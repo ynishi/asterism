@@ -26,6 +26,41 @@
       "path": "asterism_vision::package::PackageManifest",
       "kind": "struct",
       "docs": "`manifest.json` — the identity half of the data contract."
+    },
+    {
+      "path": "asterism_vision::perceptual",
+      "kind": "module",
+      "docs": "A fingerprint that survives a transform — the cheap half of\nduplicate detection.\n\nThe three exact axes ask whether two files hold the same bytes, and\nthey are right to: a digest that widened its equivalence would fold\ntwo different pictures into one, which destroys, where a narrow one\nonly fails to notice. The reasoning is written out once, beside the\ndigests it constrains, in\n`asterism_core::domain::content_hash`. Nothing here weakens it.\n\nWhat this module adds is the question those axes cannot ask. A\nresized or recompressed copy shares no bytes with its original, so\nevery exact axis reads it as an unrelated file. A perceptual\nfingerprint reads the picture instead — coarsely, deliberately — and\ntwo values that differ in a few bits mean two images that look the\nsame at a glance.\n\n## This value never enters the duplicate axes\n\nIt is not a fourth duplicate axis. Detection walks the axes\nstrongest-first, stops at the first agreement, writes an\n`identical_to` edge, and may enqueue a fold; a claim this\napproximate has no business anywhere in that sequence, and\n`asterism_core::domain::content_hash::is_duplicate_key` refuses a\nvalue carrying this tag by construction — it tests for the axis's\nown prefix, and no axis spells this one.\n\nSo the tag exists to say which question a stored value answers, the\nway every other digest in this workspace does, and to stay\nunmistakable for the ones that answer sameness. It is not a\nsub-namespace of any of them: `p1-dhash:` begins with no other tag,\nwhich is what keeps a reader from mistaking it for one."
+    },
+    {
+      "path": "asterism_vision::perceptual::NEAR_DUPLICATE_DISTANCE",
+      "kind": "constant",
+      "docs": "How far apart two fingerprints may sit and still be proposed as\ncopies of one picture.\n\nChosen from the measurement in this module's tests rather than from\nthe literature, and it buys precision at recall's expense: no pair\nof different fixture scenes — nor any scene against noise — comes\nwithin it, while the recompressed copy that drifted furthest sits\noutside it and is missed. That is the direction to fail in. A pair\nthis layer declines costs a row nobody sees; a pair it invents puts\ntwo unrelated pictures next to each other and asks a person to\nbelieve it.\n\n# What this distance does not reach\n\nCropping. A centre crop at the fixtures' safe fraction moves every\nrow and column of the grid at once, and the measurement puts it an\norder of magnitude further out than a resize — well inside the range\nwhere different pictures live, so no threshold admits it without\nadmitting them too. A crop-tolerant fingerprint is a different\nconstruction, not a wider bound on this one."
+    },
+    {
+      "path": "asterism_vision::perceptual::PERCEPTUAL_DIGEST_PREFIX",
+      "kind": "constant",
+      "docs": "Algorithm tag on a stored perceptual value: perceptual definition\nrevision 1, difference hash.\n\nVersioned like its siblings (`cr1-sha256:`, `m1-sha256:`) because a\ndefinition that has been stored cannot be edited afterwards without\nchanging what every value written under it meant. Widening the grid,\nchanging the resampling filter, or comparing columns instead of rows\neach produce a different fingerprint of the same picture, so each of\nthem is a new tag rather than a quiet improvement to this one."
+    },
+    {
+      "path": "asterism_vision::perceptual::distance",
+      "kind": "function",
+      "docs": "How many of the 128 comparisons two fingerprints disagree on.\n\nZero means the two pictures reduced to the same grid, which is what\nan exact copy and a faithful resize both do."
+    },
+    {
+      "path": "asterism_vision::perceptual::fingerprint",
+      "kind": "function",
+      "docs": "The fingerprint as bits — [`None`] for an image with no pixels,\nwhich has nothing to compare.\n\nGreyscale first and resample second: the reduction is where every\ndifference between an original and its recompressed copy is supposed\nto vanish, and dropping two channels before it means the filter\naverages one plane rather than three that will be averaged together\nafterwards anyway.\n\nThe filter is [`FilterType::Triangle`] rather than the CatmullRom\nthe fixtures resample with. A sharpening filter preserves exactly\nwhat this value is trying to discard — ringing at an edge survives\ninto the comparison and turns a JPEG artefact into a flipped bit.\n\n# Why both directions\n\nComparing along rows alone asks only where the picture gets darker\nleft to right, and two scenes whose difference is mostly vertical\nreduce to the same answer. Measured on the fixture scenes at 64\nbits, the closest pair that were not copies of each other sat 3 bits\napart — exactly where the worst recompressed copy sat, leaving no\nthreshold between them. Adding the column pass separates the two\npopulations by asking the same question down the picture as well."
+    },
+    {
+      "path": "asterism_vision::perceptual::of_image",
+      "kind": "function",
+      "docs": "The fingerprint as a stored value, tag and all — [`None`] for an\nimage with no pixels.\n\nLower-case hexadecimal, zero-padded to the full width, so that two\nvalues are the same string whenever they are the same fingerprint. A\nreader that trims a leading zero would be reading a different\npicture's value."
+    },
+    {
+      "path": "asterism_vision::perceptual::parse",
+      "kind": "function",
+      "docs": "Read a stored value back to bits — [`None`] when it carries another\ntag, or none, or does not spell the full width in hexadecimal after\nthe one it carries.\n\nStrict about the length rather than accepting whatever\n[`u128::from_str_radix`] would take, because a short value is a\nwriter that lost a leading zero and a long one is not this\nvocabulary at all; either way, answering with a number would hand\nback a fingerprint nobody computed."
     }
   ]
 }

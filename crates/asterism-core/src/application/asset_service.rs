@@ -1582,6 +1582,15 @@ impl AssetService {
                 .jobs
                 .enqueue_with_priority(JobKind::VisualFeature, payload.clone(), -10)
                 .await;
+            // The perceptual fingerprint (#250) decodes the original
+            // too, so it sits at the same priority for the same reason.
+            // Enqueued beside the encoder rather than instead of it:
+            // the two answer different questions, and this one answers
+            // its own whether or not a model is ever installed.
+            let _ = self
+                .jobs
+                .enqueue_with_priority(JobKind::PerceptualHash, payload.clone(), -10)
+                .await;
         }
         // Chapters are a container's own statement about how its content
         // is divided, so the job is enqueued only for the families that

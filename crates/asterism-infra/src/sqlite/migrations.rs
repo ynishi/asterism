@@ -7652,6 +7652,59 @@ CREATE INDEX idx_team_asset_link_on_asset
     ON team_asset_link (team_id, local_asset_id);
 "#;
 
+/// A perceptual fingerprint beside the three exact digests (#250).
+///
+/// Three columns in the shape V92 settled on — a value, a status, and a
+/// reason — because the questions are the same ones: whether anybody
+/// has looked, whether there was anything to look at, and why not when
+/// there was not.
+///
+/// # Why this is not a fourth duplicate axis
+///
+/// The value answers "do these look alike" and the axes answer "are
+/// these the same bytes"; why the two must not meet is argued where
+/// the axes are defined, in `asterism_core::domain::content_hash`.
+/// What this step does about it is nothing, which is the point:
+/// `duplicate_conflict.axis` keeps its three-value CHECK and no
+/// existing column changes meaning.
+///
+/// # Why the existing rows split on mime
+///
+/// Every pre-existing row would otherwise be `pending`, and the walk
+/// would offer the whole library — every note, every recording — to a
+/// job that only decodes images. `unsupported` is the status the
+/// fingerprint columns already use for "no probe reads this format",
+/// and its reason column already carries the format's name, so the
+/// rows a walk should skip say why they are skipped in the vocabulary
+/// a reader knows.
+///
+/// The walk writes the same answer for any such row that does reach
+/// it, which is what a row inserted after this migration gets. So this
+/// is one pass saved over a library that already exists, not a second
+/// rule about which materials have a fingerprint.
+///
+/// # No index, like V92 and unlike the three digests
+///
+/// Those three are indexed because duplicate detection looks a digest
+/// up by value; nothing ever looks a fingerprint up that way, since two
+/// that match exactly are a special case of being close rather than the
+/// question anyone asks. The two queries that do read this column are a
+/// walk filtering on the status and a rebuild that joins `asset` to
+/// scope itself to one persona — and that join is answered by
+/// `asset`'s own persona index, with the materials reached by primary
+/// key. An index over the value was written here first and measured
+/// afterwards: `EXPLAIN QUERY PLAN` never consulted it.
+const V105_MATERIAL_PERCEPTUAL_HASH: &str = r#"
+ALTER TABLE material ADD COLUMN perceptual_hash TEXT;
+ALTER TABLE material ADD COLUMN perceptual_hash_status TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE material ADD COLUMN perceptual_hash_reason TEXT;
+
+UPDATE material SET
+    perceptual_hash_status = 'unsupported',
+    perceptual_hash_reason = COALESCE(mime, 'unknown')
+WHERE mime IS NULL OR mime NOT LIKE 'image/%';
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7759,6 +7812,7 @@ const MIGRATIONS: &[Step] = &[
     Step::App(v102_forge_node_keys),
     Step::Sql(V103_FORGE_ACTOR_DISPLAY_NAME),
     Step::Sql(V104_TEAM_ASSET_LINK),
+    Step::Sql(V105_MATERIAL_PERCEPTUAL_HASH),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -14753,6 +14807,61 @@ mod tests {
             leftovers, 0,
             "no marker spelling survives in a digest column"
         );
+    }
+
+    /// V105 settles an existing library in one pass rather than handing
+    /// it to the walk: an image is what the walk is for and waits for
+    /// it, and everything else is answered where it stands, carrying
+    /// the mime that answered it.
+    ///
+    /// The row with no mime is the one worth seeding. `NOT LIKE`
+    /// against NULL is NULL rather than true, so a condition written
+    /// only as `mime NOT LIKE 'image/%'` would leave exactly those rows
+    /// pending and offer every one of them to the walk forever.
+    #[test]
+    fn v105_leaves_images_pending_and_answers_everything_else() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 104).unwrap();
+        let persona = seed_persona(&conn);
+
+        // (mime before, expected (status, reason) after).
+        type Settled<'a> = (&'a str, Option<&'a str>);
+        let cases: Vec<(Option<&str>, Settled<'_>)> = vec![
+            (Some("image/png"), ("pending", None)),
+            (Some("image/jpeg"), ("pending", None)),
+            (Some("video/mp4"), ("unsupported", Some("video/mp4"))),
+            (Some("text/plain"), ("unsupported", Some("text/plain"))),
+            (None, ("unsupported", Some("unknown"))),
+        ];
+        let seeded: Vec<(Uuid, Settled<'_>)> = cases
+            .iter()
+            .enumerate()
+            .map(|(ord, (mime, after))| {
+                let asset = seed_asset(&conn, persona);
+                conn.execute(
+                    "INSERT INTO material (asset_id, ord, locator, mime, \
+                                           created_at, updated_at) \
+                     VALUES (?1, 0, ?2, ?3, 0, 0)",
+                    params![
+                        asset,
+                        format!("{{\"kind\":\"file\",\"path\":\"/pics/v105-{ord}\"}}"),
+                        mime,
+                    ],
+                )
+                .unwrap();
+                (asset, *after)
+            })
+            .collect();
+
+        migrate(&mut conn).unwrap();
+
+        for (asset, (status, reason)) in &seeded {
+            assert_eq!(
+                axis_state_of(&conn, *asset, "perceptual_hash"),
+                (status.to_string(), None, reason.map(str::to_string)),
+                "the perceptual column settles on the mime"
+            );
+        }
     }
 
     /// V93 renames the whole-file `.json` rows to the mime `guess_mime`

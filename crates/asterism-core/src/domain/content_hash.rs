@@ -24,11 +24,18 @@
 //!
 //! Stored values carry a `sha256:` prefix. Exact-byte matching is the
 //! cheap half of duplicate detection; the useful half is perceptual
-//! (a re-encoded or resized copy of the same photograph), and that
-//! wants a different algorithm rather than a different column. A
-//! prefixed value lets a later pHash / embedding land beside this one
-//! and lets a reader tell at a glance which kind of "same" a row is
-//! claiming.
+//! (a re-encoded or resized copy of the same photograph), and the
+//! prefix is what lets a reader tell at a glance which kind of "same"
+//! a row is claiming.
+//!
+//! This paragraph expected that half to land beside these values,
+//! under its own tag in the same column. It did not: #250 gave the
+//! perceptual value three columns of its own, because
+//! [`is_duplicate_key`] has to refuse it — and a value the duplicate
+//! query must never group on has no business in the column that query
+//! reads. The prefix still earns its place for the reason above, and
+//! the tag it reserved (`p1-dhash:`) is spelled somewhere the axes
+//! cannot reach.
 //!
 //! # Select or re-render: a new digest has to say which
 //!
@@ -135,7 +142,7 @@ pub const RESERVED_VALUES: &[&str] = &[UNHASHABLE, EMPTY];
 ///
 /// A value fails it two ways. It may not be a digest at all: every
 /// unhashable material carries the one [`UNHASHABLE`] marker, and a
-/// future algorithm's output (`phash:…`) answers a different question,
+/// perceptual value (`p1-dhash:…`, #250) answers a different question,
 /// so grouping across either would report the whole conversation
 /// corpus — or two unrelated pictures — as one duplicate set. Or it may
 /// be a real digest that means nothing as sameness, which is [`EMPTY`]:
@@ -896,6 +903,34 @@ mod tests {
     /// walk: whichever of an overlapping pair is reached first wins,
     /// and which one that is depends on
     /// [`STRONGEST_FIRST`](DuplicateAxis::STRONGEST_FIRST).
+    /// The tag #250 actually shipped is refused on every axis, which
+    /// is what the doc above and `asterism-vision`'s module doc both
+    /// rest on. Until this, the refusal was only ever asserted against
+    /// `phash:` — a spelling nothing writes — so the contract was
+    /// checked against a placeholder and not against the value.
+    ///
+    /// The literal is written here rather than imported: the crate
+    /// that owns it depends on this one, and a test that imported it
+    /// would stop asking whether this contract refuses that spelling
+    /// and start asking whether it refuses whatever that crate happens
+    /// to spell today.
+    #[test]
+    fn the_perceptual_tag_is_not_a_duplicate_key_on_any_axis() {
+        let value = format!("p1-dhash:{}", "0".repeat(32));
+        for axis in DuplicateAxis::STRONGEST_FIRST {
+            assert!(
+                !is_duplicate_key(*axis, &value),
+                "the {} axis accepted a perceptual value",
+                axis.as_str()
+            );
+        }
+        assert_eq!(
+            axis_of(&value),
+            None,
+            "a perceptual value answers no axis's question"
+        );
+    }
+
     #[test]
     fn no_axis_tag_begins_with_another() {
         for outer in DuplicateAxis::STRONGEST_FIRST.iter().copied() {

@@ -8,6 +8,54 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- **A resized copy stops reading as an unrelated file** (#250). The three exact
+  axes are SHA-256 and say so, which leaves a resized or recompressed copy
+  sharing no bytes with its original. `content_hash` reserved the tag space for
+  a later perceptual value and this takes it — in columns of its own rather than
+  beside the digests, because a value those axes have to refuse cannot share a
+  column they read. A difference hash at 128 bits, comparing along rows and
+  again down columns, on a new `material.perceptual_hash` column with the status
+  and reason its three neighbours carry (V105). A `perceptual_hash` job fills it
+  — per-asset from the ingest fan-out at fingerprint priority, or a
+  chain-enqueueing batch walk — and unlike the encoder beside it, it is never
+  gated on a bound model: a fingerprint is pixels and arithmetic, so a profile
+  that binds nothing still has its copies recognised. `asterism-infra` therefore
+  links `asterism-vision` unconditionally, with `onnx` still behind the `vision`
+  feature, so a default build pulls no onnxruntime, as before.
+- **The copies a fingerprint found, as edges** (#250). A `near_duplicate` kind
+  and the rebuild that owns it, scanning the persona's whole history because a
+  copy can arrive years after its original. It is a **third** delete scope
+  rather than a second entry in the visual one: the visual rebuild runs only
+  when a model is bound, and these edges outlive a profile that binds none, so
+  sharing would have a model's removal quietly take them along. The weight is a
+  similarity rather than the distance it comes from, so the burst's sort key
+  means what it means everywhere else, and the label is the algorithm tag, so a
+  later definition's edges are told apart from these.
+- **What the threshold was measured against, and what it does not reach**
+  (#250). Over 18 fixture scenes: a half-size copy drifts at most 3 bits and a
+  JPEG at quality 70 at most 7, while the closest pair of different pictures
+  sits 6 away and noise 35. The threshold is 5 — the widest that admits no
+  stranger — recognising 35 of 36 copies and missing one recompression, which is
+  the direction to fail in: a pair declined costs a row nobody sees, a pair
+  invented puts two unrelated pictures beside each other and asks a person to
+  believe it. Cropping is out of reach at any threshold and the constant says so
+  rather than leaving it to be discovered: a centre crop moves every row and
+  column of the grid at once and lands where different pictures live. The
+  relation stream's own look-alikes are out of reach too, for the opposite
+  reason — they keep the base's two background colours and jitter a gradient
+  angle and shapes too small to survive the reduction, all of which an 8-row
+  grid is entitled to lose, so the closest of them sat 0 bits away. That is the
+  encoder's distinction to draw; a look-alike is neither a copy nor a different
+  picture.
+- **None of it touches duplicate detection** (#250). `duplicate_conflict.axis`
+  keeps its three-value CHECK, the axis walk is unchanged, and
+  `is_duplicate_key` refuses a value carrying the perceptual tag — so a claim
+  this approximate cannot reach the sequence that ends in an `identical_to` edge
+  and a fold, which is the one thing a widened equivalence would destroy rather
+  than merely miss.
+
 ### Fixed
 
 - **The six sentences a team-plane write leaves behind name who and which team

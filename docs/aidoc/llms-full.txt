@@ -2780,11 +2780,18 @@ The two must not be confused when reading a schema — a
 
 Stored values carry a `sha256:` prefix. Exact-byte matching is the
 cheap half of duplicate detection; the useful half is perceptual
-(a re-encoded or resized copy of the same photograph), and that
-wants a different algorithm rather than a different column. A
-prefixed value lets a later pHash / embedding land beside this one
-and lets a reader tell at a glance which kind of "same" a row is
-claiming.
+(a re-encoded or resized copy of the same photograph), and the
+prefix is what lets a reader tell at a glance which kind of "same"
+a row is claiming.
+
+This paragraph expected that half to land beside these values,
+under its own tag in the same column. It did not: #250 gave the
+perceptual value three columns of its own, because
+[`is_duplicate_key`] has to refuse it — and a value the duplicate
+query must never group on has no business in the column that query
+reads. The prefix still earns its place for the reason above, and
+the tag it reserved (`p1-dhash:`) is spelled somewhere the axes
+cannot reach.
 
 # Select or re-render: a new digest has to say which
 
@@ -3458,10 +3465,18 @@ each end — for a user to answer twice.
 `ConstellationEdge` — the backbone of the hover-burst experience.
 
 One edge represents an asset-to-asset relationship that surfaces when the
-user hovers a card. The `edge_rebuild` job persists edges incrementally,
-scoped to a window around each asset (same session id or ±48h) so we
-avoid an O(n²) full scan. Are.na-style "same channel" connections are
-not stored here — they are derived from the `asset_tag` table on demand.
+user hovers a card. Are.na-style "same channel" connections are not stored
+here — they are derived from the `asset_tag` table on demand.
+
+Several jobs persist edges and they do not agree about scope, which is a
+property of the questions rather than an inconsistency: `edge_rebuild`
+works a window around each asset (same session id or ±48h) because "these
+arrived together" is a claim about a window, while the visual and
+near-duplicate rebuilds scan the whole persona because a copy of a picture
+can arrive years after the original. What keeps the second kind affordable
+is that it compares stored values rather than re-reading anything, and
+what keeps the three apart is [`EdgeKind::is_synth`] and the disjoint
+scopes beside it.
 
 ## Functions
 
@@ -6707,6 +6722,7 @@ projection instead of full `Asset` entities.
 - `LayerScope` — The `(asset, material, role)` triple a layer lookup is scoped by.
 - `MaterialFingerprint` — The values one fingerprint pass produces for one material.
 - `MergeOutcome` — What one call to [`AssetRepository::merge_into`] did — or, on a dry
+- `PerceptualPrint` — One asset's stored perceptual fingerprint — a row of the
 - `QueryGroupRow` — One query group as listed by
 - `RegisteredStrategy` — One `series_strategy` row: the rule, and what the row says about
 - `RetrievalIntent` — What the caller is looking for, in the Retrieval domain's own terms.
@@ -11108,7 +11124,9 @@ for later modalities.
 - `index_rebuild` — Rebuilds the Tantivy full-text index for one asset (single-doc
 - `material_hash` — Fingerprints an original's bytes into `material.content_hash`, then
 - `material_text` — Recovers `material.meta_text` for the library that predates the
+- `near_duplicate_rebuild` — Recomputes one asset's near-duplicate edges from stored perceptual
 - `observation_sweep` — Expires observations past their stream's declared retention.
+- `perceptual_hash` — Reduces an image's pixels to the perceptual fingerprint stored on
 - `preview_gen` — Transcodes a webview-unplayable video into its preview rendition
 - `query_group_refresh` — Re-evaluates every Query Group under one persona. Payload:
 - `series_derive` — Derives `material_series` keys — applies every registered
@@ -14958,17 +14976,24 @@ dependency graph; the two meet only at the model-package data
 contract (weights plus a manifest naming `model_id`, digest,
 dimensions, preprocessing version, and license).
 
-The implementation arrives in phases. Phase 1 lands the perceptual
-hash; Phase 2 the ONNX-encoder path (load, identity check, clean
-degradation when no model is placed, derived-state invalidation on
-replacement). What exists today is the evaluation half those phases
-are graded against: [`fixtures`] generates deterministic scenes with
-derived ground truth, in memory, at test time — deliberately not a
-corpus, because nothing outside the system consumes it.
+Two answers to "are these the same picture" live here, and they are
+deliberately not one. [`perceptual`] reduces the pixels themselves
+to a fingerprint that survives a resize; it needs no model, links in
+every build, and answers only whether one image is a copy of
+another. [`encoder`] runs a packaged image/text model through ONNX
+Runtime behind the `onnx` feature and answers the looser question of
+what an image resembles — which is why a threshold that serves one
+of them serves neither the other's question nor the exact digests in
+`asterism-core`.
+
+[`fixtures`] is what both are graded against: deterministic scenes
+with derived ground truth, in memory, at test time — deliberately
+not a corpus, because nothing outside the system consumes it.
 
 ## Modules
 
 - [`package`](package.md): The model package: the data contract between model *preparation*
+- [`perceptual`](perceptual.md): A fingerprint that survives a transform — the cheap half of
 
 
 <!-- asterism_vision/package.md -->
@@ -14999,6 +15024,55 @@ than served.
 ## Constants
 
 - `MANIFEST_FILE` — Name of the manifest file inside a package directory.
+
+
+<!-- asterism_vision/perceptual.md -->
+# asterism-vision::perceptual
+
+A fingerprint that survives a transform — the cheap half of
+duplicate detection.
+
+The three exact axes ask whether two files hold the same bytes, and
+they are right to: a digest that widened its equivalence would fold
+two different pictures into one, which destroys, where a narrow one
+only fails to notice. The reasoning is written out once, beside the
+digests it constrains, in
+`asterism_core::domain::content_hash`. Nothing here weakens it.
+
+What this module adds is the question those axes cannot ask. A
+resized or recompressed copy shares no bytes with its original, so
+every exact axis reads it as an unrelated file. A perceptual
+fingerprint reads the picture instead — coarsely, deliberately — and
+two values that differ in a few bits mean two images that look the
+same at a glance.
+
+## This value never enters the duplicate axes
+
+It is not a fourth duplicate axis. Detection walks the axes
+strongest-first, stops at the first agreement, writes an
+`identical_to` edge, and may enqueue a fold; a claim this
+approximate has no business anywhere in that sequence, and
+`asterism_core::domain::content_hash::is_duplicate_key` refuses a
+value carrying this tag by construction — it tests for the axis's
+own prefix, and no axis spells this one.
+
+So the tag exists to say which question a stored value answers, the
+way every other digest in this workspace does, and to stay
+unmistakable for the ones that answer sameness. It is not a
+sub-namespace of any of them: `p1-dhash:` begins with no other tag,
+which is what keeps a reader from mistaking it for one.
+
+## Functions
+
+- `distance` — How many of the 128 comparisons two fingerprints disagree on.
+- `fingerprint` — The fingerprint as bits — [`None`] for an image with no pixels,
+- `of_image` — The fingerprint as a stored value, tag and all — [`None`] for an
+- `parse` — Read a stored value back to bits — [`None`] when it carries another
+
+## Constants
+
+- `NEAR_DUPLICATE_DISTANCE` — How far apart two fingerprints may sit and still be proposed as
+- `PERCEPTUAL_DIGEST_PREFIX` — Algorithm tag on a stored perceptual value: perceptual definition
 
 
 <!-- teams_contract/index.md -->

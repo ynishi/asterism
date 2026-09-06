@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Model-use side of Asterism's visual features: fixtures now, pHash and the encoder as they land"
+description = "Use side of Asterism's visual features: the perceptual fingerprint, the ONNX encoder, and the fixtures both are graded against"
 publish = false
 
 [features]

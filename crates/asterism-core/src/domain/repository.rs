@@ -569,6 +569,27 @@ pub struct UnhashedMaterial {
     pub mime: Option<MimeType>,
 }
 
+/// One asset's stored perceptual fingerprint — a row of the
+/// near-duplicate rebuild's input (#250).
+///
+/// Two fields rather than the three its siblings carry, because this
+/// walk reads a value that has already been computed rather than
+/// opening bytes: there is nothing to decode, so no locator and no
+/// mime. `ord` is absent for the same reason the port only returns
+/// primaries.
+///
+/// The value arrives as it is stored, tag and all. Parsing it is the
+/// caller's, because the caller owns the algorithm — a value carrying
+/// a tag this build does not implement is a row to pass over, not a
+/// row to fail the rebuild on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PerceptualPrint {
+    /// The asset the fingerprint was taken from.
+    pub asset_id: AssetId,
+    /// The stored value, algorithm tag included.
+    pub value: String,
+}
+
 /// One material no chapter reading has reached yet — the unit the
 /// `ChapterScan` backfill walks.
 ///
@@ -1316,6 +1337,25 @@ pub trait AssetRepository: Send + Sync {
         fingerprint: &MaterialFingerprint,
     ) -> Result<(), DomainError>;
 
+    /// Narrow write — records what one material's pixels look like
+    /// (#250): the perceptual value and its status, in one statement.
+    ///
+    /// Owns the three perceptual columns for the reason the verb above
+    /// owns the digests, and [`save`](Self::save) writes neither set.
+    /// A material that has since disappeared is not an error.
+    ///
+    /// Takes a [`Measurement`] rather than an `Option<String>` because
+    /// the answers worth distinguishing are the ones with no value:
+    /// bytes that are not an image at all, an original that has moved,
+    /// a picture with no pixels. One retires the row, one asks to be
+    /// retried, and only the status tells them apart.
+    async fn set_material_perceptual_hash(
+        &self,
+        asset_id: &AssetId,
+        ord: u32,
+        measurement: &Measurement,
+    ) -> Result<(), DomainError>;
+
     /// Narrow write — records that one material's bytes could not be
     /// read: every axis still `pending` (or already `failed`, which
     /// refreshes the error) flips to
@@ -1413,6 +1453,46 @@ pub trait AssetRepository: Send + Sync {
         after: Option<(&AssetId, u32)>,
         limit: u32,
     ) -> Result<Vec<UnhashedMaterial>, DomainError>;
+
+    /// Materials nobody has looked at for a perceptual fingerprint
+    /// (#250), oldest asset first, at most `limit` of them — that
+    /// walk's page.
+    ///
+    /// The predicate is the status column alone, which is the whole
+    /// question: the value is written once and the row leaves the set
+    /// whatever the walk found, an unsupported format included.
+    ///
+    /// **The format is not filtered here**, for the reason
+    /// [`scan_unrecovered_text`](Self::scan_unrecovered_text) gives at
+    /// greater length: what can be read is the reader's question, and
+    /// a list of formats in SQL is a second copy of it somewhere the
+    /// reader cannot see. A row whose bytes are not an image comes
+    /// back from this walk exactly once and retires.
+    ///
+    /// Same row shape and same composite cursor as its two siblings,
+    /// because it is the same table walked for the same kind of reason.
+    async fn scan_materials_without_perceptual_hash(
+        &self,
+        after: Option<(&AssetId, u32)>,
+        limit: u32,
+    ) -> Result<Vec<UnhashedMaterial>, DomainError>;
+
+    /// Every stored perceptual fingerprint in one persona, primary
+    /// materials only — the whole input to the near-duplicate rebuild
+    /// (#250).
+    ///
+    /// The persona's whole history rather than a candidate window, for
+    /// the reason the visual scan reads the whole history: a copy of a
+    /// picture can arrive years after the original, and a window would
+    /// answer only for the pairs that happened to arrive together.
+    ///
+    /// `ord = 0` only. An edge is a claim about two assets, and what
+    /// stands for an asset is its primary material — the same boundary
+    /// duplicate detection draws when it declines every `ord > 0` row.
+    async fn scan_perceptual_prints(
+        &self,
+        persona_id: &PersonaId,
+    ) -> Result<Vec<PerceptualPrint>, DomainError>;
 
     /// Materials whose embedded text nobody has looked for yet
     /// (`meta_text IS NULL`), oldest asset first, at most `limit` of
@@ -2503,16 +2583,16 @@ pub trait EdgeRepository: Send + Sync {
     /// time an input changes, so it must be free to throw the old set
     /// away; but the same asset can also carry *asserted* links
     /// ([`EdgeKind::DerivedFrom`] written at reify or at a correlated
-    /// re-ingest) that nothing can recompute, and visual edges the
-    /// other rebuild derived from vectors this job knows nothing about.
-    /// An unscoped delete takes them all, and the assertion has no
-    /// second copy to restore from.
+    /// re-ingest) that nothing can recompute, and edges another rebuild
+    /// derived from inputs this job knows nothing about. An unscoped
+    /// delete takes them all, and the assertion has no second copy to
+    /// restore from.
     ///
     /// Implementations must ignore any edge outside the windowed
-    /// subset in `edges` — visual and asserted alike — rather than
-    /// letting it ride in through the rebuild path; use
-    /// [`Self::add_edges`] for provenance and
-    /// [`Self::replace_visual_edges_of`] for visual suggestions.
+    /// subset in `edges` rather than letting it ride in through the
+    /// rebuild path. Where each kind belongs is
+    /// [`EdgeKind::is_synth`] and the scope functions beside it;
+    /// provenance goes through [`Self::add_edges`].
     async fn replace_synth_edges_of(
         &self,
         asset_id: &AssetId,
@@ -2523,13 +2603,25 @@ pub trait EdgeRepository: Send + Sync {
     /// `asset_id` — the unit of work for the visual rebuild (#112).
     ///
     /// The mirror of [`Self::replace_synth_edges_of`], scoped to
-    /// [`EdgeKind::visual_synth_kinds`]: the two rebuilds recompute
-    /// from different inputs on different cadences (the candidate
-    /// window versus the whole persona's stored vectors), so each must
-    /// be free to throw away its own set without touching the other's.
-    /// Implementations must ignore any edge outside the visual subset
-    /// rather than letting a windowed or asserted kind ride in.
+    /// [`EdgeKind::visual_synth_kinds`]: the rebuilds recompute from
+    /// different inputs on different cadences (the candidate window
+    /// versus the whole persona's stored vectors), so each must be free
+    /// to throw away its own set without touching another's.
+    /// Implementations must ignore any edge outside the visual subset.
     async fn replace_visual_edges_of(
+        &self,
+        asset_id: &AssetId,
+        edges: Vec<ConstellationEdge>,
+    ) -> Result<(), DomainError>;
+
+    /// Atomically replaces the **near-duplicate** synth edges
+    /// originating from `asset_id` — the unit of work for that rebuild
+    /// (#250).
+    ///
+    /// Its own scope rather than a share of the visual one, for the
+    /// reason [`EdgeKind::near_duplicate_synth_kinds`] states.
+    /// Implementations must ignore any edge outside the subset.
+    async fn replace_near_duplicate_edges_of(
         &self,
         asset_id: &AssetId,
         edges: Vec<ConstellationEdge>,

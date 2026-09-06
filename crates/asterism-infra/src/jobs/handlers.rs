@@ -21,8 +21,8 @@ use asterism_core::domain::render::render_policy;
 use asterism_core::domain::repository::{
     AssetBodyRepository, AssetCommentRepository, AssetRepository, DimsProbe, DimsScope,
     DimsWritePolicy, EdgeRepository, IndexDoc, JobQueue, MaterialFingerprint, ModalityRepository,
-    SeriesRepository, SourceTextReader, TagEvidenceRepository, TagRepository, TagVectorRepository,
-    TextLocator, ThumbRepository, VisualFeatureRepository,
+    PerceptualPrint, SeriesRepository, SourceTextReader, TagEvidenceRepository, TagRepository,
+    TagVectorRepository, TextLocator, ThumbRepository, VisualFeatureRepository,
 };
 use asterism_core::domain::series::SeriesKey;
 use asterism_core::domain::source_locator::SourceLocator;
@@ -620,6 +620,363 @@ async fn enqueue_visual_rebuild(env: &JobEnv, asset_id: &AssetId) -> Result<(), 
         )
         .await?;
     Ok(())
+}
+
+/// Page of the perceptual walk. Wider than the encoder's because the
+/// work per row is a decode and some arithmetic, where an encode is a
+/// decode and a model.
+const PERCEPTUAL_PAGE: u32 = 32;
+/// One decode at a time, for the reason [`VISUAL_ENCODE_SLOTS`] gives:
+/// the work is CPU-bound and there is a person in front of the host.
+/// Its own permit rather than that one because a profile with no model
+/// runs this job and not the other, and sharing would have the gate
+/// named after work such a profile never does.
+static PERCEPTUAL_DECODE_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+/// What one material's pass settled on.
+enum PerceptualOutcome {
+    /// A fingerprint landed on the row.
+    Measured,
+    /// The row was answered without one — the bytes are not an image,
+    /// there are none to read, or they decode to no pixels — and it
+    /// leaves the walk for good.
+    Retired,
+    /// The original could not be read. Nothing is written, so the walk
+    /// offers the row again: a disconnected disk is a temporary answer
+    /// and recording it would make it permanent. The dims-walk rule.
+    Deferred,
+}
+
+/// Reduces an image's pixels to the perceptual fingerprint stored on
+/// its material (#250).
+///
+/// `{ "asset_id": ... }` answers one asset's materials — the ingest
+/// fan-out's shape — and `{ "batch": true }` walks the rows nobody has
+/// looked at.
+pub async fn perceptual_hash(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    if payload.get("batch").and_then(|v| v.as_bool()) == Some(true) {
+        return perceptual_hash_batch(env).await;
+    }
+    let Some(asset) = load_target(env, payload).await? else {
+        return Ok("asset gone, skipped".into());
+    };
+    let (mut measured, mut retired, mut deferred) = (0usize, 0usize, 0usize);
+    for material in &asset.materials {
+        match measure_material(
+            env,
+            &asset.id,
+            material.ord,
+            &material.locator,
+            material.mime.as_ref(),
+        )
+        .await?
+        {
+            PerceptualOutcome::Measured => {
+                measured += 1;
+                // Only the primary feeds the rebuild, on the terms
+                // `scan_perceptual_prints` sets.
+                if material.ord == 0 {
+                    enqueue_near_duplicate_rebuild(env, &asset.id).await?;
+                }
+            }
+            PerceptualOutcome::Retired => retired += 1,
+            PerceptualOutcome::Deferred => deferred += 1,
+        }
+    }
+    Ok(format!(
+        "perceptual: measured={measured} retired={retired} deferred={deferred}"
+    ))
+}
+
+/// A fresh fingerprint changes one derived answer — which pictures are
+/// copies of this one — so the rebuild chains from the measurement
+/// rather than being scheduled on its own.
+async fn enqueue_near_duplicate_rebuild(
+    env: &JobEnv,
+    asset_id: &AssetId,
+) -> Result<(), DomainError> {
+    env.queue
+        .enqueue(
+            asterism_core::domain::job::JobKind::NearDuplicateRebuild,
+            serde_json::json!({ "asset_id": asset_id.to_string() }),
+        )
+        .await?;
+    Ok(())
+}
+
+/// One page of the perceptual walk, the shape the fingerprint backfill
+/// established. No cursor: every answered row leaves the walk's
+/// predicate, and a deferred row is re-offered on purpose — which is
+/// what the chain condition below has to account for.
+async fn perceptual_hash_batch(env: &JobEnv) -> Result<String, DomainError> {
+    let page = env
+        .deps
+        .assets
+        .scan_materials_without_perceptual_hash(None, PERCEPTUAL_PAGE)
+        .await?;
+    if page.is_empty() {
+        return Ok("perceptual backfill: nothing left to measure".into());
+    }
+    let full = page.len() as u32 == PERCEPTUAL_PAGE;
+    let (mut measured, mut retired, mut deferred) = (0usize, 0usize, 0usize);
+    for item in page {
+        match measure_material(
+            env,
+            &item.asset_id,
+            item.ord,
+            &item.locator,
+            item.mime.as_ref(),
+        )
+        .await?
+        {
+            PerceptualOutcome::Measured => {
+                measured += 1;
+                if item.ord == 0 {
+                    enqueue_near_duplicate_rebuild(env, &item.asset_id).await?;
+                }
+            }
+            PerceptualOutcome::Retired => retired += 1,
+            PerceptualOutcome::Deferred => deferred += 1,
+        }
+    }
+    // A page of nothing but deferred rows would chain into the same
+    // page forever; progress is what re-enqueues.
+    if full && (measured + retired) > 0 {
+        env.queue
+            .enqueue(
+                asterism_core::domain::job::JobKind::PerceptualHash,
+                serde_json::json!({ "batch": true }),
+            )
+            .await?;
+    }
+    Ok(format!(
+        "perceptual backfill: measured={measured} retired={retired} deferred={deferred}"
+    ))
+}
+
+/// Reads, decodes and fingerprints one material, recording what came
+/// back — including the answers that are not a fingerprint.
+async fn measure_material(
+    env: &JobEnv,
+    asset_id: &AssetId,
+    ord: u32,
+    locator: &SourceLocator,
+    mime: Option<&MimeType>,
+) -> Result<PerceptualOutcome, DomainError> {
+    // Bytes that are not an image are answered where they stand,
+    // carrying the format that answered them, and are offered no second
+    // pass. The walk does not filter on mime, so this is where the
+    // library's notes and recordings leave it.
+    if !matches!(mime, Some(MimeType::Image(_))) {
+        env.deps
+            .assets
+            .set_material_perceptual_hash(asset_id, ord, &not_an_image(mime))
+            .await?;
+        return Ok(PerceptualOutcome::Retired);
+    }
+    // No local bytes (a container record, a remote locator) is an
+    // answer rather than a deferral: nothing will ever decode here.
+    let Some(path) = locator.local_path().map(|p| p.to_path_buf()) else {
+        env.deps
+            .assets
+            .set_material_perceptual_hash(
+                asset_id,
+                ord,
+                &Measurement::bare(MeasurementStatus::NoBytes),
+            )
+            .await?;
+        return Ok(PerceptualOutcome::Retired);
+    };
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(
+                event = "job.perceptual_hash.unreadable",
+                locator = %locator.to_display(),
+                error = %err,
+                "original unreadable; leaving the row for a later pass"
+            );
+            return Ok(PerceptualOutcome::Deferred);
+        }
+    };
+    let _permit = PERCEPTUAL_DECODE_SLOTS
+        .acquire()
+        .await
+        .expect("semaphore never closed");
+    let decoded = tokio::task::spawn_blocking(move || fingerprint_bytes(&bytes))
+        .await
+        .map_err(|e| DomainError::Validation(format!("fingerprint task failed: {e}")))?;
+
+    if let Err(complaint) = &decoded {
+        // The decoder's own words go to the log rather than to the
+        // reason column: everywhere else in the tree that column is
+        // read beside a mime, and the one person who wants the
+        // complaint is looking at this file in particular.
+        tracing::warn!(
+            event = "job.perceptual_hash.undecodable",
+            locator = %locator.to_display(),
+            error = %complaint,
+            "a claimed image did not decode; retiring the row"
+        );
+    }
+    let measurement = perceptual_measurement(decoded, mime);
+    let measured = measurement.status == MeasurementStatus::Computed;
+    env.deps
+        .assets
+        .set_material_perceptual_hash(asset_id, ord, &measurement)
+        .await?;
+    Ok(if measured {
+        PerceptualOutcome::Measured
+    } else {
+        PerceptualOutcome::Retired
+    })
+}
+
+/// The whole of what runs on the blocking pool: bytes in, a stored
+/// value or the decoder's complaint out.
+///
+/// `Ok(None)` is a decode that succeeded onto no pixels, which is a
+/// different answer from a decode that failed and is recorded as one.
+fn fingerprint_bytes(bytes: &[u8]) -> Result<Option<String>, String> {
+    image::load_from_memory(bytes)
+        .map(|img| asterism_vision::perceptual::of_image(&img.to_rgb8()))
+        .map_err(|e| e.to_string())
+}
+
+/// The answer for bytes that are not an image, carrying the format
+/// that answered them — `unknown` when the row names none, the
+/// spelling `unsupported_format` settled on for the digest axes.
+fn not_an_image(mime: Option<&MimeType>) -> Measurement {
+    let claimed = mime.map(MimeType::as_str).filter(|m| !m.is_empty());
+    Measurement::unsupported(claimed.unwrap_or("unknown").to_string())
+}
+
+/// What a decode settles on, given what came back from it.
+///
+/// Split from the job so the mapping can be read — and tested —
+/// without a job environment behind it. Every arm here is a final
+/// answer: a row that reaches this function leaves the walk.
+fn perceptual_measurement(
+    decoded: Result<Option<String>, String>,
+    mime: Option<&MimeType>,
+) -> Measurement {
+    match decoded {
+        // A claimed image whose bytes do not decode is a final answer
+        // about the bytes rather than about the reader — the verdict
+        // the digest walk reaches for a format no probe reads, and it
+        // is recorded the same way, naming the format rather than the
+        // complaint.
+        Err(_) => not_an_image(mime),
+        // Decoded, and there is nothing in it. `EmptySpan` is what the
+        // digest walk calls a structure that ended early, and an image
+        // with no pixels is exactly that.
+        Ok(None) => Measurement::bare(MeasurementStatus::EmptySpan),
+        Ok(Some(value)) => Measurement::computed(value),
+    }
+}
+
+/// Bounded set of near-duplicate edges one asset carries.
+///
+/// A cap on what a burst can show rather than a claim about how many
+/// copies exist: a library holding more than this many copies of one
+/// picture has a question no constellation answers, and sixteen
+/// already overflows what a person reads at a glance. Ordered by
+/// distance, so what is cut is the least alike.
+const NEAR_DUPLICATE_TOP_K: usize = 16;
+
+/// Which of a persona's fingerprints are near `mine`, closest first
+/// and bounded — the whole of the rebuild's decision, as a function of
+/// its inputs.
+///
+/// A value whose tag this build does not implement is passed over
+/// rather than failed on: it was written under a definition whose
+/// distances mean something else, and comparing across the two would
+/// be arithmetic on unrelated numbers.
+fn near_duplicates_of(
+    mine: u128,
+    self_id: &AssetId,
+    prints: Vec<PerceptualPrint>,
+) -> Vec<(AssetId, u32)> {
+    let mut near: Vec<(AssetId, u32)> = prints
+        .into_iter()
+        .filter(|p| p.asset_id != *self_id)
+        .filter_map(|p| {
+            asterism_vision::perceptual::parse(&p.value).map(|bits| {
+                (
+                    p.asset_id,
+                    asterism_vision::perceptual::distance(mine, bits),
+                )
+            })
+        })
+        .filter(|(_, d)| *d <= asterism_vision::perceptual::NEAR_DUPLICATE_DISTANCE)
+        .collect();
+    // Stable, so equal distances keep the scan's `asset_id` order and
+    // a rebuild over unchanged inputs writes the same set twice.
+    near.sort_by_key(|(_, d)| *d);
+    near.truncate(NEAR_DUPLICATE_TOP_K);
+    near
+}
+
+/// Recomputes one asset's near-duplicate edges from stored perceptual
+/// fingerprints (#250), owning `near_duplicate_synth_kinds` and
+/// nothing else.
+///
+/// Its input is whatever
+/// [`AssetRepository::scan_perceptual_prints`][scan] returns, which is
+/// where the scope of that scan is argued.
+///
+/// [scan]: asterism_core::domain::repository::AssetRepository::scan_perceptual_prints
+pub async fn near_duplicate_rebuild(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    let Some(asset) = load_target(env, payload).await? else {
+        return Ok("asset gone, skipped".into());
+    };
+    // The asset's own fingerprint is the query. With none there is
+    // nothing to be near, and the empty replace is what clears edges a
+    // previous pass drew before the value was retired.
+    let mine = asset
+        .materials
+        .iter()
+        .find(|m| m.ord == 0)
+        .and_then(|m| m.perceptual_hash.as_deref())
+        .and_then(asterism_vision::perceptual::parse);
+    let Some(mine) = mine else {
+        env.deps
+            .edges
+            .replace_near_duplicate_edges_of(&asset.id, vec![])
+            .await?;
+        return Ok("no stored fingerprint; near-duplicate edges cleared".into());
+    };
+    let prints = env
+        .deps
+        .assets
+        .scan_perceptual_prints(&asset.persona_id)
+        .await?;
+    let near = near_duplicates_of(mine, &asset.id, prints);
+    let label = asterism_vision::perceptual::PERCEPTUAL_DIGEST_PREFIX.trim_end_matches(':');
+    let edges = near
+        .into_iter()
+        .map(|(to, distance)| {
+            let mut edge = ConstellationEdge::new(asset.id, to, EdgeKind::NearDuplicate)?;
+            // A similarity rather than the count it is computed from,
+            // so the burst's sort key means what it means everywhere
+            // else: higher is closer.
+            edge.weight = Some(1.0 - (distance as f32 / 128.0));
+            edge.label = Some(label.to_string());
+            Ok(edge)
+        })
+        .collect::<Result<Vec<_>, DomainError>>()?;
+    let count = edges.len();
+    env.deps
+        .edges
+        .replace_near_duplicate_edges_of(&asset.id, edges)
+        .await?;
+    Ok(format!("{count} near-duplicate edge(s) rebuilt"))
 }
 
 /// Similarity floor below which a tag is not proposed (#112, P3).
@@ -4028,6 +4385,143 @@ mod tests {
     /// and is exercised where a column is involved.)
     fn loc(raw: impl AsRef<str>) -> SourceLocator {
         SourceLocator::from_wire(raw.as_ref()).expect("locator")
+    }
+
+    /// The perceptual walk's answers, and which one is a fingerprint.
+    ///
+    /// Every arm here is final: a row that reaches either function has
+    /// been looked at and leaves the walk. A status that fell back to
+    /// `pending` would put the same picture in front of the job on
+    /// every pass, forever, which is the failure this asserts against
+    /// rather than the individual spellings.
+    #[test]
+    fn a_perceptual_pass_settles_and_never_stays_pending() {
+        let value = "p1-dhash:0123456789abcdef0123456789abcdef";
+        let settled = [
+            // Not an image: answered where it stands, carrying the
+            // format that answered it.
+            (
+                not_an_image(Some(&MimeType::parse("video/mp4"))),
+                Measurement::unsupported("video/mp4".into()),
+            ),
+            (
+                not_an_image(None),
+                Measurement::unsupported("unknown".into()),
+            ),
+            // A claimed image whose bytes do not decode: the format is
+            // what the column carries, not the decoder's complaint.
+            (
+                perceptual_measurement(
+                    Err("bad header".into()),
+                    Some(&MimeType::parse("image/png")),
+                ),
+                Measurement::unsupported("image/png".into()),
+            ),
+            // Decoded onto no pixels.
+            (
+                perceptual_measurement(Ok(None), Some(&MimeType::parse("image/png"))),
+                Measurement::bare(MeasurementStatus::EmptySpan),
+            ),
+            // The one answer that is a fingerprint.
+            (
+                perceptual_measurement(Ok(Some(value.into())), Some(&MimeType::parse("image/png"))),
+                Measurement::computed(value.into()),
+            ),
+        ];
+        for (got, want) in &settled {
+            assert_eq!(got, want);
+            assert_ne!(
+                got.status,
+                MeasurementStatus::Pending,
+                "a looked-at row must leave the walk"
+            );
+        }
+    }
+
+    /// The decode step against bytes rather than a mock: a real PNG
+    /// yields a value that reads back, and bytes that are not an image
+    /// yield the decoder's complaint rather than a panic.
+    #[test]
+    fn fingerprint_bytes_answers_real_bytes() {
+        let mut img = image::RgbImage::new(8, 8);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            *px = image::Rgb([(x * 32) as u8, (y * 32) as u8, 0]);
+        }
+        let mut png = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png, image::ImageFormat::Png)
+            .expect("encode");
+
+        let value = fingerprint_bytes(png.get_ref())
+            .expect("a real PNG decodes")
+            .expect("8x8 has pixels");
+        assert_eq!(
+            asterism_vision::perceptual::parse(&value),
+            asterism_vision::perceptual::fingerprint(&img),
+            "the stored spelling reads back as the fingerprint it spells"
+        );
+
+        assert!(
+            fingerprint_bytes(b"not a picture").is_err(),
+            "bytes that are not an image are the decoder's answer, not a panic"
+        );
+    }
+
+    fn print_id(n: u128) -> AssetId {
+        AssetId::from_uuid(uuid::Uuid::from_u128(n))
+    }
+
+    fn print_of(n: u128, bits: u128) -> PerceptualPrint {
+        PerceptualPrint {
+            asset_id: print_id(n),
+            value: format!("p1-dhash:{bits:032x}"),
+        }
+    }
+
+    /// What the rebuild keeps: nearer than the measured distance, not
+    /// the asset itself, and spelled in a definition this build
+    /// implements.
+    ///
+    /// The last of those is the one that would go wrong quietly. A
+    /// value written under a later definition parses to a number, and
+    /// comparing it with this one's would be arithmetic on unrelated
+    /// quantities — so it is dropped rather than measured.
+    #[test]
+    fn the_rebuild_keeps_the_close_and_readable_pairs() {
+        let prints = vec![
+            // The asset itself.
+            print_of(1, 0),
+            // One bit apart, and three.
+            print_of(2, 1),
+            print_of(3, 0b111),
+            // Every bit apart: a different picture.
+            print_of(4, u128::MAX),
+            // A definition this build does not implement.
+            PerceptualPrint {
+                asset_id: print_id(5),
+                value: "p2-dct:00000000000000000000000000000000".into(),
+            },
+        ];
+
+        assert_eq!(
+            near_duplicates_of(0, &print_id(1), prints),
+            vec![(print_id(2), 1), (print_id(3), 3)],
+            "closest first, with the asset itself, the stranger and the \
+             unreadable tag all dropped"
+        );
+    }
+
+    /// The bound is on what a burst shows, not a claim about how many
+    /// copies exist — so it cuts, and what it cuts is the least alike.
+    #[test]
+    fn the_rebuild_bounds_what_one_asset_carries() {
+        // Every candidate exactly one bit from the query, so all are
+        // near and none is nearer: what survives is the cap itself.
+        let prints: Vec<_> = (0..NEAR_DUPLICATE_TOP_K + 4)
+            .map(|i| print_of(i as u128 + 100, 1u128 << i))
+            .collect();
+        let near = near_duplicates_of(0, &print_id(1), prints);
+        assert_eq!(near.len(), NEAR_DUPLICATE_TOP_K);
+        assert!(near.iter().all(|(_, d)| *d == 1));
     }
 
     const DIALOGUE_BODY: &str = "First reply line\nSecond reply line\nThird reply line";

@@ -351,6 +351,7 @@
 
 - [asterism-vision overview](asterism_vision/index.md): # asterism-vision — model *use* for visual features (#112)
 - [asterism-vision::package](asterism_vision/package.md): The model package: the data contract between model *preparation*
+- [asterism-vision::perceptual](asterism_vision/perceptual.md): A fingerprint that survives a transform — the cheap half of
 
 ## teams-contract 0.1.1
 
