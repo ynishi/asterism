@@ -145,6 +145,29 @@ jobs:
         working-directory: crates/asterism-ui
         run: npm ci
 
+      # The notice that ships inside the app, regenerated and compared.
+      #
+      # `third-party-check` runs on every branch and holds the cheap half:
+      # nothing the notice names has left the lockfile, and nothing whose
+      # licence obliges a source offer is unrecorded. What it cannot see is a
+      # newly added permissive dependency the notice does not mention, because
+      # deciding which packages belong in the notice means resolving the
+      # dependency graph for one target — which is `cargo-about`'s job, and
+      # doing it twice in two implementations is how the two come to disagree.
+      #
+      # So the tool answers, here, on the run that ships the file. A minute
+      # against a twenty-minute signed build is the right place to spend it,
+      # and a release is the only thing a stale notice can damage.
+      - name: the third-party notice is current
+        run: |
+          cargo install --locked cargo-about --features cli
+          just licences
+          git diff --exit-code -- THIRD-PARTY-NOTICES.md || {
+            echo "THIRD-PARTY-NOTICES.md is not what the lockfile generates." >&2
+            echo "Run 'just licences' and commit the result." >&2
+            exit 1
+          }
+
       # The .p8 never appears in the tree or the log; it exists as a
       # file only because APPLE_API_KEY_PATH is the bundler's contract
       # for it. RUNNER_TEMP is wiped with the runner.
@@ -247,19 +270,31 @@ jobs:
             echo "FFMPEG-NOTICE.md, inside the app, says it is here." >&2
             exit 1
           fi
+          # And the source of every linked dependency whose licence asks
+          # for it — six MPL-2.0 crates, 232 KB between them, the exact
+          # archives cargo built from. THIRD-PARTY-NOTICES.md, inside the
+          # app, names all six; §3.2 asks that they be obtainable, and
+          # this release is where. The script fails rather than
+          # collecting five.
+          python3 scripts/collect-copyleft-sources.py "$RUNNER_TEMP/copyleft"
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
             gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
               --title "$GITHUB_REF_NAME" --generate-notes
           gh release upload "$GITHUB_REF_NAME" \
-            "$dmg" "$src" scripts/build-ffmpeg-sidecar.sh --clobber
+            "$dmg" "$src" scripts/build-ffmpeg-sidecar.sh \
+            "$RUNNER_TEMP"/copyleft/*.crate --clobber
 
-      # The rehearsal keeps the same three files, for the reason the
+      # The rehearsal collects the same sources, for the reason the
       # release path does. This repository is public, so a workflow
       # artifact is downloadable by anyone who can read it, and what is
-      # in that artifact is a notarized DMG whose own notice says the
+      # in that artifact is a notarized DMG whose own notices say the
       # source is beside the download. "Only a rehearsal" is a fact
       # about why it was built, not about who can fetch it.
-      - name: keep the rehearsal's DMG and the sidecar's source
+      - name: collect the copyleft sources for the rehearsal
+        if: github.event_name != 'push'
+        run: python3 scripts/collect-copyleft-sources.py "$RUNNER_TEMP/copyleft"
+
+      - name: keep the rehearsal's DMG and the sources it owes
         if: github.event_name != 'push'
         uses: actions/upload-artifact@v4
         with:
@@ -268,4 +303,5 @@ jobs:
             target/release/bundle/dmg/*.dmg
             target/ffmpeg-sidecar/ffmpeg-*.tar.xz
             scripts/build-ffmpeg-sidecar.sh
+            ${{ runner.temp }}/copyleft/*.crate
           if-no-files-found: error
