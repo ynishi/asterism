@@ -1128,7 +1128,13 @@ class SharedCatalog {
       "invite that account",
     );
     await this.roster.load({ teamId: this.teamId });
-    this.said = `Invited ${userId} as ${role}.`;
+    // The id form is reached for when the login is not known
+    // (`inviteMemberByLogin`'s own doc, below), but the roster read
+    // just above answers with it anyway — the account just invited
+    // is a row on it now.
+    const memberLogin =
+      this.roster.data?.members.find((m) => m.user_id === userId)?.login ?? userId;
+    this.said = `Invited ${memberLogin} as ${role}.`;
   }
 
   /// Lets an account into the team by login rather than by id (#218)
@@ -1168,6 +1174,9 @@ class SharedCatalog {
   /// drawing its lines, with the picker still offering it.
   async removeMember(userId: string): Promise<void> {
     const team = this.teamId;
+    const teamName = (this.teams.data ?? []).find((t) => t.team_id === team)?.name ?? team;
+    const memberLogin =
+      this.roster.data?.members.find((m) => m.user_id === userId)?.login ?? userId;
     this.said = null;
     await mutate<void>(
       "remove_team_member",
@@ -1177,15 +1186,17 @@ class SharedCatalog {
     if (userId === this.session) {
       this.stopReading();
       await this.teams.load({});
-      this.said = `You are no longer in ${team}.`;
+      this.said = `You are no longer in ${teamName}.`;
       return;
     }
     await this.roster.load({ teamId: team });
-    this.said = `Removed ${userId}.`;
+    this.said = `Removed ${memberLogin}.`;
   }
 
   /// Makes a member an owner.
   async grantOwner(userId: string): Promise<void> {
+    const memberLogin =
+      this.roster.data?.members.find((m) => m.user_id === userId)?.login ?? userId;
     this.said = null;
     await mutate<void>(
       "grant_team_owner",
@@ -1193,12 +1204,14 @@ class SharedCatalog {
       "make that member an owner",
     );
     await this.roster.load({ teamId: this.teamId });
-    this.said = `${userId} is an owner.`;
+    this.said = `${memberLogin} is an owner.`;
   }
 
   /// Puts an owner back to being a member, which the last owner cannot
   /// do even to themself.
   async revokeOwner(userId: string): Promise<void> {
+    const memberLogin =
+      this.roster.data?.members.find((m) => m.user_id === userId)?.login ?? userId;
     this.said = null;
     await mutate<void>(
       "revoke_team_owner",
@@ -1206,7 +1219,7 @@ class SharedCatalog {
       "take back the owner role",
     );
     await this.roster.load({ teamId: this.teamId });
-    this.said = `${userId} is a member.`;
+    this.said = `${memberLogin} is a member.`;
   }
 
   /// Takes the reader out of the team, and stops looking at it.
@@ -1217,21 +1230,23 @@ class SharedCatalog {
   /// removable row. The last owner cannot go by either.
   async leaveTeam(): Promise<void> {
     const team = this.teamId;
+    const teamName = (this.teams.data ?? []).find((t) => t.team_id === team)?.name ?? team;
     this.said = null;
     await mutate<void>("leave_team", { teamIdRaw: team }, "leave the team");
     this.stopReading();
     await this.teams.load({});
-    this.said = `You have left ${team}.`;
+    this.said = `You have left ${teamName}.`;
   }
 
   /// Deletes the team, and stops looking at what is no longer there.
   async deleteTeam(): Promise<void> {
     const gone = this.teamId;
+    const goneName = (this.teams.data ?? []).find((t) => t.team_id === gone)?.name ?? gone;
     this.said = null;
     await mutate<void>("delete_team", { teamIdRaw: gone }, "delete the team");
     this.stopReading();
     await this.teams.load({});
-    this.said = `Deleted team ${gone}.`;
+    this.said = `Deleted team ${goneName}.`;
   }
 
   /// Lets go of everything read about the team now named, and stops
