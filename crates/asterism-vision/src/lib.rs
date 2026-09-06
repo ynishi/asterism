@@ -7,13 +7,19 @@
 //! contract (weights plus a manifest naming `model_id`, digest,
 //! dimensions, preprocessing version, and license).
 //!
-//! The implementation arrives in phases. Phase 1 lands the perceptual
-//! hash; Phase 2 the ONNX-encoder path (load, identity check, clean
-//! degradation when no model is placed, derived-state invalidation on
-//! replacement). What exists today is the evaluation half those phases
-//! are graded against: [`fixtures`] generates deterministic scenes with
-//! derived ground truth, in memory, at test time — deliberately not a
-//! corpus, because nothing outside the system consumes it.
+//! Two answers to "are these the same picture" live here, and they are
+//! deliberately not one. [`perceptual`] reduces the pixels themselves
+//! to a fingerprint that survives a resize; it needs no model, links in
+//! every build, and answers only whether one image is a copy of
+//! another. [`encoder`] runs a packaged image/text model through ONNX
+//! Runtime behind the `onnx` feature and answers the looser question of
+//! what an image resembles — which is why a threshold that serves one
+//! of them serves neither the other's question nor the exact digests in
+//! `asterism-core`.
+//!
+//! [`fixtures`] is what both are graded against: deterministic scenes
+//! with derived ground truth, in memory, at test time — deliberately
+//! not a corpus, because nothing outside the system consumes it.
 
 #![warn(missing_docs)]
 
@@ -22,3 +28,4 @@ pub mod encoder;
 #[cfg(any(test, feature = "fixtures"))]
 pub mod fixtures;
 pub mod package;
+pub mod perceptual;
