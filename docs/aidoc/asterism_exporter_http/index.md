@@ -79,6 +79,12 @@ machine without re-reading params on every tick.
       "source_url":    "{{item.url}}",
       "cover_hint":    "{{item.caption?}}",
       "labels_static": ["batch:{{dispatch_id}}"]
+    },
+    "record": {
+      "paths":    { "seed": "$.response.seed",
+                    "prompt": "$.params.extras.prompt" },
+      "absences": { "guidance_scale": "not_returned",
+                    "sampler": "not_supported" }
     }
   },
 
@@ -177,8 +183,9 @@ reasons behind that one absence: we did not capture it, the platform
 does not report it, the parameter does not exist on this model. Only
 the first is a gap on our side, and a `null` reports all three
 identically — so the record sits beside the note rather than inside
-it, and the profile states which reason applies before any call is
-made. [`RecordSchema::paths`] says where a value is read from and
+it, and the profile states the two that are properties of the
+platform before any call is made.
+[`RecordSchema::paths`] says where a value is read from and
 [`RecordSchema::absences`] says why there is none to read. See
 [`record`] for the shape, and for why the status is beside the value
 rather than written into it.

@@ -77,6 +77,12 @@
 //!       "source_url":    "{{item.url}}",
 //!       "cover_hint":    "{{item.caption?}}",
 //!       "labels_static": ["batch:{{dispatch_id}}"]
+//!     },
+//!     "record": {
+//!       "paths":    { "seed": "$.response.seed",
+//!                     "prompt": "$.params.extras.prompt" },
+//!       "absences": { "guidance_scale": "not_returned",
+//!                     "sampler": "not_supported" }
 //!     }
 //!   },
 //!
@@ -175,8 +181,9 @@
 //! does not report it, the parameter does not exist on this model. Only
 //! the first is a gap on our side, and a `null` reports all three
 //! identically — so the record sits beside the note rather than inside
-//! it, and the profile states which reason applies before any call is
-//! made. [`RecordSchema::paths`] says where a value is read from and
+//! it, and the profile states the two that are properties of the
+//! platform before any call is made.
+//! [`RecordSchema::paths`] says where a value is read from and
 //! [`RecordSchema::absences`] says why there is none to read. See
 //! [`record`] for the shape, and for why the status is beside the value
 //! rather than written into it.
@@ -899,6 +906,12 @@ impl Exporter for HttpExporter {
             // that matters here — it is the thing a person opens months
             // later — and a record that only exists one join away is a
             // record that will be read as absent.
+            //
+            // What a per-call home would have bought is already bought:
+            // the call note is written to the dispatch row whether or
+            // not the job produced anything, so a submit that minted
+            // nothing still has one. What that row cannot carry is a
+            // value read per item, which is the other half of this.
             let record = match recorded.as_ref() {
                 Some(response) => params.harvest.record.evaluate(
                     &grammar,
@@ -929,11 +942,12 @@ impl Exporter for HttpExporter {
                         // persisted on the asset.
                         "source_url": grammar.scrub_text(&source_url),
                         // How this artefact was asked for, travelling
-                        // with the artefact. The same record is on the
+                        // with the artefact. The same call is on the
                         // dispatch row; it is repeated here because an
                         // asset that has to resolve an id to say what
                         // made it is one whose answer can go missing
-                        // separately from it.
+                        // separately from it. (The record below is not
+                        // on that row — it exists per artefact only.)
                         "call": call.clone(),
                         // The same call, read the way a query needs it.
                         // The note above holds what the platform sent,
@@ -1532,6 +1546,7 @@ mod tests {
             "status": "succeeded",
             "error": "upstream refused the workflow",
             "progress_message": "step 12/30",
+            "seed": 913_224,
             "outputs": [
                 { "url": "https://renders.test/a.png" },
                 { "url": "https://renders.test/b.png" }
@@ -1600,6 +1615,32 @@ mod tests {
                 "https://renders.test/a.png".to_string(),
                 "https://renders.test/b.png".to_string(),
             ]
+        );
+
+        // harvest.record — the same family, and the one whose typo is
+        // hardest to see. A record path that does not resolve writes
+        // `not_captured`, which reads as a gap on our side rather than
+        // as the misspelling it is, on every artefact of every profile
+        // copied from this file.
+        let document = serde_json::json!({
+            "response": &resp,
+            "item": items[0],
+            "params": ctx.params,
+        });
+        let record = params.harvest.record.evaluate(&g, &document);
+        assert_eq!(
+            record["seed"],
+            FieldRecord::Captured {
+                value: serde_json::json!(913_224)
+            },
+            "the example's seed path has to reach the response"
+        );
+        assert_eq!(
+            record["prompt"],
+            FieldRecord::Captured {
+                value: serde_json::json!("photo studio portrait")
+            },
+            "and its prompt path has to reach the params it shipped"
         );
     }
 

@@ -525,6 +525,21 @@ fn http_params(port: u16) -> serde_json::Value {
                 "locator": "{{item.url}}",
                 "cover_hint": "{{item.caption?}}",
                 "labels_static": ["batch:{{dispatch_id}}"]
+            },
+            // One field out of the response, one out of what we sent,
+            // and one of each declared absence — the four states a
+            // record can carry, driven through a real submit rather
+            // than asserted against a hand-built document.
+            "record": {
+                "paths": {
+                    "seed": "$.response.seed",
+                    "prompt": "$.params.extras.prompt",
+                    "steps": "$.response.steps"
+                },
+                "absences": {
+                    "guidance_scale": "not_returned",
+                    "sampler": "not_supported"
+                }
             }
         },
         "extras": { "prompt": "a test plate" }
@@ -1710,6 +1725,35 @@ async fn a_profile_that_asks_for_custody_lands_the_bytes_and_the_record() {
         call["submitted_at_ms"].is_i64(),
         "the submit moment is what a deadline is measured from: {call}"
     );
+
+    // The record beside it: the same call read the way a query needs
+    // it, and the reason a reader can tell one absence from another.
+    // The document the paths resolve against is assembled here and
+    // nowhere else, so this is what stops `$.response` / `$.item` /
+    // `$.params` being renamed on one side of the profile grammar.
+    let record = &facts.extra["http"]["record"];
+    assert_eq!(
+        record["seed"],
+        json!({ "status": "captured", "value": 913_224 }),
+        "a path into the response resolves against the real one: {record}"
+    );
+    assert_eq!(
+        record["prompt"],
+        json!({ "status": "captured", "value": "a test plate" }),
+        "and a path into the params reaches what was sent, which is the \
+         half no response carries"
+    );
+    assert_eq!(
+        record["steps"],
+        json!({ "status": "not_captured" }),
+        "a path the backend answered nothing for is a gap on our side, \
+         and says so rather than reading as a platform that declined"
+    );
+    assert_eq!(
+        record["guidance_scale"],
+        json!({ "status": "not_returned" })
+    );
+    assert_eq!(record["sampler"], json!({ "status": "not_supported" }));
 
     // The same record read the other way: off the dispatch row, which
     // is where it lives, rather than off an artefact it was copied to.
