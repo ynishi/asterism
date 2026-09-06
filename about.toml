@@ -1,0 +1,73 @@
+# What `cargo about` may resolve a dependency's licence to, and in what order.
+#
+# The order is the decision. A package offering `MIT OR Apache-2.0` — which
+# most of this graph does; the notice's own overview is where that number
+# lives — has its licence picked by the first entry here that matches. MIT is
+# first deliberately: the app satisfies either, and MIT is the one that does
+# not bring Apache-2.0 §4's NOTICE handling with it, so the packages that
+# leave the choice to us take the simpler obligation and the notice stays
+# about the ones that constrain it.
+#
+# Below Apache-2.0 the list is alphabetical, because nothing in this graph
+# chooses between those: no expression offers two of them without MIT or
+# Apache-2.0 also present. Several are there because a package offers nothing
+# else — `MPL-2.0`, `Unicode-3.0`, the BSD pair, `ISC` and the rest of that
+# kind — and the others because a package names them in an `OR` this
+# repository is content to have on the list.
+#
+# The list is short on purpose, and holds what this graph actually contains.
+# A licence arriving that is not here stops `just licences` rather than being
+# resolved by a default, which is the point: the next entry is a decision
+# somebody makes, not one the tool makes for them.
+#
+# `LGPL-2.1-or-later` is deliberately absent, and so are GPL and AGPL. That
+# absence is this repository's copyleft policy and it is enforced here rather
+# than in a script: a package whose only licence is one of them fails the
+# generator. `scripts/check-third-party-notices.py` used to make the same
+# judgement in Python and made it wrong twice — worth knowing before anyone
+# moves it back.
+#
+# `MPL-2.0` is on the list because six packages offer nothing else. That is an
+# obligation rather than a preference, and MPL-2.0 asks for source as well as
+# attribution; `scripts/copyleft-sources.txt` records which packages, and the
+# release attaches their archives.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "0BSD",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "zlib-acknowledgement",
+]
+
+# The notice is about what the application ships. A dependency that only ever
+# builds a test binary is not distributed, so it is not in the closure this
+# describes — the same boundary `licence-check` draws for the AGPL planes,
+# drawn the other way round because here the question is what reaches a user
+# rather than what could contaminate a build.
+ignore-dev-dependencies = true
+
+# One target, and it is the one the release builds — see
+# `.github/workflows/release.yml`, which is where that would change. Left
+# unset, the generator resolves for every target it knows and the notice names
+# packages no macOS build ever links: the UEFI and Windows and Redox branches
+# of half the standard-library shims in this graph.
+targets = ["aarch64-apple-darwin"]
+
+# Keeps this repository's own crates out of a file about other people's. Every
+# workspace member carries `publish = false`, which is what this setting keys
+# on, and `asterism-ui` reaches twenty-five of them. It is not what keeps the
+# teams plane out — nothing in the app's graph reaches those four, which is
+# what `licence-check` asserts and what scoping the generator to the app's own
+# manifest already settles.
+[private]
+ignore = true

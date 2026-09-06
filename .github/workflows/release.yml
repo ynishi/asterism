@@ -145,6 +145,35 @@ jobs:
         working-directory: crates/asterism-ui
         run: npm ci
 
+      # The notice that ships inside the app, regenerated and compared.
+      #
+      # `third-party-check` runs on every branch and holds the cheap half:
+      # nothing the notice names has left the lockfile, and nothing whose
+      # licence obliges a source offer is unrecorded. What it cannot see is a
+      # newly added permissive dependency the notice does not mention, because
+      # deciding which packages belong in the notice means resolving the
+      # dependency graph for one target — which is `cargo-about`'s job, and
+      # doing it twice in two implementations is how the two come to disagree.
+      #
+      # So the tool answers, here, on the run that ships the file — the one
+      # place a minute buys a verdict over the artefact rather than over the
+      # tree.
+      #
+      # The version is pinned because this step's whole value is that its
+      # answer matches the committed file: `--locked` pins cargo-about's own
+      # dependencies and not cargo-about, so an unpinned install would one day
+      # regenerate the notice differently and fail a release for a reason
+      # nobody changed.
+      - name: the third-party notice is current
+        run: |
+          cargo install --locked cargo-about@0.9.2 --features cli
+          just licences
+          git diff --exit-code -- THIRD-PARTY-NOTICES.md || {
+            echo "THIRD-PARTY-NOTICES.md is not what the lockfile generates." >&2
+            echo "Run 'just licences' and commit the result." >&2
+            exit 1
+          }
+
       # The .p8 never appears in the tree or the log; it exists as a
       # file only because APPLE_API_KEY_PATH is the bundler's contract
       # for it. RUNNER_TEMP is wiped with the runner.
@@ -170,6 +199,17 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         run: just dogfood-build
+
+      # The source of every linked dependency whose licence asks for it,
+      # collected here rather than beside the upload: the registry cache is
+      # complete the moment the build ends, and a cache that carried the
+      # unpacked sources and not the archives would otherwise fail the run
+      # after notarization — twenty minutes and one Apple submission past the
+      # point it could have been known. The script fails rather than
+      # collecting a subset, because THIRD-PARTY-NOTICES.md inside the app
+      # promises all of them.
+      - name: collect the source its licences ask for
+        run: python3 scripts/collect-copyleft-sources.py "$RUNNER_TEMP/copyleft"
 
       # The bundler notarized and stapled the .app; the DMG is its own
       # submission. Without this, `spctl` still accepts the app inside,
@@ -227,7 +267,12 @@ jobs:
       # The build script goes up with it because the tarball alone does
       # not say how it was configured, and the configuration is what
       # makes the binary reproducible from that source.
-      - name: attach the DMG and the sidecar's source to a draft release
+      #
+      # The `.crate` archives collected above go up for the same reason in
+      # the other direction: THIRD-PARTY-NOTICES.md, also inside the app,
+      # tells a reader that the source of every package it lists under
+      # MPL-2.0 is attached here.
+      - name: attach the DMG and the sources it owes to a draft release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -251,15 +296,16 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
               --title "$GITHUB_REF_NAME" --generate-notes
           gh release upload "$GITHUB_REF_NAME" \
-            "$dmg" "$src" scripts/build-ffmpeg-sidecar.sh --clobber
+            "$dmg" "$src" scripts/build-ffmpeg-sidecar.sh \
+            "$RUNNER_TEMP"/copyleft/*.crate --clobber
 
-      # The rehearsal keeps the same three files, for the reason the
-      # release path does. This repository is public, so a workflow
-      # artifact is downloadable by anyone who can read it, and what is
-      # in that artifact is a notarized DMG whose own notice says the
-      # source is beside the download. "Only a rehearsal" is a fact
-      # about why it was built, not about who can fetch it.
-      - name: keep the rehearsal's DMG and the sidecar's source
+      # The rehearsal keeps the same set, for the reason the release path
+      # attaches it. This repository is public, so a workflow artifact is
+      # downloadable by anyone who can read it, and what is in that artifact
+      # is a notarized DMG whose own notices say the source is beside the
+      # download. "Only a rehearsal" is a fact about why it was built, not
+      # about who can fetch it.
+      - name: keep the rehearsal's DMG and the sources it owes
         if: github.event_name != 'push'
         uses: actions/upload-artifact@v4
         with:
@@ -268,4 +314,5 @@ jobs:
             target/release/bundle/dmg/*.dmg
             target/ffmpeg-sidecar/ffmpeg-*.tar.xz
             scripts/build-ffmpeg-sidecar.sh
+            ${{ runner.temp }}/copyleft/*.crate
           if-no-files-found: error
