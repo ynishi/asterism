@@ -4305,6 +4305,36 @@ impl AssetRepository for SqliteAssetRepository {
             .map_err(infra_err)
     }
 
+    async fn set_material_perceptual_hash(
+        &self,
+        asset_id: &AssetId,
+        ord: u32,
+        measurement: &Measurement,
+    ) -> Result<(), DomainError> {
+        let uuid = *asset_id.as_uuid();
+        let ord = i64::from(ord);
+        let measurement = measurement.clone();
+        self.isle
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE material SET \
+                         perceptual_hash = ?1, perceptual_hash_status = ?2, \
+                         perceptual_hash_reason = ?3 \
+                      WHERE asset_id = ?4 AND ord = ?5",
+                    params![
+                        measurement.digest,
+                        measurement.status.as_str(),
+                        measurement.reason,
+                        uuid,
+                        ord
+                    ],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(infra_err)
+    }
+
     async fn mark_material_unreadable(
         &self,
         asset_id: &AssetId,
@@ -4491,6 +4521,66 @@ impl AssetRepository for SqliteAssetRepository {
                         locator: SourceLocator::try_from(locator.as_str())?,
                         // Same parse as the entity's boundary, so the two
                         // fingerprint passes cannot disagree about format.
+                        mime: mime.as_deref().map(MimeType::parse),
+                    })
+                },
+            )
+            .collect()
+    }
+
+    async fn scan_materials_without_perceptual_hash(
+        &self,
+        after: Option<(&AssetId, u32)>,
+        limit: u32,
+    ) -> Result<Vec<UnhashedMaterial>, DomainError> {
+        let cursor = after.map(|(id, ord)| (*id.as_uuid(), i64::from(ord)));
+        let limit = i64::from(limit);
+        let rows: Vec<(Uuid, i64, String, Option<String>)> = self
+            .isle
+            .call(move |conn| {
+                // One column carries the whole question, where the
+                // digest walk above needs a condition per axis: this
+                // value is written once and the row leaves the set
+                // whatever the walk found, `unsupported` included.
+                //
+                // No mime predicate, deliberately — the port says why.
+                // Trashed assets are included and the cursor compares
+                // the composite key, both for the reasons the walk
+                // above states at length.
+                let sql = "SELECT m.asset_id, m.ord, m.locator, m.mime \
+                             FROM material m \
+                            WHERE m.perceptual_hash_status = 'pending' {CURSOR} \
+                            ORDER BY m.asset_id, m.ord \
+                            LIMIT ?1";
+                match cursor {
+                    None => {
+                        let mut stmt = conn.prepare(&sql.replace("{CURSOR}", ""))?;
+                        stmt.query_map(params![limit], |r| {
+                            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                        })?
+                        .collect::<Result<_, _>>()
+                    }
+                    Some((uuid, ord)) => {
+                        let mut stmt = conn.prepare(&sql.replace(
+                            "{CURSOR}",
+                            "AND (m.asset_id > ?2 OR (m.asset_id = ?2 AND m.ord > ?3))",
+                        ))?;
+                        stmt.query_map(params![limit, uuid, ord], |r| {
+                            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                        })?
+                        .collect::<Result<_, _>>()
+                    }
+                }
+            })
+            .await
+            .map_err(infra_err)?;
+        rows.into_iter()
+            .map(
+                |(asset_id, ord, locator, mime): (_, i64, String, Option<String>)| {
+                    Ok(UnhashedMaterial {
+                        asset_id: AssetId::from_uuid(asset_id),
+                        ord: ord.max(0) as u32,
+                        locator: SourceLocator::try_from(locator.as_str())?,
                         mime: mime.as_deref().map(MimeType::parse),
                     })
                 },

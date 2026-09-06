@@ -376,6 +376,27 @@ pub enum JobKind {
     /// row is one artefact that stays unmarked until something
     /// re-fingerprints it.
     DisclosureStamp,
+    /// Reduces an image's pixels to the perceptual fingerprint stored
+    /// on its material (#250) — the question no exact digest can
+    /// answer, because a resized copy shares no bytes with what it was
+    /// copied from.
+    ///
+    /// Two payload shapes, the same split
+    /// [`MaterialHash`](Self::MaterialHash) uses:
+    /// `{ "asset_id": "<uuid>" }` fingerprints one asset (the ingest
+    /// fan-out), and `{ "batch": true }` walks materials with no answer
+    /// yet, chain-enqueueing itself while pages come back full.
+    ///
+    /// Where [`VisualFeature`](Self::VisualFeature) skips without a
+    /// bound model, this never skips: the fingerprint is pixels and
+    /// arithmetic, so a profile that binds nothing still gets its
+    /// copies recognised. A material whose bytes are not an image
+    /// retires as unsupported on its first pass and is offered no
+    /// second one.
+    ///
+    /// Off the ingest critical path for the reason the fingerprint walk
+    /// is: it opens and decodes the original.
+    PerceptualHash,
     /// Encodes an image's pixels into the stored feature vector the
     /// visual layer (#112) retrieves by.
     ///
@@ -477,6 +498,7 @@ impl JobKind {
             Self::PreviewGen => "preview_gen",
             Self::ChapterScan => "chapter_scan",
             Self::DisclosureStamp => "disclosure_stamp",
+            Self::PerceptualHash => "perceptual_hash",
             Self::VisualFeature => "visual_feature",
             Self::VisualEdgeRebuild => "visual_edge_rebuild",
             Self::VisualTagSuggest => "visual_tag_suggest",
@@ -509,6 +531,7 @@ impl JobKind {
             "preview_gen" => Ok(Self::PreviewGen),
             "chapter_scan" => Ok(Self::ChapterScan),
             "disclosure_stamp" => Ok(Self::DisclosureStamp),
+            "perceptual_hash" => Ok(Self::PerceptualHash),
             "visual_feature" => Ok(Self::VisualFeature),
             "visual_edge_rebuild" => Ok(Self::VisualEdgeRebuild),
             "visual_tag_suggest" => Ok(Self::VisualTagSuggest),

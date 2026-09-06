@@ -1316,6 +1316,25 @@ pub trait AssetRepository: Send + Sync {
         fingerprint: &MaterialFingerprint,
     ) -> Result<(), DomainError>;
 
+    /// Narrow write — records what one material's pixels look like
+    /// (#250): the perceptual value and its status, in one statement.
+    ///
+    /// Owns the three perceptual columns for the reason the verb above
+    /// owns the digests, and [`save`](Self::save) writes neither set.
+    /// A material that has since disappeared is not an error.
+    ///
+    /// Takes a [`Measurement`] rather than an `Option<String>` because
+    /// the answers worth distinguishing are the ones with no value:
+    /// bytes that are not an image at all, an original that has moved,
+    /// a picture with no pixels. One retires the row, one asks to be
+    /// retried, and only the status tells them apart.
+    async fn set_material_perceptual_hash(
+        &self,
+        asset_id: &AssetId,
+        ord: u32,
+        measurement: &Measurement,
+    ) -> Result<(), DomainError>;
+
     /// Narrow write — records that one material's bytes could not be
     /// read: every axis still `pending` (or already `failed`, which
     /// refreshes the error) flips to
@@ -1409,6 +1428,29 @@ pub trait AssetRepository: Send + Sync {
     /// `asset_id`-only cursor would skip the remaining `ord > 0`
     /// materials of an asset a page boundary happened to cut through.
     async fn scan_unhashed_materials(
+        &self,
+        after: Option<(&AssetId, u32)>,
+        limit: u32,
+    ) -> Result<Vec<UnhashedMaterial>, DomainError>;
+
+    /// Materials nobody has looked at for a perceptual fingerprint
+    /// (#250), oldest asset first, at most `limit` of them — that
+    /// walk's page.
+    ///
+    /// The predicate is the status column alone, which is the whole
+    /// question: the value is written once and the row leaves the set
+    /// whatever the walk found, an unsupported format included.
+    ///
+    /// **The format is not filtered here**, for the reason
+    /// [`scan_untexted_materials`](Self::scan_untexted_materials)
+    /// gives at greater length: what can be read is the reader's
+    /// question, and a list of formats in SQL is a second copy of it
+    /// somewhere the reader cannot see. A row whose bytes are not an
+    /// image comes back from this walk exactly once and retires.
+    ///
+    /// Same row shape and same composite cursor as its two siblings,
+    /// because it is the same table walked for the same kind of reason.
+    async fn scan_materials_without_perceptual_hash(
         &self,
         after: Option<(&AssetId, u32)>,
         limit: u32,

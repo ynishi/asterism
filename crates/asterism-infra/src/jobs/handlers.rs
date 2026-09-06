@@ -622,6 +622,218 @@ async fn enqueue_visual_rebuild(env: &JobEnv, asset_id: &AssetId) -> Result<(), 
     Ok(())
 }
 
+/// Page of the perceptual walk. Wider than the encoder's because the
+/// work per row is a decode and some arithmetic, where an encode is a
+/// decode and a model.
+const PERCEPTUAL_PAGE: u32 = 32;
+/// One decode at a time, for the reason [`VISUAL_ENCODE_SLOTS`] gives:
+/// the work is CPU-bound and there is a person in front of the host.
+/// Its own permit rather than that one because a profile with no model
+/// runs this job and not the other, and sharing would have the gate
+/// named after work such a profile never does.
+static PERCEPTUAL_DECODE_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+/// What one material's pass settled on.
+enum PerceptualOutcome {
+    /// A fingerprint landed on the row.
+    Measured,
+    /// The row was answered without one — the bytes are not an image,
+    /// there are none to read, or they decode to no pixels — and it
+    /// leaves the walk for good.
+    Retired,
+    /// The original could not be read. Nothing is written, so the walk
+    /// offers the row again: a disconnected disk is a temporary answer
+    /// and recording it would make it permanent. The dims-walk rule.
+    Deferred,
+}
+
+/// Reduces an image's pixels to the perceptual fingerprint stored on
+/// its material (#250).
+///
+/// `{ "asset_id": ... }` answers one asset's materials — the ingest
+/// fan-out's shape — and `{ "batch": true }` walks the rows nobody has
+/// looked at, chain-enqueueing while pages come back full. Needs no
+/// model, so unlike the encoder beside it this is never gated on one.
+pub async fn perceptual_hash(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    if payload.get("batch").and_then(|v| v.as_bool()) == Some(true) {
+        return perceptual_hash_batch(env).await;
+    }
+    let Some(asset) = load_target(env, payload).await? else {
+        return Ok("asset gone, skipped".into());
+    };
+    let (mut measured, mut retired, mut deferred) = (0usize, 0usize, 0usize);
+    for material in &asset.materials {
+        match measure_material(
+            env,
+            &asset.id,
+            material.ord,
+            &material.locator,
+            material.mime.as_ref(),
+        )
+        .await?
+        {
+            PerceptualOutcome::Measured => measured += 1,
+            PerceptualOutcome::Retired => retired += 1,
+            PerceptualOutcome::Deferred => deferred += 1,
+        }
+    }
+    Ok(format!(
+        "perceptual: measured={measured} retired={retired} deferred={deferred}"
+    ))
+}
+
+/// One page of the perceptual walk; chain-enqueues while pages come
+/// back full, the shape the fingerprint backfill established. No
+/// cursor: every answered row leaves the walk's predicate, and a
+/// deferred row is re-offered on purpose.
+async fn perceptual_hash_batch(env: &JobEnv) -> Result<String, DomainError> {
+    let page = env
+        .deps
+        .assets
+        .scan_materials_without_perceptual_hash(None, PERCEPTUAL_PAGE)
+        .await?;
+    if page.is_empty() {
+        return Ok("perceptual backfill: nothing left to measure".into());
+    }
+    let full = page.len() as u32 == PERCEPTUAL_PAGE;
+    let (mut measured, mut retired, mut deferred) = (0usize, 0usize, 0usize);
+    for item in page {
+        match measure_material(
+            env,
+            &item.asset_id,
+            item.ord,
+            &item.locator,
+            item.mime.as_ref(),
+        )
+        .await?
+        {
+            PerceptualOutcome::Measured => measured += 1,
+            PerceptualOutcome::Retired => retired += 1,
+            PerceptualOutcome::Deferred => deferred += 1,
+        }
+    }
+    // A page of nothing but deferred rows would chain into the same
+    // page forever; progress is what re-enqueues.
+    if full && (measured + retired) > 0 {
+        env.queue
+            .enqueue(
+                asterism_core::domain::job::JobKind::PerceptualHash,
+                serde_json::json!({ "batch": true }),
+            )
+            .await?;
+    }
+    Ok(format!(
+        "perceptual backfill: measured={measured} retired={retired} deferred={deferred}"
+    ))
+}
+
+/// Reads, decodes and fingerprints one material, recording what came
+/// back — including the answers that are not a fingerprint.
+async fn measure_material(
+    env: &JobEnv,
+    asset_id: &AssetId,
+    ord: u32,
+    locator: &SourceLocator,
+    mime: Option<&MimeType>,
+) -> Result<PerceptualOutcome, DomainError> {
+    // Bytes that are not an image are answered where they stand,
+    // carrying the format that answered them, and are offered no second
+    // pass. The walk does not filter on mime, so this is where the
+    // library's notes and recordings leave it.
+    if !matches!(mime, Some(MimeType::Image(_))) {
+        env.deps
+            .assets
+            .set_material_perceptual_hash(asset_id, ord, &not_an_image(mime))
+            .await?;
+        return Ok(PerceptualOutcome::Retired);
+    }
+    // No local bytes (a container record, a remote locator) is an
+    // answer rather than a deferral: nothing will ever decode here.
+    let Some(path) = locator.local_path().map(|p| p.to_path_buf()) else {
+        env.deps
+            .assets
+            .set_material_perceptual_hash(
+                asset_id,
+                ord,
+                &Measurement::bare(MeasurementStatus::NoBytes),
+            )
+            .await?;
+        return Ok(PerceptualOutcome::Retired);
+    };
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(
+                event = "job.perceptual_hash.unreadable",
+                locator = %locator.to_display(),
+                error = %err,
+                "original unreadable; leaving the row for a later pass"
+            );
+            return Ok(PerceptualOutcome::Deferred);
+        }
+    };
+    let _permit = PERCEPTUAL_DECODE_SLOTS
+        .acquire()
+        .await
+        .expect("semaphore never closed");
+    let decoded = tokio::task::spawn_blocking(move || fingerprint_bytes(&bytes))
+        .await
+        .map_err(|e| DomainError::Validation(format!("fingerprint task failed: {e}")))?;
+
+    let measurement = perceptual_measurement(decoded);
+    let measured = measurement.status == MeasurementStatus::Computed;
+    env.deps
+        .assets
+        .set_material_perceptual_hash(asset_id, ord, &measurement)
+        .await?;
+    Ok(if measured {
+        PerceptualOutcome::Measured
+    } else {
+        PerceptualOutcome::Retired
+    })
+}
+
+/// The whole of what runs on the blocking pool: bytes in, a stored
+/// value or the decoder's complaint out.
+///
+/// `Ok(None)` is a decode that succeeded onto no pixels, which is a
+/// different answer from a decode that failed and is recorded as one.
+fn fingerprint_bytes(bytes: &[u8]) -> Result<Option<String>, String> {
+    image::load_from_memory(bytes)
+        .map(|img| asterism_vision::perceptual::of_image(&img.to_rgb8()))
+        .map_err(|e| e.to_string())
+}
+
+/// The answer for bytes that are not an image, carrying the format
+/// that answered them — `unknown` when the row names none, the
+/// spelling `unsupported_format` settled on for the digest axes.
+fn not_an_image(mime: Option<&MimeType>) -> Measurement {
+    let claimed = mime.map(MimeType::as_str).filter(|m| !m.is_empty());
+    Measurement::unsupported(claimed.unwrap_or("unknown").to_string())
+}
+
+/// What a decode settles on, given what came back from it.
+///
+/// Split from the job so the mapping can be read — and tested —
+/// without a job environment behind it. Every arm here is a final
+/// answer: a row that reaches this function leaves the walk.
+fn perceptual_measurement(decoded: Result<Option<String>, String>) -> Measurement {
+    match decoded {
+        // A claimed image whose bytes do not decode is a final answer
+        // about the bytes rather than about the reader — the verdict
+        // the digest walk reaches for a format no probe reads.
+        Err(err) => Measurement::unsupported(err),
+        // Decoded, and there is nothing in it. `EmptySpan` is what the
+        // digest walk calls a structure that ended early, and an image
+        // with no pixels is exactly that.
+        Ok(None) => Measurement::bare(MeasurementStatus::EmptySpan),
+        Ok(Some(value)) => Measurement::computed(value),
+    }
+}
+
 /// Similarity floor below which a tag is not proposed (#112, P3).
 ///
 /// Measured: the fixture threshold sweep
@@ -4028,6 +4240,81 @@ mod tests {
     /// and is exercised where a column is involved.)
     fn loc(raw: impl AsRef<str>) -> SourceLocator {
         SourceLocator::from_wire(raw.as_ref()).expect("locator")
+    }
+
+    /// The perceptual walk's answers, and which one is a fingerprint.
+    ///
+    /// Every arm here is final: a row that reaches either function has
+    /// been looked at and leaves the walk. A status that fell back to
+    /// `pending` would put the same picture in front of the job on
+    /// every pass, forever, which is the failure this asserts against
+    /// rather than the individual spellings.
+    #[test]
+    fn a_perceptual_pass_settles_and_never_stays_pending() {
+        let value = "p1-dhash:0123456789abcdef0123456789abcdef";
+        let settled = [
+            // Not an image: answered where it stands, carrying the
+            // format that answered it.
+            (
+                not_an_image(Some(&MimeType::parse("video/mp4"))),
+                Measurement::unsupported("video/mp4".into()),
+            ),
+            (
+                not_an_image(None),
+                Measurement::unsupported("unknown".into()),
+            ),
+            // A claimed image whose bytes do not decode.
+            (
+                perceptual_measurement(Err("bad header".into())),
+                Measurement::unsupported("bad header".into()),
+            ),
+            // Decoded onto no pixels.
+            (
+                perceptual_measurement(Ok(None)),
+                Measurement::bare(MeasurementStatus::EmptySpan),
+            ),
+            // The one answer that is a fingerprint.
+            (
+                perceptual_measurement(Ok(Some(value.into()))),
+                Measurement::computed(value.into()),
+            ),
+        ];
+        for (got, want) in &settled {
+            assert_eq!(got, want);
+            assert_ne!(
+                got.status,
+                MeasurementStatus::Pending,
+                "a looked-at row must leave the walk"
+            );
+        }
+    }
+
+    /// The decode step against bytes rather than a mock: a real PNG
+    /// yields a value that reads back, and bytes that are not an image
+    /// yield the decoder's complaint rather than a panic.
+    #[test]
+    fn fingerprint_bytes_answers_real_bytes() {
+        let mut img = image::RgbImage::new(8, 8);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            *px = image::Rgb([(x * 32) as u8, (y * 32) as u8, 0]);
+        }
+        let mut png = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png, image::ImageFormat::Png)
+            .expect("encode");
+
+        let value = fingerprint_bytes(png.get_ref())
+            .expect("a real PNG decodes")
+            .expect("8x8 has pixels");
+        assert_eq!(
+            asterism_vision::perceptual::parse(&value),
+            asterism_vision::perceptual::fingerprint(&img),
+            "the stored spelling reads back as the fingerprint it spells"
+        );
+
+        assert!(
+            fingerprint_bytes(b"not a picture").is_err(),
+            "bytes that are not an image are the decoder's answer, not a panic"
+        );
     }
 
     const DIALOGUE_BODY: &str = "First reply line\nSecond reply line\nThird reply line";

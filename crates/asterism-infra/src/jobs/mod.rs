@@ -506,6 +506,10 @@ async fn handle_asterism_job(
             // no sweep ran, so it must classify the same way.
             None => (handlers::trash_purge(&env, &job.payload).await, true),
         },
+        // Ungated, unlike the visual jobs below: a perceptual
+        // fingerprint is pixels and arithmetic, so a profile that binds
+        // no model still has its copies recognised.
+        Ok(JobKind::PerceptualHash) => (handlers::perceptual_hash(&env, &job.payload).await, false),
         // Both visual jobs need a configured encoder — for the vectors,
         // and for knowing *which* model's vectors to scan. An unbound
         // cell classifies as skipped, the `DisclosureStamp` shape.
