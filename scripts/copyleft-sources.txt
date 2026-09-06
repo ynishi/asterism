@@ -1,0 +1,32 @@
+# Packages the application links whose licence obliges more than attribution,
+# and whose source therefore travels with the release.
+#
+# All six are MPL-2.0, which is file-level copyleft: it reaches the files that
+# carry its notice and does not reach the program linking them, so nothing
+# here touches Asterism's own licensing. What it asks, at §3.2, is that
+# Covered Software distributed in Executable Form "must also be made available
+# in Source Code Form, as described in Section 3.1", with recipients told how
+# to obtain it "at a charge no more than the cost of distribution".
+#
+# The release attaches each one's `.crate` archive — the unmodified upstream
+# release, byte for byte what `Cargo.lock` pins — beside the DMG. Pointing at
+# crates.io would probably do, since these are unmodified upstream artefacts
+# whose canonical home that is; attaching them costs 232 KB and removes the
+# argument, which is the same call #243 made for the ffmpeg source.
+#
+# `scripts/check-third-party-notices.py` holds this list to the graph in both
+# directions. A package added here that obliges nothing fails, and a package
+# that obliges something and is not here fails — the second is the one that
+# matters, because the obligation arrives silently with a transitive
+# dependency.
+#
+# Not here, and deliberately: `htmlescape` (`Apache-2.0 / MIT / MPL-2.0`, via
+# `tantivy`) and `r-efi` (`MIT OR Apache-2.0 OR LGPL-2.1-or-later`). Each
+# offers a permissive alternative and `about.toml` takes it, which is a
+# decision rather than an oversight.
+cssparser
+cssparser-macros
+dtoa-short
+mp4parse
+option-ext
+selectors

@@ -1,0 +1,68 @@
+# What `cargo about` is allowed to resolve a dependency's licence to, and in
+# what order. The order is the decision: for a package offering `MIT OR
+# Apache-2.0`, the first entry that matches is the one the notice will name,
+# and 413 packages in this closure offer exactly that pair.
+#
+# MIT first, deliberately. Both are fine to comply with and the app satisfies
+# either; MIT asks for one notice to travel with the copy, where Apache-2.0
+# adds §4's NOTICE-file handling for any dependency that ships one. Choosing
+# the simpler obligation for the four hundred packages that leave the choice
+# to us keeps the notice about the packages that actually constrain it.
+#
+# Everything below Apache-2.0 is here because some package offers it with no
+# permissive alternative, so accepting it is not a preference. The list is
+# alphabetical rather than ranked for that reason — nothing chooses between
+# them.
+#
+# `LGPL-2.1-or-later` is deliberately absent. One package offers it —
+# `r-efi`, as `MIT OR Apache-2.0 OR LGPL-2.1-or-later` — and leaving it off
+# the list is how this repository states that it takes the MIT option rather
+# than the copyleft one. If a package ever arrives whose *only* licence is
+# LGPL, the generator fails rather than quietly accepting an obligation
+# nobody decided to take, which is the same reason `GPL` and `AGPL` are not
+# here either.
+#
+# MPL-2.0 is here because six packages offer nothing else. That is an
+# obligation rather than a choice, and it is answered in
+# THIRD-PARTY-NOTICES.md and by the archives the release carries — see
+# `scripts/copyleft-sources.txt` for the list held to the tree.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "0BSD",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT-0",
+    "MPL-2.0",
+    "NCSA",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "zlib-acknowledgement",
+]
+
+# The notice is about what the application ships. A dependency that only ever
+# builds a test binary is not distributed, so it is not in the closure this
+# describes — the same boundary `licence-check` draws for the AGPL planes,
+# drawn the other way round because here the question is what reaches a user
+# rather than what could contaminate a build.
+ignore-dev-dependencies = true
+
+# One target's answer, and it is the one that ships: the release workflow
+# builds `aarch64-apple-darwin` and nothing else. Left unset, the generator
+# resolves for every target it knows and the notice names packages no macOS
+# build ever links.
+targets = ["aarch64-apple-darwin"]
+
+# This repository's own crates are not third parties to it. Every workspace
+# member carries `publish = false`, which is what this setting keys on, so the
+# notice describes what Asterism links rather than restating the licence its
+# README already declares — and the four AGPL crates of the teams plane, which
+# no bundle ships, do not appear in a file that ships in one.
+[private]
+ignore = true

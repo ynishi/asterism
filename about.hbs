@@ -1,0 +1,35 @@
+# Third-party notices
+
+Asterism links open-source Rust packages into the application it ships. This
+file names every one of them, the licence it is used under, and the text that
+licence asks to travel with a copy. It is generated from `Cargo.lock` by
+`just licences` — edit that recipe or `about.toml`, never this file.
+
+Where a package offers a choice of licences, the one named here is the one
+Asterism takes. `about.toml` says which and why.
+
+What is counted is what the macOS application links: dependencies of any kind
+that reach `aarch64-apple-darwin`, with test-only dependencies left out because
+nothing distributes a test binary. Asterism's own crates are licensed
+separately and are not listed here — see `LICENSE-MIT`, `LICENSE-APACHE` and
+the README. The `ffmpeg` binary that ships beside the application is spawned
+rather than linked and has its own notice in `FFMPEG-NOTICE.md`.
+
+{{#each overview}}
+- {{count}} package{{#if (ne count 1)}}s{{/if}} under {{{name}}}
+{{/each}}
+
+{{#each licenses}}
+## {{{name}}}
+
+Used by:
+
+{{#each used_by}}
+- [{{crate.name}} {{crate.version}}]({{#if crate.repository}}{{{crate.repository}}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}})
+{{/each}}
+
+```
+{{{text}}}
+```
+
+{{/each}}
