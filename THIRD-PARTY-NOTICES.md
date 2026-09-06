@@ -3,10 +3,9 @@
 Asterism links open-source Rust packages into the application it ships. This
 file names every one of them, the licence it is used under, and the text that
 licence asks to travel with a copy. It is generated from `Cargo.lock` by
-`just licences` — edit that recipe or `about.toml`, never this file.
-
-Where a package offers a choice of licences, the one named here is the one
-Asterism takes. `about.toml` says which and why.
+`just licences`; `about.hbs` is this wording, `about.toml` decides which side of
+a choice like `MIT OR Apache-2.0` is taken and says why, and neither is this
+file — edit those.
 
 What is counted is what the macOS application links: dependencies of any kind
 that reach `aarch64-apple-darwin`, with test-only dependencies left out because
@@ -15,16 +14,39 @@ and are not listed here — see `LICENSE-MIT`, `LICENSE-APACHE` and the README.
 The `ffmpeg` binary that ships beside the application is spawned rather than
 linked and has its own notice in `FFMPEG-NOTICE.md`.
 
-- 619 packages under MIT License
-- 23 packages under Unicode License v3
-- 21 packages under Apache License 2.0
-- 20 packages under ISC License
-- 16 packages under BSD 3-Clause "New" or "Revised" License
-- 9 packages under BSD 2-Clause "Simplified" License
-- 6 packages under Mozilla Public License 2.0
-- 2 packages under Community Data License Agreement Permissive 2.0
-- 2 packages under zlib License
-- 1 package under Creative Commons Zero v1.0 Universal
+## Where the source is
+
+Most of the licences below ask only that they and their copyright notices travel
+with the application, which is what this file does.
+
+The Mozilla Public License 2.0 asks for one thing more. Its §3.2 says that when
+Covered Software is distributed in Executable Form it must also be made
+available in Source Code Form, and that recipients of the Executable Form be
+told how to obtain a copy. So: **every package listed below under Mozilla Public
+License 2.0 has its source archive attached to the same release this application
+was downloaded from** — the exact archives this build compiled, unmodified
+upstream releases, beside the disk image itself. They are the `.crate` files
+there, one per package, named for the package and the version.
+
+If this copy of Asterism reached you by some other route, those archives are on
+the release page for its version at <https://github.com/ynishi/asterism>.
+
+## What is listed
+
+Counted by entry rather than by package: a package whose licence expression
+names two licences is listed under each of them, so these add up to more than
+the number of packages.
+
+- 619 entries under MIT License
+- 23 entries under Unicode License v3
+- 21 entries under Apache License 2.0
+- 20 entries under ISC License
+- 16 entries under BSD 3-Clause "New" or "Revised" License
+- 9 entries under BSD 2-Clause "Simplified" License
+- 6 entries under Mozilla Public License 2.0
+- 2 entries under Community Data License Agreement Permissive 2.0
+- 2 entries under zlib License
+- 1 entry under Creative Commons Zero v1.0 Universal
 
 ## Apache License 2.0
 
