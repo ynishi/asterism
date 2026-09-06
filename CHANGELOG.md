@@ -10,6 +10,34 @@ and this project adheres to
 
 ### Added
 
+- **The 678 packages the app links, named** (#246). `THIRD-PARTY-NOTICES.md`
+  lists every third-party package that reaches the macOS build, the licence it
+  is used under, and that licence's text; it ships in the bundle beside the
+  other four, and `just licences` regenerates it from `Cargo.lock` with
+  `cargo-about`. `about.toml` is where the choices live: for the 413 packages
+  offering `MIT OR Apache-2.0` the notice names MIT, because both are satisfied
+  and MIT is the one that does not bring §4's NOTICE handling with it, and
+  `LGPL-2.1-or-later` is deliberately absent from the accepted list so that
+  `r-efi`'s three-way choice resolves to MIT rather than to copyleft.
+- **The source of the six packages whose licence asks for it** (#246). Six
+  MPL-2.0 crates — `cssparser`, `cssparser-macros`, `dtoa-short`, `mp4parse`,
+  `option-ext`, `selectors` — link into the app, and MPL-2.0 §3.2 asks that
+  Covered Software distributed in Executable Form also be made available in
+  Source Code Form. The release attaches their `.crate` archives, 232 KB between
+  them, the exact ones cargo built from. Pointing at crates.io would probably
+  do, since these are unmodified upstream releases whose canonical home that is;
+  attaching them costs almost nothing and removes the argument, which is the
+  call #243 made for the ffmpeg source.
+- **Two gates for the above** (#246). `just third-party-check`, in
+  `check-shared`, holds the notice and `scripts/copyleft-sources.txt` to the
+  dependency graph without needing `cargo-about`: nothing the notice names has
+  left the lockfile, and nothing that obliges a source offer is unrecorded — in
+  both directions, so a line for a package that has gone fails too. What it
+  cannot see is a newly added permissive dependency missing from the notice,
+  because deciding that means resolving the graph for one target, which is the
+  generator's job; the release workflow regenerates and diffs, on the run that
+  ships the file.
+
 - **The ffmpeg sidecar's own terms, travelling with it** (#243). The app ships
   an `ffmpeg` built from unmodified upstream source and spawns it as a separate
   process, and until now nothing shipped beside it said where it came from or
