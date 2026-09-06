@@ -82,15 +82,27 @@ mcp-proxy-build:
     cargo build --release -p asterism-server
 
 # Build the production-shaped Dogfood app without launching it.
-# The trailing assert is the teeth for the config split (2026-08-04):
+# The trailing asserts are the teeth for the config split (2026-08-04):
 # externalBin rides tauri.bundle.conf.json via `--config` merge, and if
 # that merge ever stops reaching tauri-build the bundler would silently
 # ship an app without the sidecar — runtime would fall back to whatever
 # ffmpeg the host carries instead of failing loudly here.
+#
+# `bundle.resources` is the same claim with the same failure mode, and
+# what rides on it is what the app is allowed to be handed to somebody
+# with: the sidecar is LGPL, its licence and its notice have to travel
+# with each copy, and a resources key that misses the bundler would
+# ship a DMG that carries neither and says nothing about it. The four
+# are asserted one by one rather than by counting the directory, so a
+# failure names the file that did not arrive.
 [group('app')]
 dogfood-build: ffmpeg-sidecar
     cd "{{ ui_dir }}" && npm run app:dogfood:build
     @test -x "{{ dogfood_app }}/Contents/MacOS/ffmpeg" || (echo "bundle is missing the ffmpeg sidecar — tauri.bundle.conf.json externalBin merge did not reach tauri-build" >&2; exit 1)
+    @for f in LICENSE-MIT LICENSE-APACHE LICENSE-LGPL-2.1 FFMPEG-NOTICE.md; do \
+        test -f "{{ dogfood_app }}/Contents/Resources/licenses/$f" || \
+            { echo "bundle is missing Contents/Resources/licenses/$f — tauri.conf.json bundle.resources did not reach the bundler, and the app may not ship without it" >&2; exit 1; }; \
+     done
 
 # Run the large-fixture Bench app.
 [group('app')]
