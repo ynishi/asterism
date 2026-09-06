@@ -1,4 +1,4 @@
-# asterism-media-probe 0.1.0
+# asterism-media-probe 0.1.1
 
 Header-only media measurement: what the bytes say about themselves.
 

@@ -1,4 +1,4 @@
-# asterism-core 0.1.0
+# asterism-core 0.1.1
 
 # asterism-core — Domain + Application layer
 

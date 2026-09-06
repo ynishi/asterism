@@ -1,4 +1,4 @@
-# asterism-importer-video 0.1.0
+# asterism-importer-video 0.1.1
 
 Video import adapter — turns a scanned video file into
 `Footprint::Video`.

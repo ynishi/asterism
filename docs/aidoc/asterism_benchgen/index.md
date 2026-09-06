@@ -1,4 +1,4 @@
-# asterism-benchgen 0.1.0
+# asterism-benchgen 0.1.1
 
 `asterism-benchgen` — the seeded corpus behind the grid/import benches.
 

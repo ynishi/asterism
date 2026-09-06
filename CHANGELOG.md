@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-06
+
 ### Added
 
 - **The packages the app links, named** (#246). `THIRD-PARTY-NOTICES.md` lists
@@ -41,6 +43,10 @@ and this project adheres to
   missing from the notice, which the release workflow answers by regenerating
   and diffing on the run that ships the file.
 
+## [0.1.0] - 2026-09-06
+
+### Added
+
 - **The ffmpeg sidecar's own terms, travelling with it** (#243). The app ships
   an `ffmpeg` built from unmodified upstream source and spawns it as a separate
   process, and until now nothing shipped beside it said where it came from or
@@ -68,34 +74,6 @@ and this project adheres to
   bytes. The rehearsal path keeps the same three files in its workflow artifact
   — this repository is public, so that artifact is downloadable by anyone who
   can read it.
-
-### Changed
-
-- **The sidecar build verifies what it downloads** (#243). The script fetched a
-  tarball over the network, unpacked it and compiled it without checking what
-  arrived. It now compares the archive against a pinned SHA-256, and does so
-  before the fast path rather than after it: a run that finds the binary already
-  built still fetches the archive if it is missing and still hashes it, because
-  the release uploads that archive and the notice inside the app names its
-  digest. Provenance is established by hand — the 8.0 tarball checks out against
-  FFmpeg's release signing key, whose fingerprint matches the one published on
-  ffmpeg.org — and the digest is what carries that verification into later
-  builds. The stamp that decides whether to rebuild records the digest beside
-  the version, so correcting a pin without moving the version no longer matches
-  a warm `target/` and keeps a binary compiled from the rejected bytes.
-- **Two comments in the sidecar script named the wrong clause** (#243). Both
-  reached for LGPL-2.1 §6's system-library exception to explain why linking
-  `/usr/lib` and `/System/Library` is fine. The conclusion holds and the reason
-  is simpler: §6 governs a combined work — a program of your own linked against
-  the library — and what ships here is FFmpeg's own tool linked against FFmpeg's
-  own libraries, wholly LGPL, which §4 governs. Under §4 the frameworks the OS
-  ships are not part of FFmpeg's corresponding source, so no exception has to be
-  invoked.
-
-## [0.1.0] - 2026-09-06
-
-### Added
-
 - **A gate that holds the two licence planes apart** (#242).
   `just licence-check` fails when a member on the workspace's
   `MIT OR Apache-2.0` reaches one of the four `AGPL-3.0-or-later` crates at any
@@ -1207,6 +1185,26 @@ and this project adheres to
 
 ### Changed
 
+- **The sidecar build verifies what it downloads** (#243). The script fetched a
+  tarball over the network, unpacked it and compiled it without checking what
+  arrived. It now compares the archive against a pinned SHA-256, and does so
+  before the fast path rather than after it: a run that finds the binary already
+  built still fetches the archive if it is missing and still hashes it, because
+  the release uploads that archive and the notice inside the app names its
+  digest. Provenance is established by hand — the 8.0 tarball checks out against
+  FFmpeg's release signing key, whose fingerprint matches the one published on
+  ffmpeg.org — and the digest is what carries that verification into later
+  builds. The stamp that decides whether to rebuild records the digest beside
+  the version, so correcting a pin without moving the version no longer matches
+  a warm `target/` and keeps a binary compiled from the rejected bytes.
+- **Two comments in the sidecar script named the wrong clause** (#243). Both
+  reached for LGPL-2.1 §6's system-library exception to explain why linking
+  `/usr/lib` and `/System/Library` is fine. The conclusion holds and the reason
+  is simpler: §6 governs a combined work — a program of your own linked against
+  the library — and what ships here is FFmpeg's own tool linked against FFmpeg's
+  own libraries, wholly LGPL, which §4 governs. Under §4 the frameworks the OS
+  ships are not part of FFmpeg's corresponding source, so no exception has to be
+  invoked.
 - **A version that distinguishes releases** (#242). The workspace carried
   `0.0.0` and so did all 29 members, `tauri.conf.json`, and the frontend package
   — one number that never moved. It is `0.1.0` now, which is what the release
@@ -4703,5 +4701,6 @@ and this project adheres to
   (default 14); a malformed or non-positive value is refused at startup rather
   than silently replaced.
 
-[Unreleased]: https://github.com/ynishi/asterism/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ynishi/asterism/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ynishi/asterism/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ynishi/asterism/releases/tag/v0.1.0

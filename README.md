@@ -9,6 +9,10 @@ hover-burst looks like.
 
 ## Status
 
+- **v0.1.1** — the app names the packages it links. A generated third-party
+  notice for the Rust dependency closure travels in the bundle, and the source
+  archives of the packages that notice lists under MPL-2.0 are attached to the
+  release beside the download. No change to what the app does.
 - **v0.1.0** — the team plane is wired, visible, and licensed: a team hosts the
   forge, a member's client promotes an asset onto a team-hosted line, and the
   Forge and Team surfaces are in the app. The local-first half it stands on —

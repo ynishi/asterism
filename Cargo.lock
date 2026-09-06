@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-benchgen"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-contract",
@@ -355,7 +355,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-contract"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "schema-bridge",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-contract",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-disclosure-format"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "asterism-core",
  "crc32fast",
@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-dispatch-sdk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-contract",
@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-exporter-comfy"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-contract",
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-exporter-common"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "asterism-contract",
  "asterism-dispatch-sdk",
@@ -440,7 +440,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-exporter-file"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-contract",
@@ -456,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-exporter-http"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-contract",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-importer"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-importer-audio",
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-importer-audio"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "asterism-importer-sdk",
  "chrono",
@@ -503,7 +503,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-importer-cc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "asterism-importer-sdk",
  "chrono",
@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-importer-image"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "asterism-importer-sdk",
  "asterism-media-probe",
@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-importer-persona-journal"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "asterism-importer-sdk",
  "chrono",
@@ -534,7 +534,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-importer-sdk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-contract",
@@ -557,7 +557,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-importer-tape"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "asterism-importer-sdk",
  "chrono",
@@ -566,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-importer-video"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "asterism-importer-sdk",
  "asterism-media-probe",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-infra"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "apalis",
@@ -633,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-media-probe"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-model-lab"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-vision",
@@ -661,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-contract",
@@ -696,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-teams-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-contract",
@@ -715,7 +715,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-teams-wire"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "schema-bridge",
  "serde",
@@ -723,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-ui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-contract",
@@ -758,7 +758,7 @@ dependencies = [
 
 [[package]]
 name = "asterism-vision"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "image",
@@ -9093,7 +9093,7 @@ dependencies = [
 
 [[package]]
 name = "teams-contract"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "asterism-teams-wire",
  "schema-bridge",
@@ -9103,7 +9103,7 @@ dependencies = [
 
 [[package]]
 name = "teams-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-core",
@@ -9116,7 +9116,7 @@ dependencies = [
 
 [[package]]
 name = "teams-infra"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -9141,7 +9141,7 @@ dependencies = [
 
 [[package]]
 name = "teams-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "asterism-contract",
