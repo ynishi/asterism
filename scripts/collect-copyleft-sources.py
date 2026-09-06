@@ -43,7 +43,14 @@ def wanted() -> list[str]:
     return out
 
 
-def versions(names: list[str]) -> dict[str, str]:
+def pinned(names: list[str]) -> set[tuple[str, str]]:
+    """Every (name, version) the lockfile holds for the recorded packages.
+
+    Pairs, and every version rather than one: a graph this size resolves
+    twenty package names at two versions, and a release that offered the
+    source of one of two shipped versions would be answering half of what it
+    owes. The sibling check makes the same distinction for the same reason.
+    """
     result = subprocess.run(
         ["cargo", "metadata", "--format-version", "1", "--offline", "--locked",
          "--manifest-path", str(ROOT / "Cargo.toml")],
@@ -52,11 +59,12 @@ def versions(names: list[str]) -> dict[str, str]:
     )
     if result.returncode != 0:
         sys.exit("cargo metadata --locked --offline failed:\n" + result.stderr.strip())
-    found: dict[str, str] = {}
-    for p in json.loads(result.stdout)["packages"]:
-        if p["name"] in names:
-            found[p["name"]] = p["version"]
-    missing = sorted(set(names) - set(found))
+    found = {
+        (p["name"], p["version"])
+        for p in json.loads(result.stdout)["packages"]
+        if p["name"] in names
+    }
+    missing = sorted(set(names) - {n for n, _ in found})
     if missing:
         sys.exit(
             f"{', '.join(missing)} named in {COPYLEFT.name} but not in the "
@@ -84,7 +92,7 @@ def main() -> int:
 
     copied: list[str] = []
     missing: list[str] = []
-    for name, version in sorted(versions(wanted()).items()):
+    for name, version in sorted(pinned(wanted())):
         archive = f"{name}-{version}.crate"
         source = next((c / archive for c in cache if (c / archive).is_file()), None)
         if source is None:
@@ -97,7 +105,10 @@ def main() -> int:
         print(
             "these source archives are not in the registry cache, so the "
             "release cannot offer them:\n  " + "\n  ".join(missing) + "\n"
-            "a build downloads them; run one before collecting.",
+            "The cache holds the `.crate` a download produced; an unpacked "
+            "`registry/src` alone does not put one back, and a restored cache "
+            "can carry one directory and not the other. Fetching is what "
+            "fills it: `cargo fetch --locked`.",
             file=sys.stderr,
         )
         return 1
