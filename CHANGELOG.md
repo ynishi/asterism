@@ -8,6 +8,16 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- **The six sentences a team-plane write leaves behind name who and which team
+  too.** Inviting, removing, granting or revoking owner, leaving and deleting a
+  team all set the toast under the drawer to a sentence naming a raw `userId` or
+  `teamId`, on the same terms the promote picker and the remove confirm did
+  before #229. Each now reads a login from the roster already loaded to draw the
+  row its button sits on, or a team's name from the same list the drawer's own
+  rail already reads, falling back to the id where neither has an answer.
+
 ## [0.1.1] - 2026-09-06
 
 ### Added
@@ -1492,15 +1502,7 @@ and this project adheres to
   picker's `<option>` keeps the id on its `title`, the way a team row already
   does (#218) — and neither reads further than the object it already had. Six
   more places the sweep missed, the toasts each write leaves behind, are their
-  own entry below.
-
-- **The six sentences a team-plane write leaves behind name who and which team
-  too.** Inviting, removing, granting or revoking owner, leaving and deleting a
-  team all set the toast under the drawer to a sentence naming a raw `userId` or
-  `teamId`, on the same terms the promote picker and the remove confirm did
-  before #229. Each now reads a login from the roster already loaded to draw the
-  row its button sits on, or a team's name from the same list the drawer's own
-  rail already reads, falling back to the id where neither has an answer.
+  own entry in the release after this one.
 
 - **A `CLAUDE*.md` is ignored wherever it sits, and so is a nested `.claude/`.**
   The ignore list named the root `CLAUDE.md`, which is not where the risk lives.
