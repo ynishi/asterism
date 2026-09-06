@@ -65,3 +65,9 @@ logs
 # output then travelled as repository content. The series is local
 # evidence of a local run; CI produces its own.
 /.check*.log
+
+# Python bytecode beside the gate scripts. Running one as a script
+# writes nothing — Python does not cache `__main__` — but importing one
+# to test its functions does, and the directory it leaves makes the tree
+# dirty, which is enough for the `-changed` gates to refuse to answer.
+__pycache__/

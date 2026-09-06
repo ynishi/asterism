@@ -1,4 +1,4 @@
-# asterism-infra 0.0.0
+# asterism-infra 0.1.0
 
 # asterism-infra — outbound adapters (SQLite, filesystem, job engine)
 

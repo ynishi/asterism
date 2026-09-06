@@ -104,16 +104,19 @@ pub fn render(record: &DisclosureRecord) -> Option<String> {
     // documentation for whoever opens the file, not an identifier
     // anything resolves.
     //
-    // The name without a version, for two reasons that happen to agree.
-    // The build version here would be the same `0.0.0` every crate in
-    // this workspace carries, so it would say the same thing in every
-    // file ever written — and these bytes go inside the C2PA hard
-    // binding, which makes it the same uncorrectable claim the manifest
-    // declines to make in `claim_generator_info`. It would also be the
-    // one thing in this packet that is not read off the record, which
-    // the module doc says nothing here may be: two stamps of one
-    // unchanged record would render different bytes across a version
-    // bump, for a difference nobody stated.
+    // The name without a version. There were two reasons for that and
+    // they happened to agree; v0.1.0 retired the first, and the second is
+    // why the attribute stays as it is. The retired one: the build
+    // version was the same `0.0.0` every crate in this workspace carried,
+    // so it would have said the same thing in every file ever written,
+    // which is why `claim_generator_info` withheld it too — and does not
+    // any more. The one that stands: a version here would be the one
+    // thing in this packet that is not read off the record, which the
+    // module doc says nothing here may be. Two stamps of one unchanged
+    // record would render different bytes across a version bump, for a
+    // difference nobody stated, and these bytes go inside the C2PA hard
+    // binding. The manifest can carry a build's identity because it is
+    // not held to that rule; this packet is.
     let toolkit = "asterism";
     Some(format!(
         "<?xpacket begin=\"\u{feff}\" id=\"{PACKET_ID}\"?>\n\

@@ -1,4 +1,4 @@
-# asterism-teams-client 0.0.0
+# asterism-teams-client 0.1.0
 
 # asterism-teams-client — the member's half of a shared line
 

@@ -1,4 +1,4 @@
-# asterism-dispatch-sdk 0.0.0
+# asterism-dispatch-sdk 0.1.0
 
 # asterism-dispatch-sdk
 

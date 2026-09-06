@@ -1,5 +1,5 @@
 <!-- asterism_benchgen/index.md -->
-# asterism-benchgen 0.0.0
+# asterism-benchgen 0.1.0
 
 `asterism-benchgen` — the seeded corpus behind the grid/import benches.
 
@@ -41,7 +41,7 @@ at the real library.
 
 
 <!-- asterism_contract/index.md -->
-# asterism-contract 0.0.0
+# asterism-contract 0.1.0
 
 # asterism-contract — Command / Query / Response DTOs
 
@@ -627,7 +627,7 @@ and an actor's display name is a snapshot rather than a lookup.
 
 
 <!-- asterism_core/index.md -->
-# asterism-core 0.0.0
+# asterism-core 0.1.0
 
 # asterism-core — Domain + Application layer
 
@@ -7615,7 +7615,7 @@ something that changes.
 
 
 <!-- asterism_disclosure_format/index.md -->
-# asterism-disclosure-format 0.0.0
+# asterism-disclosure-format 0.1.0
 
 # asterism-disclosure-format
 
@@ -7913,7 +7913,7 @@ reports.)
 
 
 <!-- asterism_dispatch_sdk/index.md -->
-# asterism-dispatch-sdk 0.0.0
+# asterism-dispatch-sdk 0.1.0
 
 # asterism-dispatch-sdk
 
@@ -8185,7 +8185,7 @@ any).
 
 
 <!-- asterism_exporter_comfy/index.md -->
-# asterism-exporter-comfy 0.0.0
+# asterism-exporter-comfy 0.1.0
 
 # asterism-exporter-comfy
 
@@ -8240,7 +8240,7 @@ into [`ComfyDispatchParams`]:
 
 
 <!-- asterism_exporter_common/index.md -->
-# asterism-exporter-common 0.0.0
+# asterism-exporter-common 0.1.0
 
 # asterism-exporter-common
 
@@ -8418,7 +8418,7 @@ place and the traversals follow.
 
 
 <!-- asterism_exporter_file/index.md -->
-# asterism-exporter-file 0.0.0
+# asterism-exporter-file 0.1.0
 
 # asterism-exporter-file
 
@@ -8515,7 +8515,7 @@ without introducing a fake "waiting" phase.
 
 
 <!-- asterism_exporter_http/index.md -->
-# asterism-exporter-http 0.0.0
+# asterism-exporter-http 0.1.0
 
 # asterism-exporter-http
 
@@ -8751,7 +8751,7 @@ agreeing to.
 
 
 <!-- asterism_importer/index.md -->
-# asterism-importer 0.0.0
+# asterism-importer 0.1.0
 
 Unified CLI for all built-in Asterism import adapters.
 
@@ -8766,7 +8766,7 @@ validates and reports without writing anything.
 
 
 <!-- asterism_importer_audio/index.md -->
-# asterism-importer-audio 0.0.0
+# asterism-importer-audio 0.1.0
 
 Audio import adapter — turns a scanned audio file into
 `Footprint::Audio`.
@@ -8798,7 +8798,7 @@ MPC / AIFF. Header-only reads — no decoding.
 
 
 <!-- asterism_importer_cc/index.md -->
-# asterism-importer-cc 0.0.0
+# asterism-importer-cc 0.1.0
 
 Claude Code session import adapter — turns a session's JSONL log
 into `Footprint::ChatMessage`s (plus `Footprint::Image` for pasted
@@ -8861,7 +8861,7 @@ would take the picture down with the missing id.
 
 
 <!-- asterism_importer_image/index.md -->
-# asterism-importer-image 0.0.0
+# asterism-importer-image 0.1.0
 
 Image import adapter — parses one image file into one
 `Footprint::Image`.
@@ -8913,7 +8913,7 @@ states where the bytes are; what they contain is read from them.
 
 
 <!-- asterism_importer_persona_journal/index.md -->
-# asterism-importer-persona-journal 0.0.0
+# asterism-importer-persona-journal 0.1.0
 
 persona-journal import adapter — turns a persona-journal SQLite row
 into `Footprint::JournalEntry`.
@@ -8962,7 +8962,7 @@ Idempotency relies on the server-side
 
 
 <!-- asterism_importer_sdk/index.md -->
-# asterism-importer-sdk 0.0.0
+# asterism-importer-sdk 0.1.0
 
 # asterism-importer-sdk
 
@@ -10449,7 +10449,7 @@ checked, which is precisely what the server refuses.
 
 
 <!-- asterism_importer_tape/index.md -->
-# asterism-importer-tape 0.0.0
+# asterism-importer-tape 0.1.0
 
 Tape import adapter — turns an exported conversation tape file into
 `Footprint::Tape`.
@@ -10477,7 +10477,7 @@ Persona Tape parser — one terminal transcript file becomes one document.
 
 
 <!-- asterism_importer_video/index.md -->
-# asterism-importer-video 0.0.0
+# asterism-importer-video 0.1.0
 
 Video import adapter — turns a scanned video file into
 `Footprint::Video`.
@@ -10512,7 +10512,7 @@ the contract for every probe miss.
 
 
 <!-- asterism_infra/index.md -->
-# asterism-infra 0.0.0
+# asterism-infra 0.1.0
 
 # asterism-infra — outbound adapters (SQLite, filesystem, job engine)
 
@@ -13223,7 +13223,7 @@ the two transports share one mapping instead of duplicating it.
 
 
 <!-- asterism_media_probe/index.md -->
-# asterism-media-probe 0.0.0
+# asterism-media-probe 0.1.0
 
 Header-only media measurement: what the bytes say about themselves.
 
@@ -13336,7 +13336,7 @@ line, and the caller sees no settings rather than wrong ones.
 
 
 <!-- asterism_model_lab/index.md -->
-# asterism-model-lab 0.0.0
+# asterism-model-lab 0.1.0
 
 # asterism-model-lab — provider-side model preparation (#112)
 
@@ -13366,7 +13366,7 @@ that needs conversion would declare it.
 
 
 <!-- asterism_server/index.md -->
-# asterism-server 0.0.0
+# asterism-server 0.1.0
 
 # asterism-server — library surface.
 
@@ -13665,7 +13665,7 @@ bus in this process.
 
 
 <!-- asterism_teams_client/index.md -->
-# asterism-teams-client 0.0.0
+# asterism-teams-client 0.1.0
 
 # asterism-teams-client — the member's half of a shared line
 
@@ -14152,7 +14152,7 @@ reachable from here.
 
 
 <!-- asterism_teams_wire/index.md -->
-# asterism-teams-wire 0.0.0
+# asterism-teams-wire 0.1.0
 
 # asterism-teams-wire — what a member's client and a team server
 both say
@@ -14323,7 +14323,7 @@ unsafe direction.
 
 
 <!-- asterism_ui/index.md -->
-# asterism-ui 0.0.0
+# asterism-ui 0.1.0
 
 # asterism-ui — Asterism desktop UI (Tauri v2 backend)
 
@@ -14947,7 +14947,7 @@ week, with no way to tell that from a revoked token.
 
 
 <!-- asterism_vision/index.md -->
-# asterism-vision 0.0.0
+# asterism-vision 0.1.0
 
 # asterism-vision — model *use* for visual features (#112)
 
@@ -15002,7 +15002,7 @@ than served.
 
 
 <!-- teams_contract/index.md -->
-# teams-contract 0.0.0
+# teams-contract 0.1.0
 
 # teams-contract — wire contract for the teams plane
 
@@ -15102,7 +15102,7 @@ on.
 
 
 <!-- teams_core/index.md -->
-# teams-core 0.0.0
+# teams-core 0.1.0
 
 # teams-core — domain layer of the Asterism teams plane
 
@@ -15513,7 +15513,7 @@ none of that shows here, deliberately.
 
 
 <!-- teams_infra/index.md -->
-# teams-infra 0.0.0
+# teams-infra 0.1.0
 
 # teams-infra — adapters for the teams plane
 
@@ -16407,7 +16407,7 @@ append recomputes over what actually committed. The domain's
 
 
 <!-- teams_server/index.md -->
-# teams-server 0.0.0
+# teams-server 0.1.0
 
 # teams-server — the hosted Team plane's server library
 

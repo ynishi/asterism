@@ -1,4 +1,4 @@
-# asterism-exporter-common 0.0.0
+# asterism-exporter-common 0.1.0
 
 # asterism-exporter-common
 

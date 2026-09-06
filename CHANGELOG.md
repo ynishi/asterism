@@ -8,8 +8,33 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-06
+
 ### Added
 
+- **A gate that holds the two licence planes apart** (#242).
+  `just licence-check` fails when a member on the workspace's
+  `MIT OR Apache-2.0` reaches one of the four `AGPL-3.0-or-later` crates at any
+  depth — or when a `teams-*` crate stops being licensed AGPL, since otherwise
+  the first assertion could be defeated by deleting a line rather than by adding
+  one. Both answers come from `cargo metadata --locked`, so the resolver decides
+  what a licence field says and what depends on what, and a crossing written
+  into a manifest but not yet resolved fails here rather than passing. README's
+  licence section has said since #162 that the forbidden direction stays empty,
+  and nothing but that sentence said so: the boundary test nearest to it,
+  `tests/boundary.rs` in the UI crate, answers for the wire crate's vocabulary,
+  so a line reading `teams-core = { path = "../../teams-core" }` in the UI
+  manifest would have passed it, passed clippy, and passed every recipe `check`
+  composes. In `check-shared`, so a pull request is asked the same question
+  `main` is.
+- **The licence texts inside the bundle** (#242). `LICENSE-MIT` and
+  `LICENSE-APACHE` are bundle resources now, which is what puts the notices the
+  shipped code asks to travel with it — MIT's, and Apache-2.0 §4(a) and §4(d) —
+  into the app: the bundle had a copyright string and no licence file of any
+  kind. No release has been built from this, so the config is what changed and
+  the artefact is what the first release run will show. `LICENSE-AGPL` joins
+  them on the day a teams binary is ever bundled, and not before: the app's
+  dependency closure holds none of the four.
 - **An admin's reach over somebody else's sign-in** (#213). An instance admin
   can now take back every live device token an account holds
   (`DELETE /teams/admin/accounts/{user_id}/devices`, after `GET …/devices` to
@@ -1098,6 +1123,21 @@ and this project adheres to
 
 ### Changed
 
+- **A version that distinguishes releases** (#242). The workspace carried
+  `0.0.0` and so did all 29 members, `tauri.conf.json`, and the frontend package
+  — one number that never moved. It is `0.1.0` now, which is what the release
+  workflow's own guard compares a tag against before it builds anything.
+  `/asterism/health` and the MCP server info follow it without being edited;
+  they read `CARGO_PKG_VERSION` rather than restating it.
+- **The manifest names the release that wrote it** (#242).
+  `claim_generator_info` carries `version` again. It was withdrawn because the
+  only value available was the `0.0.0` every build shared, which puts a claim
+  into a signed, uncorrectable document that says nothing confidently; the note
+  left in its place said the field comes back when releases start carrying a
+  number that distinguishes them, and this is that release. The XMP packet still
+  declines the same claim, for the second of the two reasons it had: nothing in
+  it may be read off anything but the record, or two stamps of one unchanged
+  record would render different bytes across a bump.
 - **A dark ground, and colours that are named once** (#240). `DetailPane`
   already put an image on `#1a1a1a`; everything around that stage was light, so
   the grid — where a selection is actually made, hundreds of thumbnails at a
@@ -3799,6 +3839,13 @@ and this project adheres to
   renderings inside one build, which cannot see a difference that moves both
   sides together; it now pins the toolkit attribute literally.
 
+  The manifest half did not stay that way, and both paragraphs above describe
+  the tree between this change and v0.1.0 rather than the release they sit
+  under: giving the workspace a number that distinguishes releases is the
+  condition the comment left in `claim_generator_info`'s place named, so the
+  field and a test that can fail came back with it (#242). The packet half
+  stands, for the second of the two reasons this entry gives it.
+
 - **The series key no longer borrows its canonical form from a dependency**
   (#14) — `series::render` hashes a `serde_json::Value` parsed out of a
   container, and was taking its nested key order from whichever map type
@@ -4572,4 +4619,5 @@ and this project adheres to
   (default 14); a malformed or non-positive value is refused at startup rather
   than silently replaced.
 
-[Unreleased]: https://github.com/ynishi/asterism/commits/main
+[Unreleased]: https://github.com/ynishi/asterism/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ynishi/asterism/releases/tag/v0.1.0

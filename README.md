@@ -9,9 +9,13 @@ hover-burst looks like.
 
 ## Status
 
-- **v0.0.0** — the initial cut is in place. Domain, application, SQLite schema,
-  job pipeline (`cover_gen` / `auto_tag` / `edge_rebuild`), the HTTP API server,
-  and the Tauri grid UI with hover-burst rendering all run end-to-end.
+- **v0.1.0** — the team plane is wired, visible, and licensed: a team hosts the
+  forge, a member's client promotes an asset onto a team-hosted line, and the
+  Forge and Team surfaces are in the app. The local-first half it stands on —
+  domain, application, SQLite schema, the job pipeline (`cover_gen` / `auto_tag`
+  / `edge_rebuild`), the HTTP API server, and the Tauri grid UI with hover-burst
+  rendering — runs end-to-end, and the release workflow signs and notarizes the
+  macOS build.
 - Nothing is published to crates.io (every crate has `publish = false`).
 - Data is isolated by local profile: release builds default to
   `~/.asterism/profiles/dogfood/`, debug builds to `~/.asterism/profiles/dev/`,
@@ -200,8 +204,11 @@ defined in [PUBLIC_DEVELOPMENT.md](PUBLIC_DEVELOPMENT.md).
 
 ## Licence
 
-Licensing is declared **per crate** (the `license` field in each crate's
-`Cargo.toml`). The local-first core is licensed under either of
+Licensing is **per crate**, and stated in two places on purpose: the workspace
+manifest carries the permissive terms once and every crate on that plane
+inherits them, while each crate that is licensed otherwise says so at its own
+`license` field. `just licence-check` holds the tree to that arrangement. The
+local-first core is licensed under either of
 
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
