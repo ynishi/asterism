@@ -24,7 +24,7 @@ use asterism_core::domain::merge_plan::MergePlan;
 use asterism_core::domain::repository::{
     AssetRepository, ChapterScanCandidate, DimsCandidate, DimsProbe, DimsScope, DimsWritePolicy,
     DuplicateGroup, FingerprintedMaterial, FoldOutcome, FoldRefusal, FoldReport,
-    MaterialFingerprint, MergeOutcome, SourceLookupScope, UnhashedMaterial,
+    MaterialFingerprint, MergeOutcome, PerceptualPrint, SourceLookupScope, UnhashedMaterial,
 };
 use asterism_core::domain::session::{Session, SessionMetadata};
 use asterism_core::domain::source_locator::SourceLocator;
@@ -4586,6 +4586,45 @@ impl AssetRepository for SqliteAssetRepository {
                 },
             )
             .collect()
+    }
+
+    async fn scan_perceptual_prints(
+        &self,
+        persona_id: &PersonaId,
+    ) -> Result<Vec<PerceptualPrint>, DomainError> {
+        let persona = *persona_id.as_uuid();
+        let rows: Vec<(Uuid, String)> = self
+            .isle
+            .call(move |conn| {
+                // Trashed and folded assets are excluded, matching the
+                // windowed rebuild's candidate query: an edge is drawn
+                // between things a person can see, and a fold has
+                // already answered the question this kind asks.
+                //
+                // The partial index over the value covers this scan.
+                let mut stmt = conn.prepare(
+                    "SELECT m.asset_id, m.perceptual_hash \
+                       FROM material m \
+                       JOIN asset a ON a.id = m.asset_id \
+                      WHERE a.persona_id = ?1 \
+                        AND a.trashed_at IS NULL \
+                        AND a.folded_into IS NULL \
+                        AND m.ord = 0 \
+                        AND m.perceptual_hash IS NOT NULL \
+                      ORDER BY m.asset_id",
+                )?;
+                stmt.query_map(params![persona], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<Result<_, _>>()
+            })
+            .await
+            .map_err(infra_err)?;
+        Ok(rows
+            .into_iter()
+            .map(|(asset_id, value)| PerceptualPrint {
+                asset_id: AssetId::from_uuid(asset_id),
+                value,
+            })
+            .collect())
     }
 
     async fn scan_chapter_scan_candidates(

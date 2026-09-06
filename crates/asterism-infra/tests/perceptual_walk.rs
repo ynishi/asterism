@@ -184,6 +184,76 @@ async fn the_answer_reads_back_off_the_material() {
     );
 }
 
+/// What the rebuild's input leaves out, and why each exclusion is
+/// there.
+///
+/// An edge is drawn between things a person can open. A trashed asset
+/// is not one, a folded asset has already been answered by the fold,
+/// and another persona's library is a different library. A row with no
+/// stored value has nothing to compare. The `ord = 0` filter is the
+/// boundary duplicate detection draws for the same reason: an edge is
+/// a claim about two assets, not about two files inside them.
+#[tokio::test]
+async fn the_print_scan_reads_only_what_an_edge_may_point_at() {
+    let (isle, _driver) = open_and_migrate_in_memory().await.unwrap();
+    let assets = SqliteAssetRepository::new(isle.clone());
+    let persona = seed_persona(&isle).await;
+    let stranger = seed_persona(&isle).await;
+
+    let value = "p1-dhash:0123456789abcdef0123456789abcdef";
+    let printed = |repo: &SqliteAssetRepository, id| {
+        let repo = repo.clone();
+        async move {
+            repo.set_material_perceptual_hash(&id, 0, &Measurement::computed(value.into()))
+                .await
+                .unwrap();
+        }
+    };
+
+    let kept = row_declaring(&assets, persona, "/pics/kept.png", Some("image/png")).await;
+    let unmeasured = row_declaring(&assets, persona, "/pics/blank.png", Some("image/png")).await;
+    let trashed = row_declaring(&assets, persona, "/pics/gone.png", Some("image/png")).await;
+    let folded = row_declaring(&assets, persona, "/pics/folded.png", Some("image/png")).await;
+    let elsewhere = row_declaring(&assets, stranger, "/pics/other.png", Some("image/png")).await;
+
+    printed(&assets, kept.id).await;
+    printed(&assets, trashed.id).await;
+    printed(&assets, folded.id).await;
+    printed(&assets, elsewhere.id).await;
+    // `unmeasured` deliberately gets none.
+
+    assets.trash(&trashed.id, Utc::now()).await.unwrap();
+    let (folded_id, keeper) = (*folded.id.as_uuid(), *kept.id.as_uuid());
+    isle.call(move |conn| {
+        conn.execute(
+            "UPDATE asset SET folded_into = ?2 WHERE id = ?1",
+            rusqlite::params![folded_id, keeper],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+
+    let prints = assets.scan_perceptual_prints(&persona).await.unwrap();
+    assert_eq!(
+        prints.iter().map(|p| p.asset_id).collect::<Vec<_>>(),
+        vec![kept.id],
+        "the trashed, the folded, the unmeasured and another persona's are all out"
+    );
+    assert_eq!(prints[0].value, value, "the value arrives as it is stored");
+
+    // The unmeasured row is in the library and simply has no answer
+    // yet — it is still the walk's to offer.
+    let pending = assets
+        .scan_materials_without_perceptual_hash(None, 16)
+        .await
+        .unwrap();
+    assert_eq!(
+        pending.iter().map(|m| m.asset_id).collect::<Vec<_>>(),
+        vec![unmeasured.id]
+    );
+}
+
 /// The three exact axes are untouched by a perceptual write. They are
 /// what duplicate detection reads, and a fingerprint that reached them
 /// would put an approximate claim in front of a fold.

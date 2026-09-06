@@ -253,6 +253,15 @@ impl EdgeRepository for SqliteEdgeRepository {
             .await
     }
 
+    async fn replace_near_duplicate_edges_of(
+        &self,
+        asset_id: &AssetId,
+        edges: Vec<ConstellationEdge>,
+    ) -> Result<(), DomainError> {
+        self.replace_owned_kinds(asset_id, edges, EdgeKind::near_duplicate_synth_kinds())
+            .await
+    }
+
     async fn add_edges(&self, edges: Vec<ConstellationEdge>) -> Result<(), DomainError> {
         if edges.is_empty() {
             return Ok(());
@@ -491,6 +500,90 @@ mod tests {
             .map(|e| e.kind)
             .collect();
         assert_eq!(kinds, vec![EdgeKind::TimeProximity]);
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// Three rebuilds now share the `edge` table and each delete is
+    /// scoped to its own subset. The near-duplicate population is the
+    /// one that makes this load-bearing rather than tidy: it is derived
+    /// from a value no model produced and survives a profile that binds
+    /// none, so a visual rebuild — which runs only when a model is
+    /// bound, and clears its set when one is not — would otherwise take
+    /// these edges with it the moment a model was removed.
+    #[tokio::test]
+    async fn each_rebuild_deletes_only_its_own_edges() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteEdgeRepository::new(isle.clone());
+        let (a, b) = seed_two_assets(&isle).await;
+
+        async fn slugs(repo: &SqliteEdgeRepository, of: &AssetId) -> Vec<String> {
+            let mut found: Vec<String> = repo
+                .edges_of(of, None, 10)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|e| e.kind.as_str().to_string())
+                .collect();
+            found.sort();
+            found
+        }
+
+        repo.replace_synth_edges_of(
+            &b,
+            vec![ConstellationEdge::new(b, a, EdgeKind::TimeProximity).unwrap()],
+        )
+        .await
+        .unwrap();
+        repo.replace_visual_edges_of(
+            &b,
+            vec![ConstellationEdge::new(b, a, EdgeKind::VisualSimilarity).unwrap()],
+        )
+        .await
+        .unwrap();
+        repo.replace_near_duplicate_edges_of(
+            &b,
+            vec![ConstellationEdge::new(b, a, EdgeKind::NearDuplicate).unwrap()],
+        )
+        .await
+        .unwrap();
+        repo.add_edges(vec![
+            ConstellationEdge::new(b, a, EdgeKind::DerivedFrom).unwrap(),
+        ])
+        .await
+        .unwrap();
+        assert_eq!(
+            slugs(&repo, &b).await,
+            vec![
+                "derived_from",
+                "near_duplicate",
+                "time_proximity",
+                "visual_similarity"
+            ]
+        );
+
+        // Each rebuild clearing its own set leaves the other three
+        // exactly where they were.
+        repo.replace_near_duplicate_edges_of(&b, vec![])
+            .await
+            .unwrap();
+        assert_eq!(
+            slugs(&repo, &b).await,
+            vec!["derived_from", "time_proximity", "visual_similarity"]
+        );
+
+        repo.replace_visual_edges_of(&b, vec![]).await.unwrap();
+        assert_eq!(
+            slugs(&repo, &b).await,
+            vec!["derived_from", "time_proximity"]
+        );
+
+        repo.replace_synth_edges_of(&b, vec![]).await.unwrap();
+        assert_eq!(
+            slugs(&repo, &b).await,
+            vec!["derived_from"],
+            "what a person asserted outlives every rebuild"
+        );
 
         driver.shutdown().await.unwrap();
     }

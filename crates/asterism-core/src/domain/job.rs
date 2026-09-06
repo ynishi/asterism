@@ -395,8 +395,23 @@ pub enum JobKind {
     /// second one.
     ///
     /// Off the ingest critical path for the reason the fingerprint walk
-    /// is: it opens and decodes the original.
+    /// is: it opens and decodes the original. A completed pass
+    /// chain-enqueues
+    /// [`NearDuplicateRebuild`](Self::NearDuplicateRebuild) for the
+    /// same asset.
     PerceptualHash,
+    /// Recomputes one asset's near-duplicate edges from stored
+    /// perceptual fingerprints (#250) — a third rebuild beside
+    /// [`EdgeRebuild`](Self::EdgeRebuild) and
+    /// [`VisualEdgeRebuild`](Self::VisualEdgeRebuild), owning
+    /// `near_duplicate_synth_kinds` and nothing else.
+    ///
+    /// Payload: `{ "asset_id": "<uuid>" }`. The scan is the whole
+    /// persona's stored fingerprints, deliberately not the ±48 h
+    /// candidate window; only pairs within the measured distance are
+    /// materialised, and an asset with no fingerprint of its own has
+    /// its edges cleared rather than left behind.
+    NearDuplicateRebuild,
     /// Encodes an image's pixels into the stored feature vector the
     /// visual layer (#112) retrieves by.
     ///
@@ -499,6 +514,7 @@ impl JobKind {
             Self::ChapterScan => "chapter_scan",
             Self::DisclosureStamp => "disclosure_stamp",
             Self::PerceptualHash => "perceptual_hash",
+            Self::NearDuplicateRebuild => "near_duplicate_rebuild",
             Self::VisualFeature => "visual_feature",
             Self::VisualEdgeRebuild => "visual_edge_rebuild",
             Self::VisualTagSuggest => "visual_tag_suggest",
@@ -532,6 +548,7 @@ impl JobKind {
             "chapter_scan" => Ok(Self::ChapterScan),
             "disclosure_stamp" => Ok(Self::DisclosureStamp),
             "perceptual_hash" => Ok(Self::PerceptualHash),
+            "near_duplicate_rebuild" => Ok(Self::NearDuplicateRebuild),
             "visual_feature" => Ok(Self::VisualFeature),
             "visual_edge_rebuild" => Ok(Self::VisualEdgeRebuild),
             "visual_tag_suggest" => Ok(Self::VisualTagSuggest),

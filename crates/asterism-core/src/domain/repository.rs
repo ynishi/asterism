@@ -569,6 +569,27 @@ pub struct UnhashedMaterial {
     pub mime: Option<MimeType>,
 }
 
+/// One asset's stored perceptual fingerprint — a row of the
+/// near-duplicate rebuild's input (#250).
+///
+/// Two fields rather than the three its siblings carry, because this
+/// walk reads a value that has already been computed rather than
+/// opening bytes: there is nothing to decode, so no locator and no
+/// mime. `ord` is absent for the same reason the port only returns
+/// primaries.
+///
+/// The value arrives as it is stored, tag and all. Parsing it is the
+/// caller's, because the caller owns the algorithm — a value carrying
+/// a tag this build does not implement is a row to pass over, not a
+/// row to fail the rebuild on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PerceptualPrint {
+    /// The asset the fingerprint was taken from.
+    pub asset_id: AssetId,
+    /// The stored value, algorithm tag included.
+    pub value: String,
+}
+
 /// One material no chapter reading has reached yet — the unit the
 /// `ChapterScan` backfill walks.
 ///
@@ -1455,6 +1476,23 @@ pub trait AssetRepository: Send + Sync {
         after: Option<(&AssetId, u32)>,
         limit: u32,
     ) -> Result<Vec<UnhashedMaterial>, DomainError>;
+
+    /// Every stored perceptual fingerprint in one persona, primary
+    /// materials only — the whole input to the near-duplicate rebuild
+    /// (#250).
+    ///
+    /// The persona's whole history rather than a candidate window, for
+    /// the reason the visual scan reads the whole history: a copy of a
+    /// picture can arrive years after the original, and a window would
+    /// answer only for the pairs that happened to arrive together.
+    ///
+    /// `ord = 0` only. An edge is a claim about two assets, and what
+    /// stands for an asset is its primary material — the same boundary
+    /// duplicate detection draws when it declines every `ord > 0` row.
+    async fn scan_perceptual_prints(
+        &self,
+        persona_id: &PersonaId,
+    ) -> Result<Vec<PerceptualPrint>, DomainError>;
 
     /// Materials whose embedded text nobody has looked for yet
     /// (`meta_text IS NULL`), oldest asset first, at most `limit` of
@@ -2572,6 +2610,21 @@ pub trait EdgeRepository: Send + Sync {
     /// Implementations must ignore any edge outside the visual subset
     /// rather than letting a windowed or asserted kind ride in.
     async fn replace_visual_edges_of(
+        &self,
+        asset_id: &AssetId,
+        edges: Vec<ConstellationEdge>,
+    ) -> Result<(), DomainError>;
+
+    /// Atomically replaces the **near-duplicate** synth edges
+    /// originating from `asset_id` — the unit of work for that rebuild
+    /// (#250).
+    ///
+    /// A third scope beside the two above, for the reason
+    /// [`EdgeKind::near_duplicate_synth_kinds`] states: this population
+    /// is derived from a value no model produced and survives a profile
+    /// that binds none, so a model install or removal must not take it
+    /// along. Implementations must ignore any edge outside the subset.
+    async fn replace_near_duplicate_edges_of(
         &self,
         asset_id: &AssetId,
         edges: Vec<ConstellationEdge>,

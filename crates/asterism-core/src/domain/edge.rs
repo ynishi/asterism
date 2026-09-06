@@ -157,6 +157,33 @@ pub enum EdgeKind {
     ///
     /// [replace-visual]: crate::domain::repository::EdgeRepository::replace_visual_edges_of
     VisualSimilarity,
+    /// The two are the same picture, transformed (#250) — proposed from
+    /// perceptual fingerprints, never asserted by anyone.
+    ///
+    /// Synthetic and disposable, with a **third** owner. Neither the
+    /// windowed rebuild nor the visual one may delete it: it is derived
+    /// from something both are blind to, and it outlives a profile that
+    /// binds no model at all, which the visual population does not. Its
+    /// scope is
+    /// [`near_duplicate_synth_kinds`](Self::near_duplicate_synth_kinds).
+    ///
+    /// **Not [`IdenticalTo`](Self::IdenticalTo), and that is the whole
+    /// point.** That kind says two files hold the same bytes, is
+    /// asserted when they are fingerprinted, and is what a fold acts
+    /// on. This one says two pictures reduce to nearly the same grid,
+    /// which is a claim no fold may rest on — and cannot, because the
+    /// value it is derived from carries a tag
+    /// [`is_duplicate_key`](crate::domain::content_hash::is_duplicate_key)
+    /// refuses.
+    ///
+    /// [`ConstellationEdge::weight`] holds a similarity in `0.0..=1.0`
+    /// rather than the Hamming distance it is computed from, so that
+    /// the burst's sort key means the same thing here as everywhere
+    /// else: higher is closer. [`ConstellationEdge::label`] holds the
+    /// fingerprint's algorithm tag, so an edge says which definition
+    /// produced it and a later definition's edges are told apart from
+    /// this one's rather than mixed in with them.
+    NearDuplicate,
 }
 
 impl EdgeKind {
@@ -171,6 +198,7 @@ impl EdgeKind {
             Self::DerivedFrom => "derived_from",
             Self::IdenticalTo => "identical_to",
             Self::VisualSimilarity => "visual_similarity",
+            Self::NearDuplicate => "near_duplicate",
         }
     }
 
@@ -219,7 +247,8 @@ impl EdgeKind {
             | Self::KeywordOverlap
             | Self::CoPresence
             | Self::Cadence
-            | Self::VisualSimilarity => true,
+            | Self::VisualSimilarity
+            | Self::NearDuplicate => true,
             Self::Reference | Self::DerivedFrom | Self::IdenticalTo => false,
         }
     }
@@ -227,7 +256,8 @@ impl EdgeKind {
     /// Every disposable kind, for reasoning about the population as a
     /// whole. **Not** a delete scope: each rebuild deletes only its own
     /// subset ([`windowed_synth_kinds`](Self::windowed_synth_kinds) /
-    /// [`visual_synth_kinds`](Self::visual_synth_kinds)).
+    /// [`visual_synth_kinds`](Self::visual_synth_kinds) /
+    /// [`near_duplicate_synth_kinds`](Self::near_duplicate_synth_kinds)).
     pub fn synth_kinds() -> &'static [EdgeKind] {
         &[
             Self::TimeProximity,
@@ -235,6 +265,7 @@ impl EdgeKind {
             Self::CoPresence,
             Self::Cadence,
             Self::VisualSimilarity,
+            Self::NearDuplicate,
         ]
     }
 
@@ -262,6 +293,23 @@ impl EdgeKind {
         &[Self::VisualSimilarity]
     }
 
+    /// The kinds the near-duplicate rebuild owns — recomputed from
+    /// stored perceptual fingerprints over the whole persona history.
+    /// This is the delete scope of
+    /// [`EdgeRepository::replace_near_duplicate_edges_of`][port].
+    ///
+    /// Its own scope rather than a second entry in
+    /// [`visual_synth_kinds`](Self::visual_synth_kinds), because the
+    /// two rebuilds do not run together: the visual one needs a bound
+    /// model and skips without it, and sharing a scope would have a
+    /// model install — or its removal — quietly take these edges with
+    /// it. They are derived from a value no model produced.
+    ///
+    /// [port]: crate::domain::repository::EdgeRepository::replace_near_duplicate_edges_of
+    pub fn near_duplicate_synth_kinds() -> &'static [EdgeKind] {
+        &[Self::NearDuplicate]
+    }
+
     /// Parses a slug (unknown values yield a validation error).
     pub fn parse(slug: &str) -> Result<Self, DomainError> {
         match slug {
@@ -273,6 +321,7 @@ impl EdgeKind {
             "derived_from" => Ok(Self::DerivedFrom),
             "identical_to" => Ok(Self::IdenticalTo),
             "visual_similarity" => Ok(Self::VisualSimilarity),
+            "near_duplicate" => Ok(Self::NearDuplicate),
             other => Err(DomainError::Validation(format!(
                 "unknown edge kind: {other:?}"
             ))),
@@ -579,19 +628,32 @@ mod tests {
         assert!(EdgeKind::VisualSimilarity.is_synth());
     }
 
-    /// The two rebuilds own disjoint subsets whose union is exactly the
-    /// synth population — a kind in both would be deleted by a job that
-    /// cannot recompute it, a kind in neither would never be cleaned.
+    /// The rebuilds own disjoint subsets whose union is exactly the
+    /// synth population — a kind in two of them would be deleted by a
+    /// job that cannot recompute it, a kind in none would never be
+    /// cleaned.
+    ///
+    /// Written over the list of scopes rather than over a pair, so
+    /// that a fourth rebuild is one entry here rather than a rewrite —
+    /// and so that adding a scope without listing it fails as loudly as
+    /// adding a kind without an owner. It was two until #250 added the
+    /// near-duplicate population, which is derived from a value no
+    /// model produced and so could not share the visual scope.
     #[test]
-    fn the_two_rebuild_scopes_partition_the_synth_kinds() {
-        for kind in EdgeKind::windowed_synth_kinds() {
-            assert!(!EdgeKind::visual_synth_kinds().contains(kind));
+    fn the_rebuild_scopes_partition_the_synth_kinds() {
+        let scopes = [
+            EdgeKind::windowed_synth_kinds(),
+            EdgeKind::visual_synth_kinds(),
+            EdgeKind::near_duplicate_synth_kinds(),
+        ];
+        for (i, scope) in scopes.iter().enumerate() {
+            for other in &scopes[i + 1..] {
+                for kind in *scope {
+                    assert!(!other.contains(kind), "{kind:?} is owned by two rebuilds");
+                }
+            }
         }
-        let union: Vec<EdgeKind> = EdgeKind::windowed_synth_kinds()
-            .iter()
-            .chain(EdgeKind::visual_synth_kinds())
-            .copied()
-            .collect();
+        let union: Vec<EdgeKind> = scopes.iter().flat_map(|s| s.iter().copied()).collect();
         assert_eq!(union.len(), EdgeKind::synth_kinds().len());
         for kind in EdgeKind::synth_kinds() {
             assert!(union.contains(kind), "{kind:?} has no owning rebuild");

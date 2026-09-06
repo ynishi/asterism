@@ -21,8 +21,8 @@ use asterism_core::domain::render::render_policy;
 use asterism_core::domain::repository::{
     AssetBodyRepository, AssetCommentRepository, AssetRepository, DimsProbe, DimsScope,
     DimsWritePolicy, EdgeRepository, IndexDoc, JobQueue, MaterialFingerprint, ModalityRepository,
-    SeriesRepository, SourceTextReader, TagEvidenceRepository, TagRepository, TagVectorRepository,
-    TextLocator, ThumbRepository, VisualFeatureRepository,
+    PerceptualPrint, SeriesRepository, SourceTextReader, TagEvidenceRepository, TagRepository,
+    TagVectorRepository, TextLocator, ThumbRepository, VisualFeatureRepository,
 };
 use asterism_core::domain::series::SeriesKey;
 use asterism_core::domain::source_locator::SourceLocator;
@@ -675,7 +675,15 @@ pub async fn perceptual_hash(
         )
         .await?
         {
-            PerceptualOutcome::Measured => measured += 1,
+            PerceptualOutcome::Measured => {
+                measured += 1;
+                // Only the primary feeds the rebuild: an edge is a
+                // claim about two assets, and what stands for an asset
+                // is its primary material.
+                if material.ord == 0 {
+                    enqueue_near_duplicate_rebuild(env, &asset.id).await?;
+                }
+            }
             PerceptualOutcome::Retired => retired += 1,
             PerceptualOutcome::Deferred => deferred += 1,
         }
@@ -683,6 +691,22 @@ pub async fn perceptual_hash(
     Ok(format!(
         "perceptual: measured={measured} retired={retired} deferred={deferred}"
     ))
+}
+
+/// A fresh fingerprint changes one derived answer — which pictures are
+/// copies of this one — so the rebuild chains from the measurement
+/// rather than being scheduled on its own.
+async fn enqueue_near_duplicate_rebuild(
+    env: &JobEnv,
+    asset_id: &AssetId,
+) -> Result<(), DomainError> {
+    env.queue
+        .enqueue(
+            asterism_core::domain::job::JobKind::NearDuplicateRebuild,
+            serde_json::json!({ "asset_id": asset_id.to_string() }),
+        )
+        .await?;
+    Ok(())
 }
 
 /// One page of the perceptual walk; chain-enqueues while pages come
@@ -710,7 +734,12 @@ async fn perceptual_hash_batch(env: &JobEnv) -> Result<String, DomainError> {
         )
         .await?
         {
-            PerceptualOutcome::Measured => measured += 1,
+            PerceptualOutcome::Measured => {
+                measured += 1;
+                if item.ord == 0 {
+                    enqueue_near_duplicate_rebuild(env, &item.asset_id).await?;
+                }
+            }
             PerceptualOutcome::Retired => retired += 1,
             PerceptualOutcome::Deferred => deferred += 1,
         }
@@ -832,6 +861,105 @@ fn perceptual_measurement(decoded: Result<Option<String>, String>) -> Measuremen
         Ok(None) => Measurement::bare(MeasurementStatus::EmptySpan),
         Ok(Some(value)) => Measurement::computed(value),
     }
+}
+
+/// Bounded set of near-duplicate edges one asset carries.
+///
+/// A cap on what a burst can show rather than a claim about how many
+/// copies exist: a library holding more than this many copies of one
+/// picture has a question no constellation answers, and sixteen
+/// already overflows what a person reads at a glance. Ordered by
+/// distance, so what is cut is the least alike.
+const NEAR_DUPLICATE_TOP_K: usize = 16;
+
+/// Which of a persona's fingerprints are near `mine`, closest first
+/// and bounded — the whole of the rebuild's decision, as a function of
+/// its inputs.
+///
+/// A value whose tag this build does not implement is passed over
+/// rather than failed on: it was written under a definition whose
+/// distances mean something else, and comparing across the two would
+/// be arithmetic on unrelated numbers.
+fn near_duplicates_of(
+    mine: u128,
+    self_id: &AssetId,
+    prints: Vec<PerceptualPrint>,
+) -> Vec<(AssetId, u32)> {
+    let mut near: Vec<(AssetId, u32)> = prints
+        .into_iter()
+        .filter(|p| p.asset_id != *self_id)
+        .filter_map(|p| {
+            asterism_vision::perceptual::parse(&p.value).map(|bits| {
+                (
+                    p.asset_id,
+                    asterism_vision::perceptual::distance(mine, bits),
+                )
+            })
+        })
+        .filter(|(_, d)| *d <= asterism_vision::perceptual::NEAR_DUPLICATE_DISTANCE)
+        .collect();
+    // Stable, so equal distances keep the scan's `asset_id` order and
+    // a rebuild over unchanged inputs writes the same set twice.
+    near.sort_by_key(|(_, d)| *d);
+    near.truncate(NEAR_DUPLICATE_TOP_K);
+    near
+}
+
+/// Recomputes one asset's near-duplicate edges from stored perceptual
+/// fingerprints (#250) — the third rebuild, owning
+/// `near_duplicate_synth_kinds` and nothing else.
+///
+/// Scans the whole persona rather than a window, for the reason the
+/// visual rebuild does: a copy can arrive years after its original.
+/// Needs no model, so unlike that one it is never gated on one.
+pub async fn near_duplicate_rebuild(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    let Some(asset) = load_target(env, payload).await? else {
+        return Ok("asset gone, skipped".into());
+    };
+    // The asset's own fingerprint is the query. With none there is
+    // nothing to be near, and the empty replace is what clears edges a
+    // previous pass drew before the value was retired.
+    let mine = asset
+        .materials
+        .iter()
+        .find(|m| m.ord == 0)
+        .and_then(|m| m.perceptual_hash.as_deref())
+        .and_then(asterism_vision::perceptual::parse);
+    let Some(mine) = mine else {
+        env.deps
+            .edges
+            .replace_near_duplicate_edges_of(&asset.id, vec![])
+            .await?;
+        return Ok("no stored fingerprint; near-duplicate edges cleared".into());
+    };
+    let prints = env
+        .deps
+        .assets
+        .scan_perceptual_prints(&asset.persona_id)
+        .await?;
+    let near = near_duplicates_of(mine, &asset.id, prints);
+    let label = asterism_vision::perceptual::PERCEPTUAL_DIGEST_PREFIX.trim_end_matches(':');
+    let edges = near
+        .into_iter()
+        .map(|(to, distance)| {
+            let mut edge = ConstellationEdge::new(asset.id, to, EdgeKind::NearDuplicate)?;
+            // A similarity rather than the count it is computed from,
+            // so the burst's sort key means what it means everywhere
+            // else: higher is closer.
+            edge.weight = Some(1.0 - (distance as f32 / 128.0));
+            edge.label = Some(label.to_string());
+            Ok(edge)
+        })
+        .collect::<Result<Vec<_>, DomainError>>()?;
+    let count = edges.len();
+    env.deps
+        .edges
+        .replace_near_duplicate_edges_of(&asset.id, edges)
+        .await?;
+    Ok(format!("{count} near-duplicate edge(s) rebuilt"))
 }
 
 /// Similarity floor below which a tag is not proposed (#112, P3).
@@ -4315,6 +4443,64 @@ mod tests {
             fingerprint_bytes(b"not a picture").is_err(),
             "bytes that are not an image are the decoder's answer, not a panic"
         );
+    }
+
+    fn print_id(n: u128) -> AssetId {
+        AssetId::from_uuid(uuid::Uuid::from_u128(n))
+    }
+
+    fn print_of(n: u128, bits: u128) -> PerceptualPrint {
+        PerceptualPrint {
+            asset_id: print_id(n),
+            value: format!("p1-dhash:{bits:032x}"),
+        }
+    }
+
+    /// What the rebuild keeps: nearer than the measured distance, not
+    /// the asset itself, and spelled in a definition this build
+    /// implements.
+    ///
+    /// The last of those is the one that would go wrong quietly. A
+    /// value written under a later definition parses to a number, and
+    /// comparing it with this one's would be arithmetic on unrelated
+    /// quantities — so it is dropped rather than measured.
+    #[test]
+    fn the_rebuild_keeps_the_close_and_readable_pairs() {
+        let prints = vec![
+            // The asset itself.
+            print_of(1, 0),
+            // One bit apart, and three.
+            print_of(2, 1),
+            print_of(3, 0b111),
+            // Every bit apart: a different picture.
+            print_of(4, u128::MAX),
+            // A definition this build does not implement.
+            PerceptualPrint {
+                asset_id: print_id(5),
+                value: "p2-dct:00000000000000000000000000000000".into(),
+            },
+        ];
+
+        assert_eq!(
+            near_duplicates_of(0, &print_id(1), prints),
+            vec![(print_id(2), 1), (print_id(3), 3)],
+            "closest first, with the asset itself, the stranger and the \
+             unreadable tag all dropped"
+        );
+    }
+
+    /// The bound is on what a burst shows, not a claim about how many
+    /// copies exist — so it cuts, and what it cuts is the least alike.
+    #[test]
+    fn the_rebuild_bounds_what_one_asset_carries() {
+        // Every candidate exactly one bit from the query, so all are
+        // near and none is nearer: what survives is the cap itself.
+        let prints: Vec<_> = (0..NEAR_DUPLICATE_TOP_K + 4)
+            .map(|i| print_of(i as u128 + 100, 1u128 << i))
+            .collect();
+        let near = near_duplicates_of(0, &print_id(1), prints);
+        assert_eq!(near.len(), NEAR_DUPLICATE_TOP_K);
+        assert!(near.iter().all(|(_, d)| *d == 1));
     }
 
     const DIALOGUE_BODY: &str = "First reply line\nSecond reply line\nThird reply line";
