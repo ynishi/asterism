@@ -264,15 +264,19 @@ async fn a_perceptual_write_leaves_the_exact_axes_alone() {
     let persona = seed_persona(&isle).await;
 
     let picture = row_declaring(&assets, persona, "/pics/a.png", Some("image/png")).await;
-    let digest = format!("sha256:{}", "a".repeat(64));
+    // A digest on each axis, so the assertion below covers all three
+    // rather than the one the fixture happened to fill.
+    let file = format!("sha256:{}", "a".repeat(64));
+    let region = format!("cr1-sha256:{}", "b".repeat(64));
+    let meta = format!("m1-sha256:{}", "c".repeat(64));
     assets
         .set_material_fingerprint(
             &picture.id,
             0,
             &asterism_core::domain::repository::MaterialFingerprint {
-                file: Measurement::computed(digest.clone()),
-                content: Measurement::bare(MeasurementStatus::EmptySpan),
-                meta: Measurement::bare(MeasurementStatus::EmptySpan),
+                file: Measurement::computed(file.clone()),
+                content: Measurement::computed(region.clone()),
+                meta: Measurement::computed(meta.clone()),
                 meta_kv: None,
                 meta_raw: None,
                 meta_text: None,
@@ -291,13 +295,25 @@ async fn a_perceptual_write_leaves_the_exact_axes_alone() {
         .unwrap();
 
     let fresh = assets.find(&picture.id).await.unwrap().unwrap();
+    let m = &fresh.materials[0];
     assert_eq!(
-        fresh.materials[0].content_hash,
-        Some(digest),
-        "the artefact axis survives a perceptual write"
+        (
+            m.content_hash.as_deref(),
+            m.content_region_hash.as_deref(),
+            m.meta_hash.as_deref()
+        ),
+        (
+            Some(file.as_str()),
+            Some(region.as_str()),
+            Some(meta.as_str())
+        ),
+        "every exact axis survives a perceptual write"
     );
-    assert_eq!(
-        fresh.materials[0].content_hash_status,
-        MeasurementStatus::Computed
-    );
+    for status in [
+        m.content_hash_status,
+        m.content_region_hash_status,
+        m.meta_hash_status,
+    ] {
+        assert_eq!(status, MeasurementStatus::Computed);
+    }
 }
