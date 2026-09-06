@@ -67,8 +67,9 @@
   import { sharedCatalog } from "./lib/stores/shared.svelte";
   import type { ForgeProjectedEntry } from "./lib/forge-projection";
   import { promptCatalog } from "./lib/stores/prompt.svelte";
-  import type { ForgeOpDto, ForgeRoundDto } from "./bindings";
+  import type { ForgeOpDto } from "./bindings";
   import { endingWord } from "./lib/formatters";
+  import ForgeRoundLog from "./ForgeRoundLog.svelte";
 
   const work = $derived(sharedCatalog.work);
   const ended = $derived(work !== null && work.close !== null);
@@ -201,20 +202,6 @@
 
   function when(ms: number): string {
     return new Date(ms).toLocaleString();
-  }
-
-  /** What to call an entry an operation names — the op's own name when
-   *  it carries one, and otherwise whatever the fold has for it. */
-  function opName(op: ForgeOpDto): string {
-    return (
-      op.name ??
-      projected.find((row) => row.entryId === op.entry_id)?.name ??
-      op.entry_id
-    );
-  }
-
-  function summarise(round: ForgeRoundDto): string {
-    return `${round.ops.length} ${round.ops.length === 1 ? "operation" : "operations"}`;
   }
 </script>
 
@@ -412,37 +399,16 @@
     </p>
   {/if}
 
-  <!-- The log, oldest first: the order the chain holds and the order
-       somebody reads a piece of work in. -->
-  <h4>What was asked for</h4>
-  <ol class="rounds">
-    {#each work.rounds as round (round.id)}
-      <li>
-        <p class="round-head">
-          <span>{summarise(round)}</span>
-          <span class="quiet">{when(round.at_ms)}</span>
-        </p>
-        {#if round.note !== null}
-          <p class="quiet note">{round.note}</p>
-        {/if}
-        <ul class="ops">
-          {#each round.ops as op (op.entry_id + op.kind)}
-            <li>
-              <!-- The verb is stated rather than read off what moved:
-                   an operation carries one, which a change row does
-                   not. -->
-              <span class="kind">{op.kind}</span>
-              <span class="op-name">{opName(op)}</span>
-            </li>
-          {/each}
-        </ul>
-      </li>
-    {/each}
-  </ol>
-
-  {#if work.rounds.length === 0}
-    <p class="quiet">Nothing asked for yet.</p>
-  {/if}
+  <!-- The log, factored out to `ForgeRoundLog` (#217): identical to
+       `ForgeWork`'s copy except for the "say something" verb, which
+       this plane does not carry (no `onTalkAboutRound`/`onTalkAboutOp`
+       — the member's client has no thread commands), and the divider
+       colour, which the two files never shared either. -->
+  <ForgeRoundLog
+    rounds={work.rounds}
+    {projected}
+    dividerColor="var(--wash-up-strong)"
+  />
 
   {#if !ended}
     <div class="close">
@@ -472,8 +438,7 @@
     font-size: 0.82rem;
     font-weight: 500;
   }
-  ul,
-  ol {
+  ul {
     list-style: none;
     margin: 0;
     padding: 0;
@@ -484,15 +449,15 @@
     margin: 0.3rem 0;
   }
   .error {
-    color: #ff9d9d;
+    color: var(--danger-ink);
     opacity: 1;
   }
   .warn {
-    border-left: 2px solid rgba(220, 170, 90, 0.7);
+    border-left: 2px solid var(--warning-line);
     padding-left: 0.5rem;
   }
   .collisions {
-    border-left: 2px solid rgba(220, 90, 90, 0.6);
+    border-left: 2px solid var(--danger-line);
     padding-left: 0.5rem;
     margin: 0.5rem 0;
   }
@@ -506,7 +471,7 @@
     align-items: baseline;
     gap: 0.5rem;
     font-size: 0.78rem;
-    border-left: 2px solid rgba(255, 255, 255, 0.3);
+    border-left: 2px solid var(--line-strong);
     padding-left: 0.5rem;
   }
   .said button {
@@ -571,33 +536,12 @@
   .close button,
   .quiet button {
     background: none;
-    border: 1px solid rgba(255, 255, 255, 0.25);
+    border: 1px solid var(--line-strong);
     border-radius: 0.2rem;
     color: inherit;
     cursor: pointer;
     font-size: 0.72rem;
     padding: 0.1rem 0.4rem;
-  }
-  .rounds > li {
-    border-top: 1px solid rgba(255, 255, 255, 0.14);
-    padding: 0.4rem 0;
-  }
-  .round-head {
-    display: flex;
-    gap: 0.6rem;
-    margin: 0;
-    font-size: 0.78rem;
-  }
-  .ops li {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.78rem;
-    padding: 0.15rem 0;
-  }
-  .kind {
-    min-width: 4rem;
-    opacity: 0.75;
   }
   .op-name {
     overflow: hidden;
@@ -621,7 +565,7 @@
     gap: 0.35rem;
     margin-top: 1rem;
     padding-top: 0.7rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    border-top: 1px solid var(--line);
   }
   .new-work label,
   .close label {
@@ -634,7 +578,7 @@
   .new-work button {
     align-self: flex-start;
     background: none;
-    border: 1px solid rgba(255, 255, 255, 0.25);
+    border: 1px solid var(--line-strong);
     border-radius: 0.2rem;
     color: inherit;
     cursor: pointer;

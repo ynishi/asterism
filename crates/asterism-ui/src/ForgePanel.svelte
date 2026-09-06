@@ -45,6 +45,7 @@
   // says which line, and hands that line down.
   import ForgeWork from "./ForgeWork.svelte";
   import ForgeTalk from "./ForgeTalk.svelte";
+  import TabStrip from "./TabStrip.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
   import { detailRequest } from "./lib/stores/detail-request.svelte";
   import { gridSelection } from "./lib/stores/grid-selection.svelte";
@@ -427,20 +428,21 @@
         {/if}
       </div>
 
-      <div class="tabs" role="tablist">
-        <button
-          role="tab"
-          aria-selected={tab === "contents"}
-          onclick={() => (tab = "contents")}
-        >on the line</button>
-        <button
-          role="tab"
-          aria-selected={tab === "work"}
-          onclick={() => (tab = "work")}
-        >work</button>
-        <button role="tab" aria-selected={tab === "history"} onclick={toHistory}>
-          history
-        </button>
+      <!-- Row shared with `SharedLinesPanel` as `TabStrip` (#217); this
+           file's own CSS values are the ones the component kept. The
+           `ariaLabel` below is not this file's own — it came from
+           `SharedLinesPanel`'s line row, which had one where this row
+           never did. -->
+      <div class="tabs">
+        <TabStrip
+          ariaLabel="What to read about this line"
+          tabs={[
+            { key: "contents", label: "on the line", onSelect: () => (tab = "contents") },
+            { key: "work", label: "work", onSelect: () => (tab = "work") },
+            { key: "history", label: "history", onSelect: toHistory },
+          ]}
+          active={tab}
+        />
       </div>
 
       {#if tab === "contents"}
@@ -605,16 +607,16 @@
     align-items: center;
     gap: 0.6rem;
     font-size: 0.78rem;
-    background: var(--panel-bg, #1b1b1e);
-    color: var(--panel-fg, #e8e8ea);
-    border: 1px solid rgba(128, 128, 128, 0.4);
+    background: var(--panel-bg, var(--surface-stage));
+    color: var(--panel-fg, var(--ink-secondary));
+    border: 1px solid var(--line);
     border-radius: 0.3rem;
-    box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0.3rem 1rem var(--shadow-color-strong);
     padding: 0.5rem 0.7rem;
   }
   .waiting button {
     background: none;
-    border: 1px solid rgba(128, 128, 128, 0.4);
+    border: 1px solid var(--line);
     border-radius: 0.2rem;
     color: inherit;
     cursor: pointer;
@@ -629,7 +631,7 @@
   .drawer-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--wash-down);
     z-index: 60;
     border: 0;
     padding: 0;
@@ -644,9 +646,9 @@
        (#217). */
     width: min(52rem, 96vw);
     overflow-y: auto;
-    background: var(--panel-bg, #1b1b1e);
-    color: var(--panel-fg, #e8e8ea);
-    box-shadow: -0.5rem 0 1.5rem rgba(0, 0, 0, 0.4);
+    background: var(--panel-bg, var(--surface-stage));
+    color: var(--panel-fg, var(--ink-secondary));
+    box-shadow: -0.5rem 0 1.5rem var(--shadow-color-strong);
     padding: 1rem 1.15rem 2rem;
     box-sizing: border-box;
   }
@@ -670,11 +672,12 @@
   }
   .forge {
     display: flex;
-    gap: 1rem;
+    gap: var(--drawer-shell-gap);
     align-items: flex-start;
   }
   .lines {
-    flex: 0 0 12rem;
+    flex: 0 0 var(--drawer-rail-width);
+    min-width: 0;
   }
   .line {
     flex: 1 1 auto;
@@ -716,21 +719,7 @@
     margin-left: auto;
   }
   .tabs {
-    display: flex;
-    gap: 0.8rem;
     margin: 0.6rem 0;
-    border-bottom: 1px solid rgba(128, 128, 128, 0.3);
-  }
-  .tabs button {
-    background: none;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    color: inherit;
-    cursor: pointer;
-    padding: 0.3rem 0;
-  }
-  .tabs button[aria-selected="true"] {
-    border-bottom-color: currentColor;
   }
   .entries {
     display: grid;
@@ -749,7 +738,7 @@
     aspect-ratio: 1;
     object-fit: cover;
     border-radius: 0.2rem;
-    background: rgba(128, 128, 128, 0.15);
+    background: var(--wash-down);
   }
   /* The button is the whole cell — picture and name — and it says at
      rest that it is one: an arrow beside the name, and a frame that
@@ -771,8 +760,8 @@
   }
   .tile:hover,
   .tile:focus-visible {
-    border-color: rgba(128, 128, 128, 0.55);
-    background: rgba(128, 128, 128, 0.12);
+    border-color: var(--line-strong);
+    background: var(--wash-down);
   }
   .open-hint {
     opacity: 0.55;
@@ -786,7 +775,7 @@
     display: grid;
     place-items: center;
     aspect-ratio: 1;
-    border: 1px dashed rgba(128, 128, 128, 0.5);
+    border: 1px dashed var(--line-strong);
     border-radius: 0.2rem;
     opacity: 0.6;
   }
@@ -826,7 +815,7 @@
   }
   .rows-open {
     margin: 0 0 0.4rem 1.2rem;
-    border-left: 1px solid rgba(128, 128, 128, 0.3);
+    border-left: 1px solid var(--line);
     padding-left: 0.6rem;
   }
   .rows-open li {
@@ -872,14 +861,14 @@
   }
   .verbs button {
     background: none;
-    border: 1px solid rgba(128, 128, 128, 0.4);
+    border: 1px solid var(--line);
     border-radius: 0.2rem;
     color: inherit;
     cursor: pointer;
     padding: 0.15rem 0.5rem;
   }
   .verbs button.danger {
-    border-color: rgba(220, 90, 90, 0.6);
+    border-color: var(--danger-line);
   }
   .rule {
     display: flex;
@@ -892,7 +881,7 @@
     align-items: baseline;
     gap: 0.5rem;
     font-size: 0.78rem;
-    border-left: 2px solid rgba(220, 90, 90, 0.6);
+    border-left: 2px solid var(--danger-line);
     padding-left: 0.5rem;
     margin: 0 0 0.8rem;
   }
@@ -911,7 +900,7 @@
     gap: 0.35rem;
     margin-top: 1.1rem;
     padding-top: 0.8rem;
-    border-top: 1px solid rgba(128, 128, 128, 0.3);
+    border-top: 1px solid var(--line);
   }
   .new-line label {
     display: flex;
@@ -931,7 +920,7 @@
     margin: 0.3rem 0;
   }
   .genesis {
-    border-top: 1px solid rgba(128, 128, 128, 0.3);
+    border-top: 1px solid var(--line);
     padding-top: 0.4rem;
   }
 </style>

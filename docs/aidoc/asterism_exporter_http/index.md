@@ -1,4 +1,4 @@
-# asterism-exporter-http 0.0.0
+# asterism-exporter-http 0.1.1
 
 # asterism-exporter-http
 

@@ -49,7 +49,7 @@ repository    = "https://github.com/ynishi/asterism"
 homepage      = "https://github.com/ynishi/asterism"
 documentation = "https://github.com/ynishi/asterism"
 description   = "Persona/Char/Memory grid UI — local-first Asterism for personal AI companion footprints"
-version       = "0.0.0"
+version       = "0.1.1"
 edition       = "2024"
 
 # docs/aidoc/ describes the whole workspace: the app's own layers, the

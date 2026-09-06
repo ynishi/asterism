@@ -271,7 +271,7 @@
     font-size: 0.78rem;
   }
   .model-facts dt {
-    color: #99a;
+    color: var(--ink-faint);
   }
   .model-facts dd {
     margin: 0;
@@ -281,17 +281,17 @@
     min-width: 0;
   }
   .model-id {
-    color: #334;
+    color: var(--ink);
   }
   .model-dim,
   .model-hint {
     font-size: 0.75rem;
     font-style: italic;
-    color: #999;
+    color: var(--ink-faint);
   }
   .model-none {
     font-size: 0.75rem;
-    color: #999;
+    color: var(--ink-faint);
   }
   .model-badge {
     align-self: flex-start;
@@ -328,7 +328,7 @@
   }
   .model-label {
     font-size: 0.82rem;
-    color: #334;
+    color: var(--ink);
   }
   .model-artifact {
     flex: none;
@@ -349,11 +349,11 @@
     opacity: 0.6;
   }
   .model-error {
-    color: var(--danger, #e2665b);
+    color: var(--danger, var(--danger-ink));
     font-size: 0.78rem;
   }
   .model-verdict {
-    color: #567;
+    color: var(--info-ink);
     font-size: 0.78rem;
   }
 </style>

@@ -1,6 +1,6 @@
 {
   "crate": "asterism-ui",
-  "version": "0.0.0",
+  "version": "0.1.1",
   "items": [
     {
       "path": "asterism_ui::commands",

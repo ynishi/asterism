@@ -1,4 +1,4 @@
-# asterism-disclosure-format 0.0.0
+# asterism-disclosure-format 0.1.1
 
 # asterism-disclosure-format
 

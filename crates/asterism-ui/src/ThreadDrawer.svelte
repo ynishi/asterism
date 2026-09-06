@@ -367,7 +367,7 @@
   .drawer-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--wash-down);
     z-index: 40;
     display: flex;
     justify-content: flex-end;
@@ -375,18 +375,18 @@
   .drawer {
     width: min(760px, 90vw);
     height: 100vh;
-    background: var(--asterism-surface, #1a1a1c);
-    color: var(--asterism-text, #eee);
+    background: var(--asterism-surface, var(--surface-stage));
+    color: var(--asterism-text, var(--ink-secondary));
     display: flex;
     flex-direction: column;
-    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+    box-shadow: -4px 0 24px var(--shadow-color-strong);
   }
   .drawer-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0.75rem 1rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--line);
   }
   .drawer-head h3 {
     margin: 0;
@@ -411,7 +411,7 @@
     min-height: 0;
   }
   .thread-list {
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    border-right: 1px solid var(--line);
     padding: 0.5rem;
     overflow-y: auto;
   }
@@ -420,7 +420,7 @@
     padding: 0.4rem;
     background: transparent;
     color: inherit;
-    border: 1px dashed rgba(255, 255, 255, 0.2);
+    border: 1px dashed var(--line);
     border-radius: 4px;
     cursor: pointer;
     margin-bottom: 0.5rem;
@@ -434,9 +434,9 @@
   }
   .thread-new-form input {
     padding: 0.3rem;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--wash-up);
     color: inherit;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--line);
     border-radius: 3px;
     font-size: 0.85rem;
   }
@@ -464,10 +464,10 @@
     margin-bottom: 0.15rem;
   }
   .thread-row:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--wash-up);
   }
   .thread-row.active {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--wash-up-strong);
   }
   .thread-title {
     font-size: 0.9rem;
@@ -489,7 +489,7 @@
     align-items: center;
     gap: 0.5rem;
     padding-bottom: 0.5rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--line);
   }
   .thread-heading {
     flex: 1;
@@ -499,15 +499,15 @@
   .tool-btn {
     background: transparent;
     color: inherit;
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    border: 1px solid var(--line);
     padding: 0.25rem 0.6rem;
     font-size: 0.75rem;
     border-radius: 3px;
     cursor: pointer;
   }
   .tool-btn.danger {
-    color: #f88;
-    border-color: rgba(255, 100, 100, 0.4);
+    color: var(--danger-ink);
+    border-color: var(--danger-line);
   }
   .message-list {
     flex: 1;
@@ -520,17 +520,17 @@
   .message {
     padding: 0.5rem 0.6rem;
     border-radius: 4px;
-    background: rgba(255, 255, 255, 0.04);
-    border-left: 3px solid rgba(255, 255, 255, 0.2);
+    background: var(--wash-up);
+    border-left: 3px solid var(--line);
   }
   .message-claude_code {
-    border-left-color: #6ac;
+    border-left-color: var(--info-fill);
   }
   .message-agent {
-    border-left-color: #cb6;
+    border-left-color: var(--warning-fill);
   }
   .message-persona {
-    border-left-color: #c6c;
+    border-left-color: var(--cat-orchid);
   }
   .message-system {
     opacity: 0.7;
@@ -550,7 +550,7 @@
     line-height: 1.4;
   }
   .composer {
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid var(--line);
     padding-top: 0.5rem;
     display: flex;
     flex-direction: column;
@@ -559,9 +559,9 @@
   .composer-input {
     width: 100%;
     resize: vertical;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--wash-up);
     color: inherit;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--line);
     border-radius: 3px;
     padding: 0.4rem;
     font-family: inherit;
@@ -573,9 +573,9 @@
   }
   .composer-actions button {
     padding: 0.3rem 0.9rem;
-    background: rgba(100, 170, 220, 0.2);
+    background: var(--info-surface);
     color: inherit;
-    border: 1px solid rgba(100, 170, 220, 0.4);
+    border: 1px solid var(--info-line);
     border-radius: 3px;
     cursor: pointer;
     font-size: 0.85rem;
@@ -593,7 +593,7 @@
     margin: 1rem 0;
   }
   .error {
-    color: #f66;
+    color: var(--danger-ink);
     font-size: 0.8rem;
     margin: 0.25rem 0;
   }

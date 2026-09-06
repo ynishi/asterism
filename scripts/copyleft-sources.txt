@@ -1,0 +1,30 @@
+# Packages the application links whose licence asks for source as well as
+# attribution, and whose archives therefore travel with the release.
+#
+# Every one is MPL-2.0 today. That is file-level copyleft: it reaches the files
+# carrying its notice and does not reach the program linking them, so nothing
+# here touches Asterism's own licensing. What it asks, at §3.2, is that Covered
+# Software distributed in Executable Form "must also be made available in
+# Source Code Form, as described in Section 3.1", with recipients told how they
+# can obtain it. THIRD-PARTY-NOTICES.md, inside the app, is where they are
+# told; the release is where the archives are.
+#
+# What travels is each package's `.crate` — the unmodified upstream release,
+# byte for byte what `Cargo.lock` pins and what the build compiled. Pointing at
+# crates.io would probably do, since these are unmodified upstream artefacts
+# whose canonical home that is; attaching them costs little and removes the
+# argument, which is the call #243 made for the ffmpeg source.
+#
+# `scripts/check-third-party-notices.py` holds this list to the generated
+# notice in both directions, and its docstring says how.
+#
+# One package offers MPL among other terms rather than alone: `htmlescape`
+# (`Apache-2.0 / MIT / MPL-2.0`, reached through `tantivy`). `about.toml` takes
+# MIT, so it owes nothing here — a decision rather than an oversight, and the
+# notice lists it under MIT where a reader can see which was taken.
+cssparser
+cssparser-macros
+dtoa-short
+mp4parse
+option-ext
+selectors

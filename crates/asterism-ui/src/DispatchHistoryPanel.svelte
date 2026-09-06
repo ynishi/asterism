@@ -146,7 +146,7 @@
   .drawer-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(23, 22, 42, 0.35);
+    background: var(--wash-down);
     z-index: 60;
     display: flex;
     justify-content: flex-end;
@@ -154,8 +154,8 @@
   .drawer {
     width: min(28rem, 100vw);
     height: 100%;
-    background: #fbfbff;
-    box-shadow: -6px 0 24px rgba(23, 22, 42, 0.25);
+    background: var(--surface-raised);
+    box-shadow: -6px 0 24px var(--shadow-color);
     display: flex;
     flex-direction: column;
     font-family: inherit;
@@ -165,53 +165,53 @@
     align-items: center;
     justify-content: space-between;
     padding: 0.7rem 1rem 0.5rem;
-    border-bottom: 1px solid #e6e5f0;
+    border-bottom: 1px solid var(--accent-line);
   }
   .drawer-head h3 {
     margin: 0;
     font-size: 0.95rem;
-    color: #2f2b5a;
+    color: var(--ink);
   }
   .drawer-close {
     background: transparent;
     border: none;
-    color: #7a76c9;
+    color: var(--accent-ink);
     font-size: 0.95rem;
     cursor: pointer;
     padding: 0.15rem 0.4rem;
     border-radius: 4px;
   }
   .drawer-close:hover {
-    background: #ecebfa;
+    background: var(--accent-surface);
   }
   .drawer-filters {
     display: flex;
     gap: 0.3rem;
     padding: 0.55rem 1rem;
-    border-bottom: 1px solid #efedfa;
+    border-bottom: 1px solid var(--accent-line);
   }
   .drawer-filter {
     padding: 0.15rem 0.6rem;
     font-size: 0.72rem;
     font-family: inherit;
-    color: #7a76c9;
-    background: #f0effc;
-    border: 1px solid #d9d5f2;
+    color: var(--accent-ink);
+    background: var(--accent-surface);
+    border: 1px solid var(--accent-line);
     border-radius: 999px;
     cursor: pointer;
   }
   .drawer-filter.active {
-    background: #7a76c9;
-    color: #fff;
-    border-color: #7a76c9;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
+    border-color: var(--accent-line-strong);
   }
   .drawer-empty {
     padding: 1rem;
-    color: #8a87ab;
+    color: var(--accent-ink);
     font-size: 0.8rem;
   }
   .drawer-error {
-    color: #b05656;
+    color: var(--danger-ink);
   }
   .drawer-list {
     list-style: none;
@@ -228,24 +228,24 @@
     text-align: left;
     padding: 0.55rem 1rem;
     border: none;
-    border-bottom: 1px solid #efedfa;
+    border-bottom: 1px solid var(--accent-line);
     background: transparent;
-    color: #2f2b5a;
+    color: var(--ink);
     font-family: inherit;
     font-size: 0.8rem;
     cursor: pointer;
   }
   .drawer-row:hover {
-    background: #f5f4ff;
+    background: var(--accent-surface);
   }
   .drawer-row.row-done .row-state {
-    color: #4a8f78;
+    color: var(--success-ink);
   }
   .drawer-row.row-failed .row-state {
-    color: #b05656;
+    color: var(--danger-ink);
   }
   .drawer-row.row-running .row-state {
-    color: #b57a55;
+    color: var(--warning-ink);
   }
   .row-title {
     overflow: hidden;
@@ -253,21 +253,21 @@
     white-space: nowrap;
   }
   .row-out {
-    color: #4a8f78;
+    color: var(--success-ink);
     margin-left: 0.35rem;
   }
   .row-msg {
-    color: #8a87ab;
+    color: var(--accent-ink);
     margin-left: 0.35rem;
   }
   .row-operator {
-    color: #8a86b8;
+    color: var(--accent-ink);
     margin-left: 0.35rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.72rem;
   }
   .row-time {
-    color: #9a97b0;
+    color: var(--accent-ink);
     font-size: 0.72rem;
     font-variant-numeric: tabular-nums;
   }

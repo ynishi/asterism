@@ -86,7 +86,7 @@
     padding: 0;
     margin: 0;
     display: block;
-    background: rgba(23, 22, 42, 0.4);
+    background: var(--wash-down);
     z-index: 1200;
     cursor: default;
   }
@@ -97,10 +97,10 @@
     transform: translate(-50%, -50%);
     min-width: 24rem;
     max-width: 90vw;
-    background: #ffffff;
+    background: var(--surface-raised);
     padding: 1.1rem 1.3rem;
     border-radius: 10px;
-    box-shadow: 0 20px 60px rgba(23, 22, 42, 0.35);
+    box-shadow: 0 20px 60px var(--shadow-color-strong);
     z-index: 1201;
     display: flex;
     flex-direction: column;
@@ -110,13 +110,13 @@
     margin: 0;
     font-size: 1rem;
     font-weight: 600;
-    color: #1f1e33;
+    color: var(--ink);
   }
   .confirm-body {
     margin: 0;
     font-size: 0.88rem;
     line-height: 1.45;
-    color: #4a4863;
+    color: var(--accent-ink);
   }
   .confirm-actions {
     display: flex;
@@ -133,31 +133,31 @@
     font-family: inherit;
   }
   .confirm-btn.primary {
-    background: #5850ff;
-    color: #ffffff;
-    border-color: #5850ff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
+    border-color: var(--accent-line-strong);
   }
   .confirm-btn.primary:hover {
-    background: #4a42e0;
-    border-color: #4a42e0;
+    background: var(--accent-fill-hover);
+    border-color: var(--accent-fill);
   }
   /* The irreversible choice carries the warning tone (HIG: a
      destructive action is marked before it is taken, not after). */
   .confirm-btn.danger {
-    background: #c0392b;
-    color: #ffffff;
-    border-color: #c0392b;
+    background: var(--danger-fill);
+    color: var(--danger-on-fill);
+    border-color: var(--danger-fill);
   }
   .confirm-btn.danger:hover {
-    background: #a5301f;
-    border-color: #a5301f;
+    background: var(--danger-fill-hover);
+    border-color: var(--danger-fill-hover);
   }
   .confirm-btn.ghost {
     background: transparent;
-    color: #555;
-    border-color: #ccc;
+    color: var(--ink-secondary);
+    border-color: var(--line);
   }
   .confirm-btn.ghost:hover {
-    background: #f2f2f6;
+    background: var(--surface-hover);
   }
 </style>

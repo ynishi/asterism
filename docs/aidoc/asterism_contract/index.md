@@ -1,4 +1,4 @@
-# asterism-contract 0.0.0
+# asterism-contract 0.1.1
 
 # asterism-contract — Command / Query / Response DTOs
 

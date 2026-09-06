@@ -223,16 +223,16 @@
   .burst {
     position: fixed;
     width: 260px;
-    background: #fffef9;
-    border: 1px solid #d9d5f2;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 10px;
     padding: 0.7rem 0.8rem;
-    box-shadow: 0 6px 18px rgba(80, 70, 160, 0.12);
+    box-shadow: 0 6px 18px var(--shadow-color-strong);
   }
 
   .burst h3 {
     font-size: 0.75rem;
-    color: #7a76c9;
+    color: var(--accent-ink);
     margin: 0 0 0.4rem;
   }
 
@@ -255,14 +255,14 @@
     background: transparent;
     border: none;
     border-radius: 4px;
-    color: #999;
+    color: var(--ink-faint);
     font-size: 0.7rem;
     cursor: pointer;
   }
 
   .burst-close:hover {
-    background: #f0eefa;
-    color: #333;
+    background: var(--accent-surface);
+    color: var(--ink);
   }
 
   .burst-item {
@@ -276,34 +276,34 @@
     background: transparent;
     cursor: pointer;
     border: none;
-    border-top: 1px solid #eeecf8;
+    border-top: 1px solid var(--accent-line);
     padding: 0.35rem 0 0.35rem 0.5rem;
     border-left: 2px solid transparent;
     color: inherit;
     font: inherit;
   }
   .burst-item:hover {
-    background: #f6f5ff;
+    background: var(--accent-surface);
   }
 
   /* Direction hint from ConstellationItemDto.direction:
      both = confirmed on both sides (accent stroke, thicker);
      outgoing / incoming = one-directional edge (tinted pastel). */
   .burst-item-both {
-    border-left-color: #7a76c9;
+    border-left-color: var(--accent-line-strong);
     border-left-width: 3px;
     padding-left: 0.45rem;
   }
   .burst-item-outgoing {
-    border-left-color: #d9d5f2;
+    border-left-color: var(--accent-line);
   }
   .burst-item-incoming {
-    border-left-color: #f2d5e8;
+    border-left-color: var(--cat-rose);
   }
 
   .burst-label {
     font-size: 0.62rem;
-    color: #9a96d9;
+    color: var(--accent-ink);
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
@@ -324,8 +324,8 @@
   .burst-modality {
     padding: 0.02rem 0.35rem;
     border-radius: 999px;
-    background: #eeecff;
-    color: #6a67a4;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
     text-transform: uppercase;
     font-size: 0.55rem;
     letter-spacing: 0.03em;
@@ -339,7 +339,7 @@
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    color: #333;
+    color: var(--ink);
   }
 
   /* Edge-kind axis color. Applied via `kind-<axis>` class on the
@@ -350,22 +350,22 @@
      more informative bit; direction stays as border-left-width
      via .burst-item-both. */
   .burst-item.kind-auto {
-    border-left-color: #b8b4de;
+    border-left-color: var(--accent-line-strong);
   }
   .burst-item.kind-derived {
-    border-left-color: #7ec49a;
+    border-left-color: var(--success-fill);
   }
   .burst-item.kind-session {
-    border-left-color: #5eb0c4;
+    border-left-color: var(--info-fill);
   }
   .burst-item.kind-selection {
-    border-left-color: #e0a06a;
+    border-left-color: var(--warning-fill);
   }
   .burst-item.kind-group {
-    border-left-color: #b591d5;
+    border-left-color: var(--cat-orchid);
   }
   .burst-item.kind-other {
-    border-left-color: #cccccc;
+    border-left-color: var(--line);
   }
 
   .burst-kind-symbol {
@@ -379,15 +379,15 @@
     float: right;
     margin-left: 0.5rem;
     padding: 0.1rem 0.55rem;
-    background: #eeecff;
-    color: #3d38a8;
-    border: 1px solid #d3d0f0;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
+    border: 1px solid var(--accent-line);
     border-radius: 999px;
     font-size: 0.65rem;
     cursor: pointer;
   }
   .burst-select-all:hover {
-    background: #dcd7ff;
-    border-color: #b9b2f0;
+    background: var(--accent-surface-strong);
+    border-color: var(--accent-line-strong);
   }
 </style>

@@ -76,7 +76,7 @@
      App copy to App's own markup. */
   h2 {
     font-size: 0.75rem;
-    color: #888;
+    color: var(--ink-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 1rem 0 0.25rem;
@@ -93,7 +93,7 @@
     border: none;
     padding: 0.2rem 0.3rem;
     font-size: 0.85rem;
-    color: #555;
+    color: var(--ink-secondary);
     cursor: pointer;
     width: 100%;
     text-align: left;
@@ -101,11 +101,11 @@
     font-family: inherit;
   }
   button:hover {
-    background: #efefe9;
+    background: var(--surface-hover);
   }
   button.active {
-    color: #111;
+    color: var(--ink);
     font-weight: 600;
-    background: #eceae2;
+    background: var(--surface-active);
   }
 </style>

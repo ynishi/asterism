@@ -237,11 +237,19 @@ agent, the loop that works is:
 
 ```text
 issue -> just worktree-new -> implement -> just check
+      -> just ui-e2e when the change has to be seen (it leaves frames)
       -> reviewer on the issue, pub-checker + doc-reviewer on the diff
       -> commit
       -> git fetch origin -> just pre-push
       -> write the PR body to a file -> hand over push/PR
 ```
+
+The `ui-e2e` step is conditional and the condition is whether the change has to
+be _looked at_ — a colour, a layout, anything a passing assertion does not
+answer for. It is the only recipe that produces something an agent can look at,
+and its own comment says what it leaves and where; the other two ways to see the
+app, `just dev` and `just dogfood`, open a window that needs a person in front
+of it.
 
 Three reviews run there and they do not overlap. `reviewer` answers whether the
 change does what its issue asked; `pub-checker` answers what may be published;

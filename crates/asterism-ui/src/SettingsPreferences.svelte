@@ -301,7 +301,7 @@
   .settings-hint {
     margin-top: 0.5rem;
     font-size: 0.75rem;
-    color: #999;
+    color: var(--ink-faint);
     font-style: italic;
   }
   .settings-toggle {
@@ -309,7 +309,7 @@
     align-items: center;
     gap: 0.5rem;
     font-size: 0.85rem;
-    color: #333;
+    color: var(--ink);
     cursor: pointer;
   }
   .settings-toggle input[type="checkbox"] {
@@ -324,7 +324,7 @@
   }
   .pref-row {
     padding: 0.35rem 0;
-    border-bottom: 1px solid var(--hairline, rgba(255, 255, 255, 0.06));
+    border-bottom: 1px solid var(--hairline, var(--line));
   }
   .pref-row:last-child {
     border-bottom: none;
@@ -370,7 +370,7 @@
   .pref-reset {
     font-size: 0.72rem;
     background: none;
-    border: 1px solid var(--hairline, rgba(255, 255, 255, 0.18));
+    border: 1px solid var(--hairline, var(--line));
     border-radius: 3px;
     padding: 0.1rem 0.4rem;
     cursor: pointer;
@@ -383,7 +383,7 @@
   .pref-chain {
     margin: 0.25rem 0 0;
     font-size: 0.72rem;
-    color: #888;
+    color: var(--ink-muted);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -414,14 +414,14 @@
   .pref-rejected-note {
     margin: 0.15rem 0 0;
     font-size: 0.72rem;
-    color: #b06b2c;
+    color: var(--warning-ink);
   }
   .pref-env-note {
     display: block;
     opacity: 0.75;
   }
   .settings-error {
-    color: var(--danger, #e2665b);
+    color: var(--danger, var(--danger-ink));
     font-size: 0.78rem;
     margin: 0.2rem 0;
   }

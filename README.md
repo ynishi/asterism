@@ -9,9 +9,17 @@ hover-burst looks like.
 
 ## Status
 
-- **v0.0.0** — the initial cut is in place. Domain, application, SQLite schema,
-  job pipeline (`cover_gen` / `auto_tag` / `edge_rebuild`), the HTTP API server,
-  and the Tauri grid UI with hover-burst rendering all run end-to-end.
+- **v0.1.1** — the app names the packages it links. A generated third-party
+  notice for the Rust dependency closure travels in the bundle, and the source
+  archives of the packages that notice lists under MPL-2.0 are attached to the
+  release beside the download. No change to what the app does.
+- **v0.1.0** — the team plane is wired, visible, and licensed: a team hosts the
+  forge, a member's client promotes an asset onto a team-hosted line, and the
+  Forge and Team surfaces are in the app. The local-first half it stands on —
+  domain, application, SQLite schema, the job pipeline (`cover_gen` / `auto_tag`
+  / `edge_rebuild`), the HTTP API server, and the Tauri grid UI with hover-burst
+  rendering — runs end-to-end, and the release workflow signs and notarizes the
+  macOS build.
 - Nothing is published to crates.io (every crate has `publish = false`).
 - Data is isolated by local profile: release builds default to
   `~/.asterism/profiles/dogfood/`, debug builds to `~/.asterism/profiles/dev/`,
@@ -200,8 +208,11 @@ defined in [PUBLIC_DEVELOPMENT.md](PUBLIC_DEVELOPMENT.md).
 
 ## Licence
 
-Licensing is declared **per crate** (the `license` field in each crate's
-`Cargo.toml`). The local-first core is licensed under either of
+Licensing is **per crate**, and stated in two places on purpose: the workspace
+manifest carries the permissive terms once and every crate on that plane
+inherits them, while each crate that is licensed otherwise says so at its own
+`license` field. `just licence-check` holds the tree to that arrangement. The
+local-first core is licensed under either of
 
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
@@ -221,6 +232,30 @@ vocabulary a member's client and a team server both speak, depends on neither
 plane, and is MIT/Apache-2.0 — which is what lets the local-first core link it
 at all, and what makes the server implementable by something that is not this
 codebase. Its manifest says so at the field.
+
+The paragraphs above are about this repository's own code. The macOS app also
+ships a binary that is not ours: an `ffmpeg` built from unmodified upstream
+source, licensed under the GNU Lesser General Public License, version 2.1 or
+later ([LICENSE-LGPL-2.1](LICENSE-LGPL-2.1)). It is spawned as a separate
+process rather than linked, so it does not reach the crates above.
+[FFMPEG-NOTICE.md](FFMPEG-NOTICE.md) is what travels with it — the copyright
+notice, the configuration it was built with, where the source is, and the credit
+libjpeg asks for.
+
+The application links open-source Rust packages, and
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) names every one of them with
+the licence it is used under and that licence's text. It is generated from
+`Cargo.lock` by `just licences`; `about.toml` records which side of a choice
+like `MIT OR Apache-2.0` this project takes, and why, and a licence that is not
+on its accepted list stops the generator rather than being resolved by default.
+Some of those packages are under MPL-2.0, which asks for their source to be
+obtainable as well as attributed — the release carries their archives beside the
+download, the notice inside the app says so, and `scripts/copyleft-sources.txt`
+is the list held to the generated notice in both directions.
+
+The bundle is built to carry all five of those files under
+`Contents/Resources/licenses/`, and `just dogfood-build` fails when any of them
+does not arrive there.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be

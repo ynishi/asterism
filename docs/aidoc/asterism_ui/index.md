@@ -1,4 +1,4 @@
-# asterism-ui 0.0.0
+# asterism-ui 0.1.1
 
 # asterism-ui — Asterism desktop UI (Tauri v2 backend)
 

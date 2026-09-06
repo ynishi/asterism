@@ -1,6 +1,6 @@
 {
   "crate": "asterism-importer-persona-journal",
-  "version": "0.0.0",
+  "version": "0.1.1",
   "items": [
     {
       "path": "asterism_importer_persona_journal::parser",

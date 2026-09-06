@@ -213,12 +213,12 @@
   }
   .maint-label {
     font-size: 0.82rem;
-    color: #334;
+    color: var(--ink);
   }
   .maint-hint {
     font-size: 0.75rem;
     font-style: italic;
-    color: #999;
+    color: var(--ink-faint);
   }
   .maint-action {
     flex: none;
@@ -241,11 +241,11 @@
     padding: 0.2rem 0.4rem;
   }
   .maint-error {
-    color: var(--danger, #e2665b);
+    color: var(--danger, var(--danger-ink));
     font-size: 0.78rem;
   }
   .maint-notice {
-    color: #567;
+    color: var(--info-ink);
     font-size: 0.78rem;
   }
 </style>

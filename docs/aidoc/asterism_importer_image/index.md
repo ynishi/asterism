@@ -1,4 +1,4 @@
-# asterism-importer-image 0.0.0
+# asterism-importer-image 0.1.1
 
 Image import adapter — parses one image file into one
 `Footprint::Image`.

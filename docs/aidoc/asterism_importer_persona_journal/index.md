@@ -1,4 +1,4 @@
-# asterism-importer-persona-journal 0.0.0
+# asterism-importer-persona-journal 0.1.1
 
 persona-journal import adapter — turns a persona-journal SQLite row
 into `Footprint::JournalEntry`.

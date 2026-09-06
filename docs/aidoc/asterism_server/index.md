@@ -1,4 +1,4 @@
-# asterism-server 0.0.0
+# asterism-server 0.1.1
 
 # asterism-server — library surface.
 

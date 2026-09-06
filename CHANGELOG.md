@@ -8,8 +8,95 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-06
+
 ### Added
 
+- **The packages the app links, named** (#246). `THIRD-PARTY-NOTICES.md` lists
+  every third-party package that reaches the macOS build, the licence it is used
+  under, and that licence's text; it ships in the bundle beside the other four,
+  and `just licences` regenerates it from `Cargo.lock` with `cargo-about`.
+  `about.toml` is where the choices live: most of the graph offers
+  `MIT OR Apache-2.0` and the notice names MIT, because both are satisfied and
+  MIT is the one that does not bring §4's NOTICE handling with it. That file is
+  also this project's copyleft policy and its teeth — `LGPL-2.1-or-later`, GPL
+  and AGPL are absent from the accepted list, so a package whose only licence is
+  one of them stops the generator rather than being resolved by a default.
+- **The source of the packages whose licence asks for it** (#246). MPL-2.0
+  crates link into the app, and §3.2 asks that Covered Software distributed in
+  Executable Form also be made available in Source Code Form, with recipients
+  told how to obtain it. The notice inside the app tells them; the release
+  attaches those packages' `.crate` archives, the exact ones cargo built from.
+  Pointing at crates.io would probably do, since these are unmodified upstream
+  releases whose canonical home that is; attaching them costs little and removes
+  the argument, which is the call #243 made for the ffmpeg source.
+  `scripts/copyleft-sources.txt` is the list, and the release fails rather than
+  attaching a subset of it.
+- **A gate for the above** (#246). `just third-party-check`, in `check-shared`,
+  holds the notice and `scripts/copyleft-sources.txt` to the tree without
+  needing `cargo-about`: nothing the notice names has left the lockfile, and the
+  packages it lists under a licence that asks for source are exactly the ones
+  recorded — in both directions, so a line for a package that has gone fails
+  too. It evaluates no licence expressions, deliberately; that is
+  `cargo-about`'s job and the first version of this script got it wrong twice
+  doing it by hand. What it cannot see is a newly added permissive dependency
+  missing from the notice, which the release workflow answers by regenerating
+  and diffing on the run that ships the file.
+
+## [0.1.0] - 2026-09-06
+
+### Added
+
+- **The ffmpeg sidecar's own terms, travelling with it** (#243). The app ships
+  an `ffmpeg` built from unmodified upstream source and spawns it as a separate
+  process, and until now nothing shipped beside it said where it came from or
+  under what terms. `LICENSE-LGPL-2.1` and `FFMPEG-NOTICE.md` are in the tree,
+  and the bundle is configured to carry them along with the two permissive texts
+  — which move out of the top of `Contents/Resources` into a `licenses/`
+  directory beside them. The notice carries what LGPL-2.1 §1 asks to accompany
+  each copy, reaching executables through §4 — the copyright line and the
+  warranty disclaimer — plus the configuration the binary was built with, the
+  tarball it was built from, and where that tarball can be had. It also carries
+  a credit that is not the LGPL's at all: FFmpeg's own `LICENSE.md` requires
+  crediting the Independent JPEG Group in accompanying documentation when only
+  executables are distributed, and the three libjpeg-derived files it names are
+  compiled into this build because `mjpeg` and the MPEG-family decoders select
+  them. `just dogfood-build` fails when any of the four does not reach
+  `Contents/Resources/licenses/`, which is what turns "configured to carry" into
+  something a release run answers for.
+- **The sidecar's source beside the download** (#243). The release run attaches
+  the ffmpeg tarball and the script that configures it to the same draft release
+  as the DMG, names the archive from the stamp the build wrote rather than
+  globbing for it, and fails rather than publishing a release without it.
+  LGPL-2.1 §4 lets a distributor meet the source requirement by offering the
+  source "from the same place" the binary is offered from; linking to ffmpeg.org
+  would put that offer on somebody else's continued hosting of those exact
+  bytes. The rehearsal path keeps the same three files in its workflow artifact
+  — this repository is public, so that artifact is downloadable by anyone who
+  can read it.
+- **A gate that holds the two licence planes apart** (#242).
+  `just licence-check` fails when a member on the workspace's
+  `MIT OR Apache-2.0` reaches one of the four `AGPL-3.0-or-later` crates at any
+  depth — or when a `teams-*` crate stops being licensed AGPL, since otherwise
+  the first assertion could be defeated by deleting a line rather than by adding
+  one. Both answers come from `cargo metadata --locked`, so the resolver decides
+  what a licence field says and what depends on what, and a crossing written
+  into a manifest but not yet resolved fails here rather than passing. README's
+  licence section has said since #162 that the forbidden direction stays empty,
+  and nothing but that sentence said so: the boundary test nearest to it,
+  `tests/boundary.rs` in the UI crate, answers for the wire crate's vocabulary,
+  so a line reading `teams-core = { path = "../../teams-core" }` in the UI
+  manifest would have passed it, passed clippy, and passed every recipe `check`
+  composes. In `check-shared`, so a pull request is asked the same question
+  `main` is.
+- **The licence texts inside the bundle** (#242). `LICENSE-MIT` and
+  `LICENSE-APACHE` are bundle resources now, which is what puts the notices the
+  shipped code asks to travel with it — MIT's, and Apache-2.0 §4(a) and §4(d) —
+  into the app: the bundle had a copyright string and no licence file of any
+  kind. No release has been built from this, so the config is what changed and
+  the artefact is what the first release run will show. `LICENSE-AGPL` joins
+  them on the day a teams binary is ever bundled, and not before: the app's
+  dependency closure holds none of the four.
 - **An admin's reach over somebody else's sign-in** (#213). An instance admin
   can now take back every live device token an account holds
   (`DELETE /teams/admin/accounts/{user_id}/devices`, after `GET …/devices` to
@@ -415,8 +502,9 @@ and this project adheres to
   surfaces, so it builds the frame as well: #190's design said the tabs were a
   design and not a component and that the first surface to land would build
   them, and this is that surface. The connection and the team sit above the
-  tabs, because they are what the tabs are answers about; publishing sits inside
-  the lines tab, because it seeds a line.
+  tabs, because they are what the tabs are answers about; publishing is gated on
+  the lines tab, because it seeds a line (#217 later moves the form itself to
+  the rail, keeping the same gate).
 
   **The read's shape decides more than taste does.** A ledger has no final page
   and the wire says so: a page that fills its limit always carries a cursor, and
@@ -668,6 +756,21 @@ and this project adheres to
   WebView, which is the only place the seven commands' names, arguments and
   answers are checked at all — a unit test asserts the shape its own author
   wrote down twice.
+
+- **A detail pane opened from a line can reach the asset in the grid** (#189).
+  #182 answered "what is this" with a pane that comes up over whatever opened
+  it; nothing answered "show me this where I keep it" — the other half, and a
+  different question, because answering it moves the grid. A new "Show in grid"
+  button, offered on every asset the pane shows, closes the pane, steps the
+  forge drawer aside if that is what opened it, switches the persona filter when
+  the asset belongs to one the grid is not already showing, and scrolls to it.
+  The persona switch is announced on the status line — the same `personaName()`
+  a drop or a paste already reads through — because a filter that moved without
+  saying so is a library the reader did not ask to be looking at. If the asset
+  is still off the page afterward, something other than persona is keeping it
+  there (a search, a modality, a group, the 🎲 draw, the trash side, the
+  retrieval shortlist's cap), and the status line says so rather than guessing
+  which of those to clear.
 
 - **The forge's catalog, and the design its four screens share** (#177). #170
   lists four surfaces and says what each one lands; what it did not say is what
@@ -1082,6 +1185,186 @@ and this project adheres to
 
 ### Changed
 
+- **The sidecar build verifies what it downloads** (#243). The script fetched a
+  tarball over the network, unpacked it and compiled it without checking what
+  arrived. It now compares the archive against a pinned SHA-256, and does so
+  before the fast path rather than after it: a run that finds the binary already
+  built still fetches the archive if it is missing and still hashes it, because
+  the release uploads that archive and the notice inside the app names its
+  digest. Provenance is established by hand — the 8.0 tarball checks out against
+  FFmpeg's release signing key, whose fingerprint matches the one published on
+  ffmpeg.org — and the digest is what carries that verification into later
+  builds. The stamp that decides whether to rebuild records the digest beside
+  the version, so correcting a pin without moving the version no longer matches
+  a warm `target/` and keeps a binary compiled from the rejected bytes.
+- **Two comments in the sidecar script named the wrong clause** (#243). Both
+  reached for LGPL-2.1 §6's system-library exception to explain why linking
+  `/usr/lib` and `/System/Library` is fine. The conclusion holds and the reason
+  is simpler: §6 governs a combined work — a program of your own linked against
+  the library — and what ships here is FFmpeg's own tool linked against FFmpeg's
+  own libraries, wholly LGPL, which §4 governs. Under §4 the frameworks the OS
+  ships are not part of FFmpeg's corresponding source, so no exception has to be
+  invoked.
+- **A version that distinguishes releases** (#242). The workspace carried
+  `0.0.0` and so did all 29 members, `tauri.conf.json`, and the frontend package
+  — one number that never moved. It is `0.1.0` now, which is what the release
+  workflow's own guard compares a tag against before it builds anything.
+  `/asterism/health` and the MCP server info follow it without being edited;
+  they read `CARGO_PKG_VERSION` rather than restating it.
+- **The manifest names the release that wrote it** (#242).
+  `claim_generator_info` carries `version` again. It was withdrawn because the
+  only value available was the `0.0.0` every build shared, which puts a claim
+  into a signed, uncorrectable document that says nothing confidently; the note
+  left in its place said the field comes back when releases start carrying a
+  number that distinguishes them, and this is that release. The XMP packet still
+  declines the same claim, for the second of the two reasons it had: nothing in
+  it may be read off anything but the record, or two stamps of one unchanged
+  record would render different bytes across a bump.
+- **A dark ground, and colours that are named once** (#240). `DetailPane`
+  already put an image on `#1a1a1a`; everything around that stage was light, so
+  the grid — where a selection is actually made, hundreds of thumbnails at a
+  time — reported its contents against a near-white surround, and the detail
+  view a click later did not. The app opens dark now, and `color-scheme` says
+  `dark` rather than the `light dark` it had claimed while every colour it
+  painted itself was a light-mode literal: the form controls, the scrollbars and
+  the canvas behind the page were the user agent's to draw in whichever mode the
+  OS was set to, and they were the only part of the window that obeyed.
+
+  **The colours had to be collapsed before they could be inverted.** There were
+  1256 colour literals across 41 of the 45 components, 368 of them distinct and
+  188 written exactly once — not 368 decisions but about thirty, each written
+  down a dozen times slightly differently: seventeen neutral lightnesses with
+  near-duplicates piled at each, and 158 settings of a single violet. They are
+  named once in `app.css` now, in a role vocabulary that says where each one
+  belongs — `-fill` and `-on-fill` and `-ink` and `-surface` and `-line`,
+  because a name that does not carry its role gets applied to whatever the
+  reader assumed. The colours that stayed outside are the swatch representatives
+  in `lib/stores/color.svelte.ts`, which are a derived fact of each image rather
+  than a design decision. A light set, if anybody wants one, is a second block
+  of values there rather than a second pass over 41 files.
+
+  **What a mechanical substitution cannot decide.** Ten hover and focus rules
+  had used two neighbouring tints for their base and their state, both of which
+  landed on one name and left the state invisible. Light tints in one lightness
+  band fell through to their family's saturated fill, which is how a pale olive
+  background became amber under text that then read at 1.35:1. Selection rings
+  turned black, because a ring is a `box-shadow` and every `box-shadow` looked
+  like a shadow. And a status colour is not a categorical one: borrowing
+  `danger` to tell one author apart from another made a persona's own message
+  carry the colour that elsewhere means destroy. Each of those is a distinction
+  the old literals held only by being different from each other, and naming them
+  is what made the loss visible — three review passes found them, and the names
+  are also what let them be fixed in one place each.
+
+  **The invariants underneath all of that are now a test rather than a
+  paragraph.** `palette.test.ts` reads `app.css` and every component and refuses
+  a colour literal in a style block, a name the palette does not define, a name
+  nothing reads, a hover or focus rule whose every declaration equals its base,
+  and — in each rule that states both its ink and its ground — a pair below the
+  contrast bar `app.css` states. It also holds the boundary the palette had
+  quietly crossed: a component may write `var(--hook, real value)` so a host can
+  retheme it, and the palette may not define any of those names. Defining one
+  kills the fallback behind it, which is how a global `--danger` turned four
+  labels into the fill colour at 3.2:1 with every gate green. Each claim was
+  seeded back into a throwaway component to confirm it fails — reinstating
+  `--danger` in `app.css` reproduces that defect and names all three files —
+  since a check that has never failed has not been shown to work.
+
+- **The window opens at a size the UI asks for** (#239). 1280×860 rather than
+  800×600, and a floor under it. The number is the UI's own: `DetailPane`'s
+  panel is `width: min(96vw, 1200px)`, so at 800 it was clamped to 768 — about
+  three fifths of the width it was drawn for — and `max-height: 96vh` met the
+  same wall at 600 tall. Deliberately neither maximized nor full screen: a full
+  screen window on macOS takes a Space of its own, so reaching anything beside
+  it costs a switch. `min_inner_size` is new; nothing had stopped the window
+  being dragged below the point where 180px of sidebar beside a grid of
+  `minmax(180px, 1fr)` cards is still an arrangement.
+
+  Two smaller things the same pass. The page's favicon pointed at
+  `/album-logo.svg` — a file this crate does not contain, under another
+  product's name; it points at the bundle's own master now, by relative path, so
+  one file serves both. And `copyright` and `category` are set, both of which
+  are read — `category` becomes `LSApplicationCategoryType` and `copyright`
+  shows in the bundle's information. The copyright line is the one `LICENSE-MIT`
+  already declares.
+
+  **And the two pieces of the window the stylesheet cannot reach**, found by
+  opening the Dogfood build once #240 had made the app dark. The title bar took
+  whichever appearance the system was in, so an app with one value set and no
+  light one to fall back to wore a light bar across the top of it on a light
+  Mac; the window is built with `theme: Dark` now. And nothing was painted
+  between the window opening and the first frame of the UI, because the builder
+  named no `background_color` and `index.html` declared no `color-scheme` — the
+  stylesheet arrives a module load after the document is parsed. Both are stated
+  now, and `--surface` is duplicated into the window builder because a
+  stylesheet cannot hand a colour to one.
+
+- **The sidebar's filter bands show their own labels** (#239). Length, Size and
+  Pixels were rendering about two characters of their `min` and `max`
+  placeholders. The row never fitted: on one line it asks for roughly 207px
+  inside the 137px a 180px sidebar leaves, and the inputs were the only children
+  with `min-width: 0`, so the whole shortfall landed on them. The label takes
+  its own line now, the number spinner is gone — 15px of a 44px box, and a
+  filter threshold is typed rather than stepped — and the unit is sized by its
+  own text instead of by the widest of `s`, `MB` and `MP`. All three bands stand
+  the same height.
+
+- **The team drawer's sign-in stops short of the drawer's edge** (#239). Server,
+  Login and Password were taking the drawer's full body width — 795px each,
+  which the window opening at 1280 makes the state it opens in rather than
+  something to widen the window and find. Capped at 24rem, and on that form
+  alone: the other forms in the drawer sit beside the work they act on and have
+  not asked for one.
+
+- **The app carries its own icon** (#238). What shipped until now was the teal
+  and yellow interlocking rings `create-tauri-app` writes into every new
+  project. In its place: three white stars joined into a triangle, over an
+  indigo-to-black ground — the name read literally, and the shape the
+  application already has. `icons/icon.svg` is the master and the file to edit;
+  the sixteen rasters beside it are `npx tauri icon` output and are regenerated
+  rather than touched.
+
+  **The artwork carries its own rounded tile, because it ships to two macOS
+  generations that disagree about who draws one.** macOS 26 masks every app icon
+  to a squircle itself and wants full-bleed artwork; macOS 15 and earlier draw
+  what the bundle carries and want Apple's template geometry, an 824×824 tile
+  inset in a 1024 canvas. Nothing here sets a `minimumSystemVersion`, so the
+  bundle reaches both, and the inset tile is the version that is wrong in the
+  cheaper direction — under 26's mask it reads somewhat smaller, where
+  full-bleed artwork on 15 is a hard-cornered square a quarter larger than every
+  icon beside it in the Dock. The first pass of this icon shipped full-bleed on
+  the reasoning that the system masks it, which is true of one of the two. The
+  same margin rides into `icon.ico` and the `Square*Logo.png` tiles, which draw
+  unmasked and would not have asked for it; that is the price of keeping one
+  master.
+
+- **The forge and the shared-lines drawer's two-column shells share their gap
+  and rail width now** (#217). The same check the tab strip's departure got: the
+  shell's mechanism (a flex row, a fixed-width rail, a flexible body) was
+  already identical between the two drawers, but the gap and the rail's width
+  had drifted — 1.2rem and 15rem in the shared-lines drawer, 1rem and 12rem in
+  the forge's — with nothing arguing for the difference. `--drawer-shell-gap`
+  and `--drawer-rail-width` in `app.css` hold the one answer both files read
+  now, unified to the forge's values. The shared-lines drawer's rail visibly
+  narrows from 15rem to 12rem as a result, on the row with the most text per
+  line. The shell's markup stays a departure from #217's Shape section — the two
+  rails hold substantively different content, so a shared component would need
+  snippets for content neither file's counterpart has — but its values no longer
+  are.
+
+- **The forge and the shared-lines drawer draw their tabs the same way now**
+  (#217). #217's own Shape section asked for the tab strip as a component shared
+  between the two, and the shared-lines drawer's own header had recorded the
+  departure with a reason that turned out not to hold: reading the two files'
+  tab rows against each other showed their differences in gap, border colour,
+  button padding and font size were drift nobody had ever unified, not a design
+  choice. `TabStrip.svelte` is the shared component, carrying the forge's own
+  values; the shared-lines drawer's two tab rows (a team's three tabs, and a
+  line's three) visibly change as a result — no more dimming on an inactive tab,
+  a different border colour and gap — and both rows also gain the ARIA a tab
+  strip should have (`role="tablist"` / `role="tab"` / `aria-selected`), which
+  neither file's rows carried in full before.
+
 - **A team is named on every screen now, and so is everyone in it** (#218). A
   team had no name — "Start a team of your own" asked nothing — and everyone in
   it read as a UUID: a roster row carried a user id and a role, an invite form
@@ -1189,10 +1472,11 @@ and this project adheres to
 - **The shared-lines drawer gives the line its room** (#217). It is the forge
   drawer's width now, `min(52rem, 96vw)`, and draws the same two columns: a rail
   on the left with who is signed in, the teams this account is in, and — once a
-  team is on — its lines; the body on the right with the team's three tabs, and
-  inside `lines` either the open line's frame or the publish form. Before this
-  the drawer was one column at 30rem, and everything a person had to pass stayed
-  on screen above the line, so with a pursuit open the work began in the bottom
+  team is on — its lines, with the form that publishes one of this machine's own
+  at their foot; the body on the right with the team's three tabs, and inside
+  `lines`, once the team has one to open, the open line's frame. Before this the
+  drawer was one column at 30rem, and everything a person had to pass stayed on
+  screen above the line, so with a pursuit open the work began in the bottom
   tenth. The typed team id, which the instance admin still needs, sits behind
   "open a team by id" in the rail and folds away once it has named one; the
   publish form picks the local line from this machine's own list, read through
@@ -3646,6 +3930,13 @@ and this project adheres to
   renderings inside one build, which cannot see a difference that moves both
   sides together; it now pins the toolkit attribute literally.
 
+  The manifest half did not stay that way, and both paragraphs above describe
+  the tree between this change and v0.1.0 rather than the release they sit
+  under: giving the workspace a number that distinguishes releases is the
+  condition the comment left in `claim_generator_info`'s place named, so the
+  field and a test that can fail came back with it (#242). The packet half
+  stands, for the second of the two reasons this entry gives it.
+
 - **The series key no longer borrows its canonical form from a dependency**
   (#14) — `series::render` hashes a `serde_json::Value` parsed out of a
   container, and was taking its nested key order from whichever map type
@@ -4419,4 +4710,6 @@ and this project adheres to
   (default 14); a malformed or non-positive value is refused at startup rather
   than silently replaced.
 
-[Unreleased]: https://github.com/ynishi/asterism/commits/main
+[Unreleased]: https://github.com/ynishi/asterism/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ynishi/asterism/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/ynishi/asterism/releases/tag/v0.1.0

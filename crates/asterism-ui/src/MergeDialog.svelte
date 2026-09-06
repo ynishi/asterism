@@ -194,7 +194,7 @@
   .mrg-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(20, 18, 16, 0.4);
+    background: var(--wash-down);
     z-index: 50;
   }
 
@@ -206,9 +206,9 @@
     width: min(560px, 92vw);
     max-height: 80vh;
     overflow-y: auto;
-    background: #faf9f5;
+    background: var(--surface-raised);
     border-radius: 8px;
-    box-shadow: 0 14px 44px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 14px 44px var(--shadow-color);
     padding: 1rem 1.25rem 1.25rem;
     z-index: 51;
   }
@@ -228,7 +228,7 @@
     background: none;
     border: none;
     font-size: 0.9rem;
-    color: #777;
+    color: var(--ink-muted);
     cursor: pointer;
   }
   .mrg-close:disabled {
@@ -239,20 +239,20 @@
   .mrg-lead {
     margin: 0 0 0.75rem;
     font-size: 0.8rem;
-    color: #666;
+    color: var(--ink-secondary);
   }
 
   .mrg-rows {
-    border: 1px solid #e6e3da;
+    border: 1px solid var(--line);
     border-radius: 6px;
     padding: 0.5rem 0.6rem;
     margin: 0 0 0.75rem;
-    background: #fff;
+    background: var(--surface-raised);
   }
 
   legend {
     font-size: 0.75rem;
-    color: #3a3733;
+    color: var(--ink);
     padding: 0 0.3rem;
   }
 
@@ -265,10 +265,10 @@
     cursor: pointer;
   }
   .mrg-row:hover {
-    background: #f4f2ec;
+    background: var(--surface-hover);
   }
   .mrg-row.keeper {
-    background: #eef1ea;
+    background: var(--surface-hover);
   }
 
   .mrg-row img {
@@ -276,7 +276,7 @@
     height: 40px;
     object-fit: cover;
     border-radius: 3px;
-    background: #efefe9;
+    background: var(--surface-hover);
   }
 
   .mrg-row-text {
@@ -285,7 +285,7 @@
     gap: 0.1rem;
     min-width: 0;
     font-size: 0.72rem;
-    color: #555;
+    color: var(--ink-secondary);
   }
 
   .mrg-name {
@@ -295,31 +295,31 @@
   }
 
   .mrg-meta {
-    color: #999;
+    color: var(--ink-faint);
   }
 
   .mrg-preview,
   .mrg-refusal {
-    border-top: 1px solid #e6e3da;
+    border-top: 1px solid var(--line);
     padding-top: 0.6rem;
     margin-bottom: 0.5rem;
   }
 
   .mrg-note {
     font-size: 0.78rem;
-    color: #555;
+    color: var(--ink-secondary);
     margin: 0 0 0.4rem;
   }
 
   .mrg-warning {
     font-size: 0.75rem;
-    color: #8a6d3b;
+    color: var(--warning-ink);
     margin: 0 0 0.4rem;
   }
 
   .mrg-error {
     font-size: 0.78rem;
-    color: #a4423a;
+    color: var(--danger-ink);
     margin: 0 0 0.4rem;
   }
 
@@ -328,7 +328,7 @@
     margin: 0;
     padding-left: 1.1rem;
     font-size: 0.75rem;
-    color: #555;
+    color: var(--ink-secondary);
   }
 
   .mrg-actions {
@@ -342,24 +342,24 @@
     font-family: inherit;
     font-size: 0.75rem;
     padding: 0.3rem 0.6rem;
-    border: 1px solid #d8d4c8;
+    border: 1px solid var(--line);
     border-radius: 4px;
-    background: #f4f2ec;
+    background: var(--surface-hover);
     cursor: pointer;
   }
   .mrg-btn:hover:enabled {
-    background: #eceae2;
+    background: var(--surface-active);
   }
   .mrg-btn:disabled {
     opacity: 0.5;
     cursor: default;
   }
   .mrg-btn.danger {
-    border-color: #c9a09a;
-    background: #f6ebe9;
-    color: #7d322b;
+    border-color: var(--danger-fill);
+    background: var(--danger-surface);
+    color: var(--danger-ink);
   }
   .mrg-btn.danger:hover:enabled {
-    background: #f0dedb;
+    background: var(--danger-surface);
   }
 </style>

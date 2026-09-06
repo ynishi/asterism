@@ -791,7 +791,7 @@
      (wave 5a). */
   h2 {
     font-size: 0.75rem;
-    color: #888;
+    color: var(--ink-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 1rem 0 0.25rem;
@@ -808,7 +808,7 @@
     border: none;
     padding: 0.2rem 0.3rem;
     font-size: 0.85rem;
-    color: #555;
+    color: var(--ink-secondary);
     cursor: pointer;
     width: 100%;
     text-align: left;
@@ -816,12 +816,12 @@
     font-family: inherit;
   }
   button:hover {
-    background: #efefe9;
+    background: var(--surface-hover);
   }
   button.active {
-    color: #111;
+    color: var(--ink);
     font-weight: 600;
-    background: #eceae2;
+    background: var(--surface-active);
   }
 
   /* Shared row cascade (name + count, empty state, active-count
@@ -840,19 +840,19 @@
   }
   .tag-count {
     font-size: 0.6rem;
-    color: #b5b1e2;
+    color: var(--accent-ink-dim);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
   }
   .tags-empty {
     font-size: 0.65rem;
-    color: #999;
+    color: var(--ink-faint);
     padding: 0.2rem 0.4rem;
     list-style: none;
   }
   .tags-active-count {
     font-size: 0.6rem;
-    color: #9a96d9;
+    color: var(--accent-ink);
     font-weight: normal;
   }
 
@@ -875,8 +875,8 @@
      hover / active style doesn't visually cancel the row-level
      highlight. */
   .group-row.drop-target-group {
-    background: #eef7f4 !important;
-    outline: 2px solid #7ab89a;
+    background: var(--success-surface) !important;
+    outline: 2px solid var(--success-fill);
     outline-offset: -2px;
     border-radius: 4px;
   }
@@ -893,18 +893,18 @@
   .group-kind {
     display: inline-block;
     margin-right: 0.25em;
-    color: #8f89b6;
+    color: var(--accent-ink);
     font-size: 0.85em;
   }
   .group-kind.group-kind-query {
-    color: #b57a55;
+    color: var(--warning-ink);
   }
   /* W4-b staleness chip — the last refresh of this query group
      failed; the tooltip carries the stamped error text. */
   .group-stale {
     display: inline-block;
     margin-right: 0.25em;
-    color: #c0392b;
+    color: var(--danger-ink);
     font-size: 0.85em;
   }
   /* Target the name button explicitly — a nested query group renders
@@ -913,7 +913,7 @@
      label. `.group-main-btn` is present on every group name button
      (with or without nested children). */
   .group-row-query > button.group-main-btn {
-    color: #5a4a3a;
+    color: var(--warning-ink);
   }
   .group-row-query > button.group-main-btn .tag-name {
     font-style: italic;
@@ -926,10 +926,10 @@
     position: fixed;
     z-index: 1000;
     min-width: 240px;
-    background: #fff;
-    border: 1px solid #d9d5f2;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 6px;
-    box-shadow: 0 6px 18px rgba(58, 50, 130, 0.14);
+    box-shadow: 0 6px 18px var(--shadow-color-strong);
     padding: 0.35rem 0;
     font-family: inherit;
   }
@@ -938,8 +938,8 @@
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #9a97b0;
-    border-bottom: 1px solid #efedfa;
+    color: var(--accent-ink);
+    border-bottom: 1px solid var(--accent-line);
     margin-bottom: 0.3rem;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -952,20 +952,20 @@
     padding: 0.35rem 0.7rem;
     font-size: 0.78rem;
     font-family: inherit;
-    color: #4a4770;
+    color: var(--accent-ink);
     background: transparent;
     border: none;
     cursor: pointer;
   }
   .query-menu-item:hover {
-    background: #f0effc;
-    color: #2f2b5a;
+    background: var(--accent-surface);
+    color: var(--ink);
   }
   .query-menu-error {
     padding: 0.35rem 0.7rem;
     margin-top: 0.25rem;
-    border-top: 1px solid #f0d5d5;
-    color: #b05656;
+    border-top: 1px solid var(--danger-line);
+    color: var(--danger-ink);
     font-size: 0.72rem;
     white-space: normal;
   }
@@ -973,14 +973,14 @@
   .group-delete {
     padding: 0 0.35rem;
     font-size: 0.55rem;
-    color: #b0a5cf;
+    color: var(--accent-ink);
     background: transparent;
     border: none;
     cursor: pointer;
     font-family: inherit;
   }
   .group-delete:hover {
-    color: #d47272;
+    color: var(--danger-ink);
   }
 
   /* Rename affordance (dirs + groups) — hidden-ish until hover so
@@ -988,14 +988,14 @@
   .group-edit {
     padding: 0 0.2rem;
     font-size: 0.55rem;
-    color: #c9c4e4;
+    color: var(--accent-ink-dim);
     background: transparent;
     border: none;
     cursor: pointer;
     font-family: inherit;
   }
   .group-edit:hover {
-    color: #7a76c9;
+    color: var(--accent-ink);
   }
 
   /* WebKit (Tauri's WKWebView) does not initiate an HTML5 drag from
@@ -1019,24 +1019,24 @@
   .group-unlink {
     padding: 0 0.2rem;
     font-size: 0.6rem;
-    color: #7ab89a;
+    color: var(--success-ink);
     background: transparent;
     border: none;
     cursor: pointer;
     font-family: inherit;
   }
   .group-unlink:hover {
-    color: #4f9b78;
+    color: var(--ink);
   }
 
   .nest-badge {
     margin-left: 0.25rem;
     font-size: 0.6rem;
-    color: #7ab89a;
+    color: var(--success-ink);
     font-variant-numeric: tabular-nums;
   }
   .nest-mark {
-    color: #7ab89a;
+    color: var(--success-ink);
     font-size: 0.7rem;
     margin-right: 0.1rem;
   }
@@ -1048,13 +1048,13 @@
     padding: 0.2rem 0;
     text-align: center;
     font-size: 0.6rem;
-    color: #9a96d9;
+    color: var(--accent-ink);
   }
   .dir-row > .dir-name {
     flex: 1;
   }
   .dir-name .tag-name {
-    color: #6f6c9c;
+    color: var(--accent-ink);
     font-weight: 500;
   }
 
@@ -1064,9 +1064,9 @@
     min-width: 0;
     padding: 0.15rem 0.35rem;
     font-size: 0.75rem;
-    border: 1px solid #8a86ff;
+    border: 1px solid var(--accent-line-strong);
     border-radius: 4px;
-    background: #fff;
+    background: var(--surface-raised);
     font-family: inherit;
   }
   .rename-input:focus {
@@ -1076,8 +1076,8 @@
   /* Root drop target (the "● all" button) while a sidebar row is
      being dragged. */
   .drop-target-root {
-    background: #eef7f4 !important;
-    outline: 2px solid #7ab89a;
+    background: var(--success-surface) !important;
+    outline: 2px solid var(--success-fill);
     outline-offset: -2px;
   }
 
@@ -1092,16 +1092,16 @@
     flex: 1;
     padding: 0.15rem 0.35rem;
     font-size: 0.7rem;
-    border: 1px solid #d9d5f2;
+    border: 1px solid var(--accent-line);
     border-radius: 4px;
-    background: #fff;
+    background: var(--surface-raised);
     font-family: inherit;
   }
   .group-create button {
     font-size: 0.65rem;
     padding: 0.1rem 0.5rem;
-    background: #7a76c9;
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
     border: none;
     border-radius: 4px;
     cursor: pointer;
@@ -1110,7 +1110,7 @@
   .group-error {
     padding: 0.15rem 0.5rem;
     font-size: 0.6rem;
-    color: #d47272;
+    color: var(--danger-ink);
     list-style: none;
   }
   /* A rejection stays until it is read: the next successful write clears
@@ -1118,13 +1118,13 @@
   .group-error-dismiss {
     padding: 0 0.25rem;
     font-size: 0.55rem;
-    color: #d47272;
+    color: var(--danger-ink);
     background: transparent;
     border: none;
     cursor: pointer;
     font-family: inherit;
   }
   .group-error-dismiss:hover {
-    color: #b0a5cf;
+    color: var(--accent-ink);
   }
 </style>

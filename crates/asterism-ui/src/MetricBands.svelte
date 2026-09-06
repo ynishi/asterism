@@ -160,7 +160,7 @@
      graduates out of App (wave 9). */
   h2 {
     font-size: 0.75rem;
-    color: #888;
+    color: var(--ink-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 1rem 0 0.25rem;
@@ -172,51 +172,73 @@
     gap: 0.25rem;
   }
 
+  /* The label takes a line of its own. On one line the row asks for
+     about 207px — label 3.2rem, two 3.4rem inputs, the separator, the
+     unit, four gaps — inside the 138px the 180px sidebar leaves after
+     its padding and this row's. The inputs were the only children with
+     `min-width: 0`, so the whole 68px shortfall landed on them and they
+     shrank to about two characters: the `min` / `max` placeholders were
+     cut off, which is what the sidebar showed. Fitting it on one line
+     would mean a sidebar near 250px, which is a change to the shell
+     rather than to this row. */
   .band {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.25rem;
     padding: 0.1rem 0.3rem;
   }
 
   .band-label {
     font-size: 0.8rem;
-    color: #555;
-    width: 3.2rem;
+    color: var(--ink-secondary);
+    width: 100%;
     flex: none;
   }
 
+  /* 3.1rem, not 3.4: with `MB` and `MP` beside them the wider pair
+     came to 143px against the 137px the row has, and the unit dropped
+     to a third line. Measured in the running sidebar rather than
+     reasoned about — the arithmetic on paper was 6px out. */
   .band input {
-    width: 3.4rem;
+    width: 3.1rem;
     min-width: 0;
+    /* No spinner. It costs about 15px of a 44px content box — enough
+       on its own to clip `min` / `max` — and stepping a filter
+       threshold one second at a time is not how a band is set. Typing
+       still works, and so do the arrow keys. */
+    appearance: textfield;
+    -webkit-appearance: textfield;
     font-family: inherit;
     font-size: 0.8rem;
-    color: #333;
+    color: var(--ink);
     padding: 0.1rem 0.25rem;
-    border: 1px solid #ddd;
+    border: 1px solid var(--line);
     border-radius: 4px;
-    background: #fff;
+    background: var(--surface-raised);
     font-variant-numeric: tabular-nums;
   }
   .band input:focus {
     outline: none;
-    border-color: #8a86ff;
+    border-color: var(--accent-line-strong);
   }
 
   .band-sep,
   .band-unit {
     font-size: 0.75rem;
-    color: #999;
+    color: var(--ink-faint);
   }
+  /* Sized by its own text — `s`, `MB`, `MP` are 5px to 22px, and the
+     fixed 1.6rem spent the widest one's width on all three. */
   .band-unit {
-    width: 1.6rem;
+    width: auto;
   }
 
   .band-note {
     margin: 0 0.3rem;
     font-size: 0.7rem;
     line-height: 1.3;
-    color: #9c9a89;
+    color: var(--ink-faint);
   }
 
   .band-clear {
@@ -226,11 +248,11 @@
     padding: 0.1rem 0.3rem;
     font-family: inherit;
     font-size: 0.8rem;
-    color: #555;
+    color: var(--ink-secondary);
     cursor: pointer;
     border-radius: 4px;
   }
   .band-clear:hover {
-    background: #efefe9;
+    background: var(--surface-hover);
   }
 </style>

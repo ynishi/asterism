@@ -1,6 +1,6 @@
 {
   "crate": "teams-server",
-  "version": "0.0.0",
+  "version": "0.1.1",
   "items": [
     {
       "path": "teams_server::http",

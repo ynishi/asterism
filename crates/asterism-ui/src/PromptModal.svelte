@@ -74,7 +74,7 @@
   .prompt-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(23, 22, 42, 0.35);
+    background: var(--wash-down);
     z-index: 60;
     cursor: default;
   }
@@ -85,10 +85,10 @@
     transform: translate(-50%, -50%);
     min-width: 30rem;
     max-width: 90vw;
-    background: #ffffff;
+    background: var(--surface-raised);
     padding: 1.1rem 1.3rem;
     border-radius: 10px;
-    box-shadow: 0 20px 60px rgba(23, 22, 42, 0.35);
+    box-shadow: 0 20px 60px var(--shadow-color-strong);
     z-index: 61;
     display: flex;
     flex-direction: column;
@@ -98,22 +98,22 @@
     margin: 0;
     font-size: 1rem;
     font-weight: 600;
-    color: #1f1e33;
+    color: var(--ink);
   }
   .prompt-input {
     padding: 0.55rem 0.7rem;
     font-size: 0.95rem;
-    border: 1px solid #d3d1e8;
+    border: 1px solid var(--accent-line);
     border-radius: 6px;
     outline: none;
-    color: #1f1e33;
-    background: #fafafd;
+    color: var(--ink);
+    background: var(--surface-raised);
     font-family: inherit;
   }
   .prompt-input:focus {
-    border-color: #5850ff;
-    box-shadow: 0 0 0 3px rgba(88, 80, 255, 0.18);
-    background: #ffffff;
+    border-color: var(--accent-line-strong);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+    background: var(--surface-raised);
   }
   .prompt-actions {
     display: flex;
@@ -129,20 +129,20 @@
     font-family: inherit;
   }
   .prompt-btn.primary {
-    background: #5850ff;
-    color: #ffffff;
-    border-color: #5850ff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
+    border-color: var(--accent-line-strong);
   }
   .prompt-btn.primary:hover {
-    background: #4a42e0;
-    border-color: #4a42e0;
+    background: var(--accent-fill-hover);
+    border-color: var(--accent-fill);
   }
   .prompt-btn.ghost {
     background: transparent;
-    color: #555;
-    border-color: #ccc;
+    color: var(--ink-secondary);
+    border-color: var(--line);
   }
   .prompt-btn.ghost:hover {
-    background: #f2f2f6;
+    background: var(--surface-hover);
   }
 </style>

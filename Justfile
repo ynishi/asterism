@@ -82,15 +82,30 @@ mcp-proxy-build:
     cargo build --release -p asterism-server
 
 # Build the production-shaped Dogfood app without launching it.
-# The trailing assert is the teeth for the config split (2026-08-04):
+# The trailing asserts are the teeth for the config split (2026-08-04):
 # externalBin rides tauri.bundle.conf.json via `--config` merge, and if
 # that merge ever stops reaching tauri-build the bundler would silently
 # ship an app without the sidecar — runtime would fall back to whatever
 # ffmpeg the host carries instead of failing loudly here.
+#
+# `bundle.resources` is the same claim with the same failure mode, and
+# what rides on it is what the app is allowed to be handed to somebody
+# with: the sidecar is LGPL, its licence and its notice have to travel
+# with each copy, and a resources key that misses the bundler would
+# ship a DMG that carries neither and says nothing about it. The same
+# now goes for the third-party notice, which names the packages the app
+# links and tells a reader where to get the source of the ones whose
+# licence asks for it.
+# They are asserted one by one rather than by counting the directory,
+# so a failure names the file that did not arrive.
 [group('app')]
 dogfood-build: ffmpeg-sidecar
     cd "{{ ui_dir }}" && npm run app:dogfood:build
     @test -x "{{ dogfood_app }}/Contents/MacOS/ffmpeg" || (echo "bundle is missing the ffmpeg sidecar — tauri.bundle.conf.json externalBin merge did not reach tauri-build" >&2; exit 1)
+    @for f in LICENSE-MIT LICENSE-APACHE LICENSE-LGPL-2.1 FFMPEG-NOTICE.md THIRD-PARTY-NOTICES.md; do \
+        test -f "{{ dogfood_app }}/Contents/Resources/licenses/$f" || \
+            { echo "bundle is missing Contents/Resources/licenses/$f — tauri.conf.json bundle.resources did not reach the bundler, and the app may not ship without it" >&2; exit 1; }; \
+     done
 
 # Run the large-fixture Bench app.
 [group('app')]
@@ -472,9 +487,9 @@ aidoc-guard:
 # workspace rather than the size of the change. `rust-fmt-check` reads
 # files and compiles nothing; `bindings-check` builds one package;
 # `ui-test`, `ui-check` and `ui-build` are seconds of Node;
-# `cross-member-check` reads text and compiles nothing. The two
-# left out — clippy and the test suite — compile every crate, and one
-# of them links every test binary.
+# `cross-member-check`, `licence-check` and `third-party-check` read text
+# and compile nothing. The two left out — clippy and the test suite —
+# compile every crate, and one of them links every test binary.
 #
 # `aidoc-guard` sits here rather than with those two despite doing a
 # rustdoc pass over the workspace: it is not narrowable by package,
@@ -482,7 +497,7 @@ aidoc-guard:
 #
 # Every gate whose cost does not scale with the workspace.
 [group('check')]
-check-shared: rust-fmt-check md-check bindings-check ui-test ui-check ui-build aidoc-guard cross-member-check
+check-shared: rust-fmt-check md-check bindings-check ui-test ui-check ui-build aidoc-guard cross-member-check licence-check third-party-check
 
 # Run all Rust and frontend checks. The definition of green, and what
 # `main` gets.
@@ -739,6 +754,61 @@ commit-msg-check *args:
 [group('allow-agent')]
 cross-member-check:
     python3 "{{ project_root }}/scripts/check-cross-member-readers.py"
+
+# Hold the AGPL and MIT/Apache planes apart. README's licence section
+# says the direction an `asterism-*` crate depending on a `teams-*` crate
+# would open stays empty; until this recipe nothing but that sentence
+# said so. The script's doc carries the two assertions and why both
+# answers come from `cargo metadata --locked`. In `check-shared`, so a
+# pull request is asked the same question `main` is.
+
+# Check that the permissive plane never reaches an AGPL crate.
+[group('check')]
+[group('allow-agent')]
+licence-check:
+    python3 "{{ project_root }}/scripts/check-licence-planes.py"
+
+# Regenerate the notice naming every package the app links, the licence each
+# is used under, and that licence's text. `about.toml` decides which side of
+# an `OR` is taken and says why; `about.hbs` is the shape of the file.
+#
+# Scoped to the app's own manifest rather than the workspace: the notice
+# describes what a person downloads, and `teams-server` is not in it.
+#
+# Needs `cargo-about`, and the release pins the version it installs so its
+# answer matches the committed file — match it here or the two disagree:
+#
+#     cargo install --locked cargo-about@0.9.2 --features cli
+#
+# The `--features cli` is not optional and not obvious — without it the
+# install compiles the library and reports that no binary was available,
+# having exited 0.
+
+# Generation and formatting are one act here, and have to be. `md-fmt` runs
+# prettier over `**/*.md`, which reaches this file, so a raw generator output
+# would be reformatted by the next person to run that — and the release
+# regenerates the notice and fails on any difference. Two recipes that each
+# think they own the file is how that difference arrives.
+
+# Regenerate THIRD-PARTY-NOTICES.md from Cargo.lock.
+[group('check')]
+licences:
+    cargo about generate "{{ project_root }}/about.hbs" \
+        --manifest-path "{{ project_root }}/crates/asterism-ui/src-tauri/Cargo.toml" \
+        -o "{{ project_root }}/THIRD-PARTY-NOTICES.md"
+    @"{{ ui_dir }}/node_modules/.bin/prettier" --write --log-level warn \
+        "{{ project_root }}/THIRD-PARTY-NOTICES.md"
+
+# Hold that notice and the copyleft list to the graph. Deliberately not a
+# regeneration: this runs on every branch and needs nothing but
+# `cargo metadata`, where regenerating needs a tool nothing else here
+# installs. What it can and cannot see is in the script's own doc, and the
+# release workflow closes the gap by regenerating and diffing on the run that
+# actually ships the file.
+[group('check')]
+[group('allow-agent')]
+third-party-check:
+    python3 "{{ project_root }}/scripts/check-third-party-notices.py"
 
 # The last gate before a branch is handed over, and the agent that built
 # the branch is the one that runs it. It writes to nothing remote — so
@@ -1654,6 +1724,16 @@ md-check:
 # a deliberate refusal rather than an omission. Cost is a reason to run
 # it deliberately, not a reason to leave the only surface that can check
 # the grid out of reach.
+#
+# The run leaves what it saw. Every stage writes a frame to
+# `workspace/test-logs/e2e-screens/<run>/`, newest ten runs kept, and a
+# failing test adds one more named after itself. That is how a change
+# gets looked at without a person at the keyboard: the window this
+# opens is not something an agent can read, and the frames are. Said
+# here because it is a property of this recipe, and because an agent
+# that did not know it spent an afternoon reaching for `dev-headless`
+# — which serves no frontend, as its name and its `--headless` rustdoc
+# both say.
 
 # Run the desktop e2e suite in a real window (minutes; builds a binary).
 [group('check')]
