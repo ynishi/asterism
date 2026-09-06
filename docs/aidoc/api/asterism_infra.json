@@ -453,9 +453,19 @@
       "docs": "Recovers `material.meta_text` for the library that predates the\ncolumn — [`JobKind::MaterialText`](asterism_core::domain::job::JobKind::MaterialText).\n\nBatch only. The ingest path fills this column as a side effect of\nhashing, so the per-asset form would have no caller; what needs a\nwalk is the set that was already on disk when the column arrived.\n\n# What each row costs, and why the set shrinks\n\nA row leaves the set as soon as anything is written to it, and\nsomething is written for every row the walk can *read* — `{}` when\nthe bytes carry no words is an answer, not a gap. The rows that stay\nare the ones nothing looked at: a format this recovery does not\nread, a locator with no file behind it, a file over the walk ceiling\nor gone from disk. Those are `NULL` because that is true of them,\nand they cost one page scan on the next startup rather than a\nre-read.\n\n# It re-composes what it recovers\n\nWords on a row are not yet words in a document. A row that gained\ntext here has a search document composed before that text existed,\nso the asset is queued for re-composition — but only when something\nwas actually found, because a walk over a library of text-free\npictures would otherwise enqueue one no-op job per picture."
     },
     {
+      "path": "asterism_infra::jobs::handlers::near_duplicate_rebuild",
+      "kind": "function",
+      "docs": "Recomputes one asset's near-duplicate edges from stored perceptual\nfingerprints (#250), owning `near_duplicate_synth_kinds` and\nnothing else.\n\nIts input is whatever\n[`AssetRepository::scan_perceptual_prints`][scan] returns, which is\nwhere the scope of that scan is argued.\n\n[scan]: asterism_core::domain::repository::AssetRepository::scan_perceptual_prints"
+    },
+    {
       "path": "asterism_infra::jobs::handlers::observation_sweep",
       "kind": "function",
       "docs": "Expires observations past their stream's declared retention.\nPayload is empty (`{}`) — the windows come from `STREAM_REGISTRY`,\nnever from the payload, so a queued job cannot sweep on a policy\nthat has since changed.\n\nChain-enqueues while a page comes back full. Unlike `trash_purge`\nthis needs no \"made progress\" guard: a full page here means rows\nwere deleted, so the backlog strictly shrinks and the chain\nterminates."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::perceptual_hash",
+      "kind": "function",
+      "docs": "Reduces an image's pixels to the perceptual fingerprint stored on\nits material (#250).\n\n`{ \"asset_id\": ... }` answers one asset's materials — the ingest\nfan-out's shape — and `{ \"batch\": true }` walks the rows nobody has\nlooked at."
     },
     {
       "path": "asterism_infra::jobs::handlers::preview_gen",

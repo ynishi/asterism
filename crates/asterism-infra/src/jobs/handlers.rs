@@ -652,8 +652,7 @@ enum PerceptualOutcome {
 ///
 /// `{ "asset_id": ... }` answers one asset's materials — the ingest
 /// fan-out's shape — and `{ "batch": true }` walks the rows nobody has
-/// looked at, chain-enqueueing while pages come back full. Needs no
-/// model, so unlike the encoder beside it this is never gated on one.
+/// looked at.
 pub async fn perceptual_hash(
     env: &JobEnv,
     payload: &serde_json::Value,
@@ -677,9 +676,8 @@ pub async fn perceptual_hash(
         {
             PerceptualOutcome::Measured => {
                 measured += 1;
-                // Only the primary feeds the rebuild: an edge is a
-                // claim about two assets, and what stands for an asset
-                // is its primary material.
+                // Only the primary feeds the rebuild, on the terms
+                // `scan_perceptual_prints` sets.
                 if material.ord == 0 {
                     enqueue_near_duplicate_rebuild(env, &asset.id).await?;
                 }
@@ -709,10 +707,10 @@ async fn enqueue_near_duplicate_rebuild(
     Ok(())
 }
 
-/// One page of the perceptual walk; chain-enqueues while pages come
-/// back full, the shape the fingerprint backfill established. No
-/// cursor: every answered row leaves the walk's predicate, and a
-/// deferred row is re-offered on purpose.
+/// One page of the perceptual walk, the shape the fingerprint backfill
+/// established. No cursor: every answered row leaves the walk's
+/// predicate, and a deferred row is re-offered on purpose — which is
+/// what the chain condition below has to account for.
 async fn perceptual_hash_batch(env: &JobEnv) -> Result<String, DomainError> {
     let page = env
         .deps
@@ -812,7 +810,19 @@ async fn measure_material(
         .await
         .map_err(|e| DomainError::Validation(format!("fingerprint task failed: {e}")))?;
 
-    let measurement = perceptual_measurement(decoded);
+    if let Err(complaint) = &decoded {
+        // The decoder's own words go to the log rather than to the
+        // reason column: everywhere else in the tree that column is
+        // read beside a mime, and the one person who wants the
+        // complaint is looking at this file in particular.
+        tracing::warn!(
+            event = "job.perceptual_hash.undecodable",
+            locator = %locator.to_display(),
+            error = %complaint,
+            "a claimed image did not decode; retiring the row"
+        );
+    }
+    let measurement = perceptual_measurement(decoded, mime);
     let measured = measurement.status == MeasurementStatus::Computed;
     env.deps
         .assets
@@ -849,12 +859,17 @@ fn not_an_image(mime: Option<&MimeType>) -> Measurement {
 /// Split from the job so the mapping can be read — and tested —
 /// without a job environment behind it. Every arm here is a final
 /// answer: a row that reaches this function leaves the walk.
-fn perceptual_measurement(decoded: Result<Option<String>, String>) -> Measurement {
+fn perceptual_measurement(
+    decoded: Result<Option<String>, String>,
+    mime: Option<&MimeType>,
+) -> Measurement {
     match decoded {
         // A claimed image whose bytes do not decode is a final answer
         // about the bytes rather than about the reader — the verdict
-        // the digest walk reaches for a format no probe reads.
-        Err(err) => Measurement::unsupported(err),
+        // the digest walk reaches for a format no probe reads, and it
+        // is recorded the same way, naming the format rather than the
+        // complaint.
+        Err(_) => not_an_image(mime),
         // Decoded, and there is nothing in it. `EmptySpan` is what the
         // digest walk calls a structure that ended early, and an image
         // with no pixels is exactly that.
@@ -906,12 +921,14 @@ fn near_duplicates_of(
 }
 
 /// Recomputes one asset's near-duplicate edges from stored perceptual
-/// fingerprints (#250) — the third rebuild, owning
-/// `near_duplicate_synth_kinds` and nothing else.
+/// fingerprints (#250), owning `near_duplicate_synth_kinds` and
+/// nothing else.
 ///
-/// Scans the whole persona rather than a window, for the reason the
-/// visual rebuild does: a copy can arrive years after its original.
-/// Needs no model, so unlike that one it is never gated on one.
+/// Its input is whatever
+/// [`AssetRepository::scan_perceptual_prints`][scan] returns, which is
+/// where the scope of that scan is argued.
+///
+/// [scan]: asterism_core::domain::repository::AssetRepository::scan_perceptual_prints
 pub async fn near_duplicate_rebuild(
     env: &JobEnv,
     payload: &serde_json::Value,
@@ -4391,19 +4408,23 @@ mod tests {
                 not_an_image(None),
                 Measurement::unsupported("unknown".into()),
             ),
-            // A claimed image whose bytes do not decode.
+            // A claimed image whose bytes do not decode: the format is
+            // what the column carries, not the decoder's complaint.
             (
-                perceptual_measurement(Err("bad header".into())),
-                Measurement::unsupported("bad header".into()),
+                perceptual_measurement(
+                    Err("bad header".into()),
+                    Some(&MimeType::parse("image/png")),
+                ),
+                Measurement::unsupported("image/png".into()),
             ),
             // Decoded onto no pixels.
             (
-                perceptual_measurement(Ok(None)),
+                perceptual_measurement(Ok(None), Some(&MimeType::parse("image/png"))),
                 Measurement::bare(MeasurementStatus::EmptySpan),
             ),
             // The one answer that is a fingerprint.
             (
-                perceptual_measurement(Ok(Some(value.into()))),
+                perceptual_measurement(Ok(Some(value.into())), Some(&MimeType::parse("image/png"))),
                 Measurement::computed(value.into()),
             ),
         ];

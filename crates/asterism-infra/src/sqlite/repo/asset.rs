@@ -4601,7 +4601,10 @@ impl AssetRepository for SqliteAssetRepository {
                 // between things a person can see, and a fold has
                 // already answered the question this kind asks.
                 //
-                // The partial index over the value covers this scan.
+                // The join is what makes this affordable: `asset`'s
+                // persona index answers the scope and the materials
+                // come back by primary key, so the scan is the
+                // persona's images rather than the table.
                 let mut stmt = conn.prepare(
                     "SELECT m.asset_id, m.perceptual_hash \
                        FROM material m \

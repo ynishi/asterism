@@ -36,6 +36,7 @@ projection instead of full `Asset` entities.
 - `LayerScope` — The `(asset, material, role)` triple a layer lookup is scoped by.
 - `MaterialFingerprint` — The values one fingerprint pass produces for one material.
 - `MergeOutcome` — What one call to [`AssetRepository::merge_into`] did — or, on a dry
+- `PerceptualPrint` — One asset's stored perceptual fingerprint — a row of the
 - `QueryGroupRow` — One query group as listed by
 - `RegisteredStrategy` — One `series_strategy` row: the rule, and what the row says about
 - `RetrievalIntent` — What the caller is looking for, in the Retrieval domain's own terms.

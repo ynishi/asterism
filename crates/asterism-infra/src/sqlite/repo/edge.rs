@@ -67,7 +67,7 @@ impl SqliteEdgeRepository {
         Self { isle }
     }
 
-    /// The shared unit of work of the two rebuild ports: atomically
+    /// The shared unit of work of the rebuild ports: atomically
     /// replace the edges of `owned_kinds` that originate from
     /// `asset_id`. The `kind IN (…)` clause is what keeps everything
     /// outside the owning rebuild's subset alive across a pass, and
@@ -704,10 +704,12 @@ mod tests {
         driver.shutdown().await.unwrap();
     }
 
-    /// The two rebuilds run from different inputs on different
-    /// cadences, so each pass must leave the other's edges — and the
-    /// asserted ones — standing. This is the regression the scope
-    /// split exists for.
+    /// The rebuilds run from different inputs on different cadences, so
+    /// each pass must leave another's edges — and the asserted ones —
+    /// standing. This is the regression the scope split exists for, and
+    /// it is kept beside the wider fixture above rather than folded
+    /// into it: the windowed-versus-visual pair is where the collateral
+    /// delete actually happened.
     #[tokio::test]
     async fn the_two_rebuilds_cannot_destroy_each_others_edges() {
         let (isle, driver) = open_and_migrate_in_memory().await.unwrap();

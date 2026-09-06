@@ -26,11 +26,18 @@ The two must not be confused when reading a schema — a
 
 Stored values carry a `sha256:` prefix. Exact-byte matching is the
 cheap half of duplicate detection; the useful half is perceptual
-(a re-encoded or resized copy of the same photograph), and that
-wants a different algorithm rather than a different column. A
-prefixed value lets a later pHash / embedding land beside this one
-and lets a reader tell at a glance which kind of "same" a row is
-claiming.
+(a re-encoded or resized copy of the same photograph), and the
+prefix is what lets a reader tell at a glance which kind of "same"
+a row is claiming.
+
+This paragraph expected that half to land beside these values,
+under its own tag in the same column. It did not: #250 gave the
+perceptual value three columns of its own, because
+[`is_duplicate_key`] has to refuse it — and a value the duplicate
+query must never group on has no business in the column that query
+reads. The prefix still earns its place for the reason above, and
+the tag it reserved (`p1-dhash:`) is spelled somewhere the axes
+cannot reach.
 
 # Select or re-render: a new digest has to say which
 

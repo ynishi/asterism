@@ -12,9 +12,10 @@ and this project adheres to
 
 - **A resized copy stops reading as an unrelated file** (#250). The three exact
   axes are SHA-256 and say so, which leaves a resized or recompressed copy
-  sharing no bytes with its original; `content_hash` has said all along that the
-  prefix on a stored value exists so a later perceptual value can land beside
-  it, and this is that value. A difference hash at 128 bits, comparing along
+  sharing no bytes with its original. `content_hash` reserved the tag space for
+  a later perceptual value and this takes it — in columns of its own rather than
+  beside the digests, because a value those axes have to refuse cannot share a
+  column they read. A difference hash at 128 bits, comparing along
   rows and again down columns, on a new `material.perceptual_hash` column with
   the status and reason its three neighbours carry (V105). A `perceptual_hash`
   job fills it — per-asset from the ingest fan-out at fingerprint priority, or a
@@ -43,9 +44,11 @@ and this project adheres to
   rather than leaving it to be discovered: a centre crop moves every row and
   column of the grid at once and lands where different pictures live. The
   relation stream's own look-alikes are out of reach too, for the opposite
-  reason — they keep the base's background and jitter shapes too small to
-  survive the reduction, so they sit 0 bits away. That is the encoder's
-  distinction to draw; a look-alike is neither a copy nor a different picture.
+  reason — they keep the base's two background colours and jitter a gradient
+  angle and shapes too small to survive the reduction, all of which an 8-row
+  grid is entitled to lose, so the closest of them sat 0 bits away. That is the
+  encoder's distinction to draw; a look-alike is neither a copy nor a different
+  picture.
 - **None of it touches duplicate detection** (#250). `duplicate_conflict.axis`
   keeps its three-value CHECK, the axis walk is unchanged, and
   `is_duplicate_key` refuses a value carrying the perceptual tag — so a claim

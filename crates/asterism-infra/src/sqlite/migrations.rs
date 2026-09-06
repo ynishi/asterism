@@ -7661,14 +7661,12 @@ CREATE INDEX idx_team_asset_link_on_asset
 ///
 /// # Why this is not a fourth duplicate axis
 ///
-/// The value answers "do these look alike", and the axes answer "are
-/// these the same bytes". `duplicate_conflict.axis` keeps its
-/// three-value CHECK, `is_duplicate_key` keeps refusing a value that
-/// carries this tag, and detection's walk is untouched — a claim this
-/// approximate has no business in a sequence that ends by writing
-/// `identical_to` and enqueueing a fold. What reads this column is a
-/// rebuild that proposes edges, and it lands with the job that fills
-/// the column.
+/// The value answers "do these look alike" and the axes answer "are
+/// these the same bytes"; why the two must not meet is argued where
+/// the axes are defined, in `asterism_core::domain::content_hash`.
+/// What this step does about it is nothing, which is the point:
+/// `duplicate_conflict.axis` keeps its three-value CHECK and no
+/// existing column changes meaning.
 ///
 /// # Why the existing rows split on mime
 ///
@@ -7685,16 +7683,17 @@ CREATE INDEX idx_team_asset_link_on_asset
 /// is one pass saved over a library that already exists, not a second
 /// rule about which materials have a fingerprint.
 ///
-/// # Why an index here when V92 added none
+/// # No index, like V92 and unlike the three digests
 ///
-/// V92's columns are read by queries that scan `material` whole
-/// regardless. This one is read by a rebuild that wants only the rows
-/// holding a value, and the partial index over the value covers it:
-/// the scan reads the fingerprints without touching the table. It does
-/// not serve equality lookup, which is what the other three indexes
-/// are for and what this column will never be asked for — two
-/// fingerprints that match exactly are a special case of being close,
-/// not the question.
+/// Those three are indexed because duplicate detection looks a digest
+/// up by value; nothing ever looks a fingerprint up that way, since two
+/// that match exactly are a special case of being close rather than the
+/// question anyone asks. The two queries that do read this column are a
+/// walk filtering on the status and a rebuild that joins `asset` to
+/// scope itself to one persona — and that join is answered by
+/// `asset`'s own persona index, with the materials reached by primary
+/// key. An index over the value was written here first and measured
+/// afterwards: `EXPLAIN QUERY PLAN` never consulted it.
 const V105_MATERIAL_PERCEPTUAL_HASH: &str = r#"
 ALTER TABLE material ADD COLUMN perceptual_hash TEXT;
 ALTER TABLE material ADD COLUMN perceptual_hash_status TEXT NOT NULL DEFAULT 'pending';
@@ -7704,10 +7703,6 @@ UPDATE material SET
     perceptual_hash_status = 'unsupported',
     perceptual_hash_reason = COALESCE(mime, 'unknown')
 WHERE mime IS NULL OR mime NOT LIKE 'image/%';
-
-CREATE INDEX idx_material_perceptual_hash
-    ON material (perceptual_hash)
-    WHERE perceptual_hash IS NOT NULL;
 "#;
 
 /// Migrations in application order. **Append only** — never rewrite an

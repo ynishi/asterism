@@ -199,7 +199,12 @@ pub struct Material {
     /// holds, in the vocabulary the three digest columns use.
     pub perceptual_hash_status: MeasurementStatus,
     /// The status's free-text payload, when it carries one — the mime
-    /// that could not be decoded, or the error that stopped the read.
+    /// of bytes the walk declined to open, in the spelling the three
+    /// columns above use for the same answer.
+    ///
+    /// A read that stopped writes nothing here at all: that row is
+    /// still the walk's to offer, and recording a disconnected disk
+    /// would make a temporary answer permanent.
     pub perceptual_hash_reason: Option<String>,
     /// When this material record was created.
     pub created_at: DateTime<Utc>,

@@ -1,10 +1,18 @@
 //! `ConstellationEdge` — the backbone of the hover-burst experience.
 //!
 //! One edge represents an asset-to-asset relationship that surfaces when the
-//! user hovers a card. The `edge_rebuild` job persists edges incrementally,
-//! scoped to a window around each asset (same session id or ±48h) so we
-//! avoid an O(n²) full scan. Are.na-style "same channel" connections are
-//! not stored here — they are derived from the `asset_tag` table on demand.
+//! user hovers a card. Are.na-style "same channel" connections are not stored
+//! here — they are derived from the `asset_tag` table on demand.
+//!
+//! Several jobs persist edges and they do not agree about scope, which is a
+//! property of the questions rather than an inconsistency: `edge_rebuild`
+//! works a window around each asset (same session id or ±48h) because "these
+//! arrived together" is a claim about a window, while the visual and
+//! near-duplicate rebuilds scan the whole persona because a copy of a picture
+//! can arrive years after the original. What keeps the second kind affordable
+//! is that it compares stored values rather than re-reading anything, and
+//! what keeps the three apart is [`EdgeKind::is_synth`] and the disjoint
+//! scopes beside it.
 
 use crate::domain::value::{AssetId, EdgeId};
 use crate::error::DomainError;
@@ -160,12 +168,9 @@ pub enum EdgeKind {
     /// The two are the same picture, transformed (#250) — proposed from
     /// perceptual fingerprints, never asserted by anyone.
     ///
-    /// Synthetic and disposable, with a **third** owner. Neither the
-    /// windowed rebuild nor the visual one may delete it: it is derived
-    /// from something both are blind to, and it outlives a profile that
-    /// binds no model at all, which the visual population does not. Its
-    /// scope is
-    /// [`near_duplicate_synth_kinds`](Self::near_duplicate_synth_kinds).
+    /// Synthetic and disposable, with a delete scope of its own:
+    /// [`near_duplicate_synth_kinds`](Self::near_duplicate_synth_kinds),
+    /// which states why it cannot be shared with the visual one.
     ///
     /// **Not [`IdenticalTo`](Self::IdenticalTo), and that is the whole
     /// point.** That kind says two files hold the same bytes, is

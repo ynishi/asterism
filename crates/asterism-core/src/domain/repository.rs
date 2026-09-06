@@ -1463,11 +1463,11 @@ pub trait AssetRepository: Send + Sync {
     /// whatever the walk found, an unsupported format included.
     ///
     /// **The format is not filtered here**, for the reason
-    /// [`scan_untexted_materials`](Self::scan_untexted_materials)
-    /// gives at greater length: what can be read is the reader's
-    /// question, and a list of formats in SQL is a second copy of it
-    /// somewhere the reader cannot see. A row whose bytes are not an
-    /// image comes back from this walk exactly once and retires.
+    /// [`scan_unrecovered_text`](Self::scan_unrecovered_text) gives at
+    /// greater length: what can be read is the reader's question, and
+    /// a list of formats in SQL is a second copy of it somewhere the
+    /// reader cannot see. A row whose bytes are not an image comes
+    /// back from this walk exactly once and retires.
     ///
     /// Same row shape and same composite cursor as its two siblings,
     /// because it is the same table walked for the same kind of reason.
@@ -2583,16 +2583,16 @@ pub trait EdgeRepository: Send + Sync {
     /// time an input changes, so it must be free to throw the old set
     /// away; but the same asset can also carry *asserted* links
     /// ([`EdgeKind::DerivedFrom`] written at reify or at a correlated
-    /// re-ingest) that nothing can recompute, and visual edges the
-    /// other rebuild derived from vectors this job knows nothing about.
-    /// An unscoped delete takes them all, and the assertion has no
-    /// second copy to restore from.
+    /// re-ingest) that nothing can recompute, and edges another rebuild
+    /// derived from inputs this job knows nothing about. An unscoped
+    /// delete takes them all, and the assertion has no second copy to
+    /// restore from.
     ///
     /// Implementations must ignore any edge outside the windowed
-    /// subset in `edges` — visual and asserted alike — rather than
-    /// letting it ride in through the rebuild path; use
-    /// [`Self::add_edges`] for provenance and
-    /// [`Self::replace_visual_edges_of`] for visual suggestions.
+    /// subset in `edges` rather than letting it ride in through the
+    /// rebuild path. Where each kind belongs is
+    /// [`EdgeKind::is_synth`] and the scope functions beside it;
+    /// provenance goes through [`Self::add_edges`].
     async fn replace_synth_edges_of(
         &self,
         asset_id: &AssetId,
@@ -2603,12 +2603,11 @@ pub trait EdgeRepository: Send + Sync {
     /// `asset_id` — the unit of work for the visual rebuild (#112).
     ///
     /// The mirror of [`Self::replace_synth_edges_of`], scoped to
-    /// [`EdgeKind::visual_synth_kinds`]: the two rebuilds recompute
-    /// from different inputs on different cadences (the candidate
-    /// window versus the whole persona's stored vectors), so each must
-    /// be free to throw away its own set without touching the other's.
-    /// Implementations must ignore any edge outside the visual subset
-    /// rather than letting a windowed or asserted kind ride in.
+    /// [`EdgeKind::visual_synth_kinds`]: the rebuilds recompute from
+    /// different inputs on different cadences (the candidate window
+    /// versus the whole persona's stored vectors), so each must be free
+    /// to throw away its own set without touching another's.
+    /// Implementations must ignore any edge outside the visual subset.
     async fn replace_visual_edges_of(
         &self,
         asset_id: &AssetId,
@@ -2619,11 +2618,9 @@ pub trait EdgeRepository: Send + Sync {
     /// originating from `asset_id` — the unit of work for that rebuild
     /// (#250).
     ///
-    /// A third scope beside the two above, for the reason
-    /// [`EdgeKind::near_duplicate_synth_kinds`] states: this population
-    /// is derived from a value no model produced and survives a profile
-    /// that binds none, so a model install or removal must not take it
-    /// along. Implementations must ignore any edge outside the subset.
+    /// Its own scope rather than a share of the visual one, for the
+    /// reason [`EdgeKind::near_duplicate_synth_kinds`] states.
+    /// Implementations must ignore any edge outside the subset.
     async fn replace_near_duplicate_edges_of(
         &self,
         asset_id: &AssetId,

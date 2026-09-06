@@ -385,7 +385,10 @@ pub enum JobKind {
     /// [`MaterialHash`](Self::MaterialHash) uses:
     /// `{ "asset_id": "<uuid>" }` fingerprints one asset (the ingest
     /// fan-out), and `{ "batch": true }` walks materials with no answer
-    /// yet, chain-enqueueing itself while pages come back full.
+    /// yet, chain-enqueueing itself while a full page also answered
+    /// something. Fullness alone is not the condition: a page of
+    /// nothing but unreadable originals would chain into the same page
+    /// for as long as the disk stayed away.
     ///
     /// Where [`VisualFeature`](Self::VisualFeature) skips without a
     /// bound model, this never skips: the fingerprint is pixels and
@@ -395,22 +398,25 @@ pub enum JobKind {
     /// second one.
     ///
     /// Off the ingest critical path for the reason the fingerprint walk
-    /// is: it opens and decodes the original. A completed pass
-    /// chain-enqueues
-    /// [`NearDuplicateRebuild`](Self::NearDuplicateRebuild) for the
-    /// same asset.
+    /// is: it opens and decodes the original. A pass that lands a
+    /// fingerprint on a **primary** material chain-enqueues
+    /// [`NearDuplicateRebuild`](Self::NearDuplicateRebuild) for that
+    /// asset; one that retires the row, or that answers an `ord > 0`
+    /// material, enqueues nothing — there is no value for the rebuild
+    /// to be near, and an edge is a claim about two assets.
     PerceptualHash,
     /// Recomputes one asset's near-duplicate edges from stored
-    /// perceptual fingerprints (#250) — a third rebuild beside
-    /// [`EdgeRebuild`](Self::EdgeRebuild) and
-    /// [`VisualEdgeRebuild`](Self::VisualEdgeRebuild), owning
+    /// perceptual fingerprints (#250), owning
     /// `near_duplicate_synth_kinds` and nothing else.
     ///
-    /// Payload: `{ "asset_id": "<uuid>" }`. The scan is the whole
-    /// persona's stored fingerprints, deliberately not the ±48 h
-    /// candidate window; only pairs within the measured distance are
-    /// materialised, and an asset with no fingerprint of its own has
+    /// Payload: `{ "asset_id": "<uuid>" }`. The input is the whole
+    /// persona's stored fingerprints — see
+    /// [`AssetRepository::scan_perceptual_prints`][scan] for why that
+    /// is not a window — and only pairs within the measured distance
+    /// are materialised. An asset with no fingerprint of its own has
     /// its edges cleared rather than left behind.
+    ///
+    /// [scan]: crate::domain::repository::AssetRepository::scan_perceptual_prints
     NearDuplicateRebuild,
     /// Encodes an image's pixels into the stored feature vector the
     /// visual layer (#112) retrieves by.

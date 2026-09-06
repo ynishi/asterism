@@ -17,21 +17,19 @@
 //!
 //! ## This value never enters the duplicate axes
 //!
-//! It is not a fourth [`DuplicateAxis`]. Detection walks the axes
+//! It is not a fourth duplicate axis. Detection walks the axes
 //! strongest-first, stops at the first agreement, writes an
 //! `identical_to` edge, and may enqueue a fold; a claim this
 //! approximate has no business anywhere in that sequence, and
-//! `is_duplicate_key` refuses a value carrying this tag by construction
-//! — the prefix test it runs is the one that keeps `phash:` values from
-//! grouping with files they share no bytes with.
+//! `asterism_core::domain::content_hash::is_duplicate_key` refuses a
+//! value carrying this tag by construction — it tests for the axis's
+//! own prefix, and no axis spells this one.
 //!
 //! So the tag exists to say which question a stored value answers, the
 //! way every other digest in this workspace does, and to stay
 //! unmistakable for the ones that answer sameness. It is not a
 //! sub-namespace of any of them: `p1-dhash:` begins with no other tag,
 //! which is what keeps a reader from mistaking it for one.
-//!
-//! [`DuplicateAxis`]: https://docs.rs/asterism-core
 
 use image::RgbImage;
 use image::imageops::{FilterType, grayscale, resize};
@@ -175,12 +173,13 @@ mod tests {
     /// shapes large enough to survive the reduction to an 8-row grid.
     ///
     /// The relation stream's own scenes are not that, and finding out
-    /// why is what this file measured: its look-alike keeps the base's
-    /// background and jitters shapes that occupy a few percent of the
-    /// canvas, so the two reduce to the same grid and sit 0 bits apart.
-    /// That is the encoder's distinction to draw, not this one's — this
-    /// layer separates a copy from a different picture, and a
-    /// look-alike is neither.
+    /// why is what this file measured first. Its look-alike keeps the
+    /// base's two background colours and jitters the gradient angle and
+    /// a pair of shapes that occupy a few percent of the canvas — and
+    /// an 8-row grid is entitled to lose all of that, so the closest of
+    /// them sat 0 bits from its base. That is the encoder's distinction
+    /// to draw rather than this one's: this layer separates a copy from
+    /// a different picture, and a look-alike is neither.
     /// `i` walks every (background, shape) pairing exactly once, so no
     /// two scenes differ by the gradient angle alone — a difference an
     /// 8-row grid is entitled to lose.
