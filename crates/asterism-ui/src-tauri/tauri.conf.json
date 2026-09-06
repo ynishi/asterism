@@ -30,8 +30,10 @@
     "copyright": "Copyright (c) 2026 Yutaka Nishimura",
     "category": "Productivity",
     "resources": {
-      "../../../LICENSE-MIT": "LICENSE-MIT",
-      "../../../LICENSE-APACHE": "LICENSE-APACHE"
+      "../../../LICENSE-MIT": "licenses/LICENSE-MIT",
+      "../../../LICENSE-APACHE": "licenses/LICENSE-APACHE",
+      "../../../LICENSE-LGPL-2.1": "licenses/LICENSE-LGPL-2.1",
+      "../../../FFMPEG-NOTICE.md": "licenses/FFMPEG-NOTICE.md"
     },
     "icon": [
       "icons/32x32.png",
