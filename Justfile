@@ -93,8 +93,9 @@ mcp-proxy-build:
 # with: the sidecar is LGPL, its licence and its notice have to travel
 # with each copy, and a resources key that misses the bundler would
 # ship a DMG that carries neither and says nothing about it. The same
-# now goes for the third-party notice, which names the 678 packages the
-# app links and the six of them whose licence obliges a source offer.
+# now goes for the third-party notice, which names the packages the app
+# links and tells a reader where to get the source of the ones whose
+# licence asks for it.
 # They are asserted one by one rather than by counting the directory,
 # so a failure names the file that did not arrive.
 [group('app')]
@@ -774,9 +775,10 @@ licence-check:
 # Scoped to the app's own manifest rather than the workspace: the notice
 # describes what a person downloads, and `teams-server` is not in it.
 #
-# Needs `cargo-about`, which is not a dependency of anything else here:
+# Needs `cargo-about`, and the release pins the version it installs so its
+# answer matches the committed file — match it here or the two disagree:
 #
-#     cargo install cargo-about --features cli
+#     cargo install --locked cargo-about@0.9.2 --features cli
 #
 # The `--features cli` is not optional and not obvious — without it the
 # install compiles the library and reports that no binary was available,

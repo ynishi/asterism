@@ -242,11 +242,12 @@ The application links open-source Rust packages, and
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) names every one of them with
 the licence it is used under and that licence's text. It is generated from
 `Cargo.lock` by `just licences`; `about.toml` records which side of a choice
-like `MIT OR Apache-2.0` this project takes, and why. Six of those packages are
-under MPL-2.0, which asks for their source to be obtainable as well as
-attributed — the release carries their archives beside the download, and
-`scripts/copyleft-sources.txt` is the list held to the dependency graph in both
-directions.
+like `MIT OR Apache-2.0` this project takes, and why, and a licence that is not
+on its accepted list stops the generator rather than being resolved by default.
+Some of those packages are under MPL-2.0, which asks for their source to be
+obtainable as well as attributed — the release carries their archives beside the
+download, the notice inside the app says so, and `scripts/copyleft-sources.txt`
+is the list held to the generated notice in both directions.
 
 The bundle is built to carry all five of those files under
 `Contents/Resources/licenses/`, and `just dogfood-build` fails when any of them
