@@ -236,9 +236,21 @@ later ([LICENSE-LGPL-2.1](LICENSE-LGPL-2.1)). It is spawned as a separate
 process rather than linked, so it does not reach the crates above.
 [FFMPEG-NOTICE.md](FFMPEG-NOTICE.md) is what travels with it — the copyright
 notice, the configuration it was built with, where the source is, and the credit
-libjpeg asks for. The bundle is built to carry that pair and the two permissive
-texts under `Contents/Resources/licenses/`, and `just dogfood-build` fails when
-any of the four does not arrive there.
+libjpeg asks for.
+
+The application links open-source Rust packages, and
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) names every one of them with
+the licence it is used under and that licence's text. It is generated from
+`Cargo.lock` by `just licences`; `about.toml` records which side of a choice
+like `MIT OR Apache-2.0` this project takes, and why. Six of those packages are
+under MPL-2.0, which asks for their source to be obtainable as well as
+attributed — the release carries their archives beside the download, and
+`scripts/copyleft-sources.txt` is the list held to the dependency graph in both
+directions.
+
+The bundle is built to carry all five of those files under
+`Contents/Resources/licenses/`, and `just dogfood-build` fails when any of them
+does not arrive there.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
