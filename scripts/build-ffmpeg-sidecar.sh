@@ -16,8 +16,9 @@
 # so the whole build is `./configure && make` with no dependency
 # bootstrap, and the result links only /usr/lib + system frameworks
 # (verified below). Full static linking is not a goal: Apple does not
-# support statically linked binaries (QA1118), and the LGPL system
-# library exception covers frameworks the OS ships.
+# support statically linked binaries (QA1118), and what the OS ships is
+# not part of FFmpeg's corresponding source to begin with — see the
+# note on the link check below for why no exception is being invoked.
 #
 # Output: target/ffmpeg-sidecar/ffmpeg-<host-triple>
 #   - under target/ on purpose: already gitignored, wiped by
@@ -32,6 +33,29 @@
 set -euo pipefail
 
 FFMPEG_VERSION="${FFMPEG_VERSION:-8.0}"
+
+# The bytes this build is allowed to compile, pinned per version.
+#
+# Provenance was established once, by hand, and this digest is what
+# carries it into every later run: the 8.0 tarball was checked against
+# `ffmpeg-8.0.tar.xz.asc` with FFmpeg's release signing key, whose
+# fingerprint FCF986EA15E6E293A5644F10B4322F04D67658D8 matches the one
+# published on ffmpeg.org/download.html, and gpg reported a good
+# signature. Upstream publishes signatures rather than checksum files,
+# so there is nothing to fetch and compare against automatically;
+# repeating the gpg check here would mean shipping a key or trusting a
+# keyserver at build time, and a digest recorded after a verification
+# somebody did is the stronger of the two.
+#
+# What it buys after that is what a pin always buys: a download that
+# came back different — corrupted, intercepted, or silently re-rolled
+# upstream — stops here instead of being compiled and signed into the
+# app. FFMPEG-NOTICE.md states this same digest as the source the
+# binary was built from, so the two are one fact rather than two.
+#
+# Bumping FFMPEG_VERSION means verifying the new tarball's signature
+# and putting its digest here in the same commit.
+FFMPEG_SHA256="${FFMPEG_SHA256:-b2751fccb6cc4c77708113cd78b561059b6fa904b24162fa0be2d60273d27b8e}"
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out_dir="$root/target/ffmpeg-sidecar"
@@ -52,6 +76,21 @@ if [[ ! -f "$tarball" ]]; then
     echo "downloading ffmpeg $FFMPEG_VERSION source..."
     curl -fSL --retry 3 -o "$tarball" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
 fi
+
+# Before anything is unpacked, and on every run rather than only after a
+# download: a tarball already sitting in target/ is exactly as unchecked
+# as one that just arrived.
+actual="$(shasum -a 256 "$tarball" | cut -d' ' -f1)"
+if [[ "$actual" != "$FFMPEG_SHA256" ]]; then
+    echo "ffmpeg $FFMPEG_VERSION tarball is not the pinned one:" >&2
+    echo "  expected $FFMPEG_SHA256" >&2
+    echo "  got      $actual" >&2
+    echo "  at       $tarball" >&2
+    echo "Delete it to re-download, or — if the pin is what is stale —" >&2
+    echo "verify the new tarball's signature and update FFMPEG_SHA256." >&2
+    exit 1
+fi
+
 rm -rf "$src_dir"
 tar -xf "$tarball" -C "$out_dir"
 
@@ -99,8 +138,19 @@ make -j"$(sysctl -n hw.ncpu)"
 ./ffmpeg -hide_banner -encoders | grep -Eq '^ V.* mjpeg ' || { echo "missing mjpeg encoder (thumbnails)" >&2; exit 1; }
 ./ffmpeg -hide_banner -muxers   | grep -Eq ' mp4 ' || { echo "missing mp4 muxer" >&2; exit 1; }
 # GPL tripwire: the license line of -version must say LGPL, and no
-# third-party dylib may appear in the link table (system paths only —
-# that is the LGPL §6 system library exception boundary).
+# third-party dylib may appear in the link table.
+#
+# System paths only, and the reason is not the exception this comment
+# used to name. §6's system-library exception belongs to the combined
+# work case — a program of your own linked against the library and
+# distributed under terms of your choice. What ships here is FFmpeg's
+# own tool linked against FFmpeg's own libraries, wholly LGPL, which
+# §4 governs; under §4 the frameworks the OS ships are not part of
+# FFmpeg's corresponding source at all, so no exception has to be
+# invoked to leave them out. A *third-party* dylib would be a different
+# matter, which is what this check is for: it would be a library the
+# binary needs, that this build did not build and does not offer, and
+# it would also break on a machine that does not happen to have it.
 ./ffmpeg -version | grep -q 'the FFmpeg developers' || { echo "unexpected -version output" >&2; exit 1; }
 if ./ffmpeg -version | head -3 | grep -qi 'gpl'; then
     if ! ./ffmpeg -version | head -3 | grep -qi 'lgpl'; then
