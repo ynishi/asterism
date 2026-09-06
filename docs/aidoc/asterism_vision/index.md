@@ -1,4 +1,4 @@
-# asterism-vision 0.1.0
+# asterism-vision 0.1.1
 
 # asterism-vision — model *use* for visual features (#112)
 

@@ -1,6 +1,6 @@
 {
   "crate": "asterism-exporter-comfy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "items": [
     {
       "path": "asterism_exporter_comfy::ACTION_IMG2IMG",

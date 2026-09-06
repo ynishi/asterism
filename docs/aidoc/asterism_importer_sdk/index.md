@@ -1,4 +1,4 @@
-# asterism-importer-sdk 0.1.0
+# asterism-importer-sdk 0.1.1
 
 # asterism-importer-sdk
 

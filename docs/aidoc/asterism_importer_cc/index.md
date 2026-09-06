@@ -1,4 +1,4 @@
-# asterism-importer-cc 0.1.0
+# asterism-importer-cc 0.1.1
 
 Claude Code session import adapter — turns a session's JSONL log
 into `Footprint::ChatMessage`s (plus `Footprint::Image` for pasted

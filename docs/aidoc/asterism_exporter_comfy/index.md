@@ -1,4 +1,4 @@
-# asterism-exporter-comfy 0.1.0
+# asterism-exporter-comfy 0.1.1
 
 # asterism-exporter-comfy
 

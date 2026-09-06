@@ -1,4 +1,4 @@
-# teams-core 0.1.0
+# teams-core 0.1.1
 
 # teams-core — domain layer of the Asterism teams plane
 

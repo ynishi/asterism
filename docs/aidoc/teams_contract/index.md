@@ -1,4 +1,4 @@
-# teams-contract 0.1.0
+# teams-contract 0.1.1
 
 # teams-contract — wire contract for the teams plane
 

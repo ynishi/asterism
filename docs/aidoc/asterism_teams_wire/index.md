@@ -1,4 +1,4 @@
-# asterism-teams-wire 0.1.0
+# asterism-teams-wire 0.1.1
 
 # asterism-teams-wire — what a member's client and a team server
 both say

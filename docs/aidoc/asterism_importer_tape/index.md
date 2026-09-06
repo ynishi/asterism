@@ -1,4 +1,4 @@
-# asterism-importer-tape 0.1.0
+# asterism-importer-tape 0.1.1
 
 Tape import adapter — turns an exported conversation tape file into
 `Footprint::Tape`.
