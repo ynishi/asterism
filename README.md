@@ -229,15 +229,16 @@ plane, and is MIT/Apache-2.0 — which is what lets the local-first core link it
 at all, and what makes the server implementable by something that is not this
 codebase. Its manifest says so at the field.
 
-The three paragraphs above are about this repository's own code. The macOS app
-also ships a binary that is not ours: an `ffmpeg` built from unmodified upstream
+The paragraphs above are about this repository's own code. The macOS app also
+ships a binary that is not ours: an `ffmpeg` built from unmodified upstream
 source, licensed under the GNU Lesser General Public License, version 2.1 or
 later ([LICENSE-LGPL-2.1](LICENSE-LGPL-2.1)). It is spawned as a separate
 process rather than linked, so it does not reach the crates above.
 [FFMPEG-NOTICE.md](FFMPEG-NOTICE.md) is what travels with it — the copyright
 notice, the configuration it was built with, where the source is, and the credit
-libjpeg asks for — and the same files are inside the app under
-`Contents/Resources/licenses/`.
+libjpeg asks for. The bundle is built to carry that pair and the two permissive
+texts under `Contents/Resources/licenses/`, and `just dogfood-build` fails when
+any of the four does not arrive there.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be

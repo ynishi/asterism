@@ -9,7 +9,13 @@ LGPL. Nothing here is legal advice.
 
 The binary is **FFmpeg 8.0**, built from unmodified upstream source, and it is
 licensed under the **GNU Lesser General Public License, version 2.1 or later**.
-The full text is beside this file as [LICENSE-LGPL-2.1](LICENSE-LGPL-2.1).
+The full text is beside this file as [LICENSE-LGPL-2.1](LICENSE-LGPL-2.1) — the
+Free Software Foundation's, carried in verbatim from `COPYING.LGPLv2.1` in the
+tarball named below, which is the copy FFmpeg itself ships.
+
+What follows is what the binary says about itself: the copyright line it prints
+under `ffmpeg -version`, then the notice it prints under `ffmpeg -L`, whose
+closing pointer to the licence is replaced by the one above.
 
 ```
 Copyright (c) 2000-2025 the FFmpeg developers
@@ -38,8 +44,10 @@ itself under `ffmpeg -L`.
 ## The source
 
 **No modifications were made.** The tree that was compiled is the upstream
-release tarball as published, unpacked and configured, with no patch applied and
-no file added, changed or removed.
+release tarball as published, with no patch applied and no source file added,
+changed or removed. `./configure` then wrote what configure always writes —
+`config.h`, `config_components.h`, `ffbuild/config.mak` — which is the
+configuration recorded below rather than a change to FFmpeg.
 
 - Upstream: <https://ffmpeg.org/releases/ffmpeg-8.0.tar.xz>
 - SHA-256: `b2751fccb6cc4c77708113cd78b561059b6fa904b24162fa0be2d60273d27b8e`
