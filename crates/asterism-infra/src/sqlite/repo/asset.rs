@@ -1731,6 +1731,9 @@ struct MaterialRow {
     content_region_hash_reason: Option<String>,
     meta_hash_status: String,
     meta_hash_reason: Option<String>,
+    perceptual_hash: Option<String>,
+    perceptual_hash_status: String,
+    perceptual_hash_reason: Option<String>,
 }
 
 impl MaterialRow {
@@ -1743,7 +1746,9 @@ impl MaterialRow {
                                    meta_hash, meta_kv, meta_text, \
                                    content_hash_status, content_hash_reason, \
                                    content_region_hash_status, content_region_hash_reason, \
-                                   meta_hash_status, meta_hash_reason";
+                                   meta_hash_status, meta_hash_reason, \
+                                   perceptual_hash, perceptual_hash_status, \
+                                   perceptual_hash_reason";
 
     fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
         Ok(Self {
@@ -1764,6 +1769,9 @@ impl MaterialRow {
             content_region_hash_reason: row.get(14)?,
             meta_hash_status: row.get(15)?,
             meta_hash_reason: row.get(16)?,
+            perceptual_hash: row.get(17)?,
+            perceptual_hash_status: row.get(18)?,
+            perceptual_hash_reason: row.get(19)?,
         })
     }
 
@@ -1816,6 +1824,12 @@ impl MaterialRow {
             meta_hash_reason: self.meta_hash_reason,
             meta_kv: self.meta_kv,
             meta_text: self.meta_text,
+            perceptual_hash: self.perceptual_hash,
+            perceptual_hash_status: StoreFault::parsed(
+                "perceptual hash status",
+                MeasurementStatus::parse(&self.perceptual_hash_status),
+            )?,
+            perceptual_hash_reason: self.perceptual_hash_reason,
             created_at: ms_to_datetime(self.created_at)?,
             updated_at: ms_to_datetime(self.updated_at)?,
         })

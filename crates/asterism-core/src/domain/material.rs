@@ -175,6 +175,32 @@ pub struct Material {
     /// Without the middle one every text-free PNG in the library is a
     /// candidate for every backfill pass, forever.
     pub meta_text: Option<String>,
+    /// What these bytes look like, coarsely — a fingerprint that
+    /// survives a resize, where the three columns above survive
+    /// nothing.
+    ///
+    /// Tagged like they are, and deliberately not one of them. They
+    /// answer whether two files hold the same bytes and are read by
+    /// duplicate detection, whose walk ends in an `identical_to` edge
+    /// and possibly a fold; this answers whether two pictures look
+    /// alike, which is a claim no fold may rest on. `is_duplicate_key`
+    /// refuses a value carrying this tag, so the separation is
+    /// structural rather than a convention to remember.
+    ///
+    /// Only images have one, and the walk is what says so: a material
+    /// whose bytes are not an image retires to
+    /// [`Unsupported`](MeasurementStatus::Unsupported) on its first
+    /// pass, carrying the mime as its reason, and is offered no second
+    /// one. Insert leaves this `pending` like the three columns above,
+    /// for the reason the insert states — a metadata round-trip must
+    /// not erase a fingerprint computed in between.
+    pub perceptual_hash: Option<String>,
+    /// Why [`perceptual_hash`](Self::perceptual_hash) holds what it
+    /// holds, in the vocabulary the three digest columns use.
+    pub perceptual_hash_status: MeasurementStatus,
+    /// The status's free-text payload, when it carries one — the mime
+    /// that could not be decoded, or the error that stopped the read.
+    pub perceptual_hash_reason: Option<String>,
     /// When this material record was created.
     pub created_at: DateTime<Utc>,
     /// Last modification timestamp.
@@ -209,6 +235,9 @@ impl Material {
             meta_hash_reason: None,
             meta_kv: None,
             meta_text: None,
+            perceptual_hash: None,
+            perceptual_hash_status: MeasurementStatus::Pending,
+            perceptual_hash_reason: None,
             created_at: now,
             updated_at: now,
         }
