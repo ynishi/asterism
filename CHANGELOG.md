@@ -15,10 +15,10 @@ and this project adheres to
   sharing no bytes with its original. `content_hash` reserved the tag space for
   a later perceptual value and this takes it — in columns of its own rather than
   beside the digests, because a value those axes have to refuse cannot share a
-  column they read. A difference hash at 128 bits, comparing along
-  rows and again down columns, on a new `material.perceptual_hash` column with
-  the status and reason its three neighbours carry (V105). A `perceptual_hash`
-  job fills it — per-asset from the ingest fan-out at fingerprint priority, or a
+  column they read. A difference hash at 128 bits, comparing along rows and
+  again down columns, on a new `material.perceptual_hash` column with the status
+  and reason its three neighbours carry (V105). A `perceptual_hash` job fills it
+  — per-asset from the ingest fan-out at fingerprint priority, or a
   chain-enqueueing batch walk — and unlike the encoder beside it, it is never
   gated on a bound model: a fingerprint is pixels and arithmetic, so a profile
   that binds nothing still has its copies recognised. `asterism-infra` therefore
