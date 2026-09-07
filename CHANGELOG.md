@@ -10,6 +10,51 @@ and this project adheres to
 
 ### Added
 
+- **A query can reach what nobody wrote down** (#32). The store answered "the
+  one with the …" only when the remembered words happened to be words somebody
+  had written down — full text and channel tags are exact instruments, and they
+  find what was written and nothing else. An asset's own words are now encoded
+  into the same joint space its pixels already go into, so a query can propose
+  the picture nobody described in those words. Full text still answers first and
+  this only ever appends: BM25 and a cosine are not comparable numbers, and the
+  order is the arrangement rather than a ranking anybody invented. A profile
+  with no model bound, or a query naming no persona, gets full text alone — what
+  search answered before this layer existed.
+- **The measurement that chose the shape** (#32). #112 had already answered what
+  the issue called its blocking decision, since the packaged SigLIP2 binds both
+  towers and tag suggestion has been calling `encode_text` in production since
+  it landed — but nothing had ever measured text against text, only image-image
+  and text-image. Over 24 fixture scenes: the words of pictures sharing a
+  subject sat 0.905 apart at their closest, of pictures sharing none 0.877 at
+  their furthest, and a query about nothing in the library at most 0.722 from
+  anything in it. Asked as retrieval, 35 of 49 known answers landed in the top
+  five while no threshold held both precision and recall above 0.6. So the floor
+  at 0.72 is there for the honest miss and not for ranking, and the layer
+  proposes in rank order — which is what "vectors propose, metadata disposes"
+  turns out to mean when it is measured.
+- **What the encoder's window decided** (#32). It reads a fixed number of tokens
+  and pads; two documents agreeing for their first 301 characters and differing
+  after it encode identically, where at 168 they still separated. The composed
+  full-text document passes that inside its first section for any asset with a
+  body, so encoding it would store a vector that read the opening and reported
+  on the whole. `derive_words` composes the short half instead — title, cover,
+  labels, keywords, note. The body, the material metadata and the comment thread
+  are left out, which is a real gap rather than a tidy scope: a prompt lives in
+  the metadata of a generated image, and only full text reaches it.
+- **Vectors say which reading composed them** (#32). `visual_feature` carries a
+  composition version (V106), and the words walk asks whether a vector exists
+  _at the current composition_ rather than whether one exists — absence and
+  staleness are one predicate because they are one question. This is the failure
+  `asset_body.derived_version` was added to close on the full-text side, and it
+  closed it after the first derivation walk had already left every text asset
+  holding a body composed from its file alone. Failure records carry the stamp
+  too, so a row that had nothing to say under one reading is asked again under a
+  wider one. And the seven sites that already re-index a row whose words changed
+  now re-derive both readings through one call, since the walk cannot see a
+  vector composed from yesterday's title — it is present, and current.
+
+### Added
+
 - **A profile says which absences are the platform's** (#40). A record with no
   seed in it does not say why, and there are three reasons behind that one
   absence: we did not capture it, the platform does not report it, the parameter
