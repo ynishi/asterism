@@ -1153,9 +1153,19 @@
       "docs": "Which reading of an asset a cached body was composed by.\n\nA body cache is a *derived* value, and the thing it is derived by is\nthis function — so a row holding a body says nothing useful unless\nit also says which version of the composition produced it. Without\nthat, \"already indexed\" and \"indexed by a build that only ever read\nfile bytes\" are the same state, and the backfill can only find rows\nthat have no body at all. That is exactly the gap the first\nderivation walk left: every picture was visible to it (no body) and\nevery text asset was invisible (a body composed from the file\nalone), so a transcript's title, keywords and comment thread stayed\nout of its own document.\n\nStored on `asset_body.derived_version`. `NULL` there is version 0 —\na body written before this constant existed — and any value below\nthe current one marks the row as work for\n`index_rebuild_batch`. Raise it by one whenever\n[`derive_text`] starts composing from a section it did not read\nbefore; that is the whole protocol, and it is what makes a new\nsurface reach documents that already exist."
     },
     {
+      "path": "asterism_core::domain::derived_text::WORDS_COMPOSITION_VERSION",
+      "kind": "constant",
+      "docs": "Which reading of an asset a stored `words` vector was composed by\n(#32) — the same protocol as [`COMPOSITION_VERSION`], for the other\nderived reading.\n\nStored on `visual_feature.composition_ver`. `0` is a vector written\nbefore the column existed, and any value below the current one is\nwork for the words walk. Raise it by one whenever [`derive_words`]\nstarts composing from a section it did not read before.\n\nIt is a separate number from the one above because the two\nfunctions change for different reasons and neither should re-run\nthe other's library: full text gaining the comment thread is not a\nreason to re-encode every vector, and this composition gaining a\nsection is not a reason to re-index every document."
+    },
+    {
       "path": "asterism_core::domain::derived_text::derive_text",
       "kind": "function",
-      "docs": "Builds the indexable text for one asset, or `None` when the row has\nnothing to say.\n\n`file_body` is the original's text when the original *is* text\n(`None` for a picture, an unreadable file, or a record that\naddresses something inside a container). `comment_bodies` is the\nasset's comment thread in reading order; an empty slice is the\nordinary case.\n\n`None` is returned only when every section is empty — an asset with\nno title, no cover, no labels, no keywords, no note, no material\nmetadata, no declared meta, no comments, and no readable text of\nits own. That is a real state (a freshly imported picture, before\nany job has run) and it is distinct from the empty string: the\ncaller uses it to decide *not to write a document at all*, where an\nempty body would mean \"we looked and the answer is nothing\".\n\nBlank sections are dropped rather than joined, so the result never\ncarries a run of empty lines, and a value that is only whitespace\ncounts as absent."
+      "docs": "Builds the indexable text for one asset, or `None` when the row has\nnothing to say.\n\n`file_body` is the original's text when the original *is* text\n(`None` for a picture, an unreadable file, or a record that\naddresses something inside a container). `comment_bodies` is the\nasset's comment thread in reading order; an empty slice is the\nordinary case.\n\n`None` is returned only when every section is empty — an asset with\nno title, no cover, no labels, no keywords, no note, no material\nmetadata, no declared meta, no comments, and no readable text of\nits own. That is a real state (a freshly imported picture, before\nany job has run) and it is distinct from the empty string: the\ncaller uses it to decide *not to write a document at all*, where an\nempty body would mean \"we looked and the answer is nothing\".\n\nBlank sections are dropped rather than joined, so the result never\ncarries a run of empty lines, and a value that is only whitespace\ncounts as absent.\n\nA shorter reading of the same row, for the encoder rather than the\nindex, is [`derive_words`] above."
+    },
+    {
+      "path": "asterism_core::domain::derived_text::derive_words",
+      "kind": "function",
+      "docs": "Builds the short text an encoder can read whole (#32), or `None`\nwhen the row has no words of its own.\n\n# Why this is not [`derive_text`]\n\nThe same asset, read for a different instrument. Full text is an\nindex over everything the row says, and longer is strictly better\nthere: a term buried in a transcript's last paragraph is still found\nby the term. An embedding is not an index over terms — it is one\nvector for the whole input, read through a fixed window — and past\nthat window the input is not weighed less, it is not read at all.\nMeasured against the shipped package, two documents that agreed for\nroughly 300 characters and differed after it encoded identically,\nwhere at 168 they still separated.\n\n[`derive_text`] puts the file body first and bounds it nowhere, so\nfor an asset with a body of any length that is where the window\ncloses — and everything the composition adds after it, which is\nevery section a picture has, would be outside a vector that looked\nas though it had read the row.\n\nSo this composes the short half: what the asset is called, what it\nwas labelled, and the words the tagger pulled out of it. A caption\nand its keywords are what a person's remembered phrase is most\nlikely to be *about*, and they fit.\n\n# What it leaves out, and what that costs\n\nThe file body, the material metadata, the declared meta and the\ncomment thread. Each is where a remembered phrase might genuinely\nlive — a prompt is in the metadata for a generated image, and a\ndeclared statement is somebody's own words about the row — and none\nof them fits. That is a real gap, not a tidy scope: full text still\nreaches all four, and this layer is the one that proposes when full\ntext finds nothing.\n\nTags, for the reason the module doc gives, plus one this function\nadds: `auto_tag` writes the same words to `keywords` and to the tag\nlinks, so the tagger's vocabulary is already here. A tag a person\nattached by hand is not, and a tag rename does not re-compose\nanything — which is the trade the module doc describes, taken the\nsame way.\n\n# Changing this\n\nRaise [`WORDS_COMPOSITION_VERSION`] by one. That is the whole\nprotocol, and it is stated where the constant is: a stored vector\ncarries the version that composed it, the walk offers back every\nrow below the current one, and the startup seed is what hands the\nexisting library to that walk. Without the bump the old vectors\nstay, answering a question this function no longer asks, and\nnothing can tell them from the new ones."
     },
     {
       "path": "asterism_core::domain::dir",
@@ -2455,7 +2465,7 @@
     {
       "path": "asterism_core::domain::repository::Evidence",
       "kind": "enum",
-      "docs": "Why one asset came back as a candidate.\n\nKept implementation-neutral so a future retriever can explain\nitself without the shape changing: a full-text hit has a snippet,\na tag-expansion route has the tags it went through, an\nagent-driven route has its reasoning. A caller that only knows how\nto render `Snippet` still compiles against every other route."
+      "docs": "Why one asset came back as a candidate.\n\nKept implementation-neutral so a future retriever can explain\nitself without the shape changing: a full-text hit has a snippet,\na tag-expansion route has the tags it went through, and a route\nthat reached an asset some other way says so in words. A caller\nthat only knows how to render `Snippet` still compiles against\nevery other route."
     },
     {
       "path": "asterism_core::domain::repository::FingerprintedMaterial",
@@ -2575,7 +2585,7 @@
     {
       "path": "asterism_core::domain::repository::RetrievalIntent",
       "kind": "enum",
-      "docs": "What the caller is looking for, in the Retrieval domain's own terms.\n\nEach variant is a different way of pointing at assets, not a\ndifferent backend: the same [`AssetRetriever`] answers all of them\nwith whatever machinery it has (BM25 today, embeddings / VLM /\nagent-driven expansion later)."
+      "docs": "What the caller is looking for, in the Retrieval domain's own terms.\n\nEach variant is a different way of pointing at assets, not a\ndifferent backend: the same [`AssetRetriever`] answers all of them\nwith whatever machinery it has — BM25 and embeddings today, VLM or\nagent-driven expansion later."
     },
     {
       "path": "asterism_core::domain::repository::RetrievalQuery",
@@ -3235,7 +3245,7 @@
     {
       "path": "asterism_core::domain::visual::VisualFeatureKind",
       "kind": "enum",
-      "docs": "What kind of feature a stored vector is.\n\nOne kind exists today. The enum exists so that a later image-only\nfeature (a DINOv2-class vector, a learned perceptual code) can share\nthe storage without a migration — the kind is part of the row key."
+      "docs": "What kind of feature a stored vector is.\n\nThe kind is part of the row key, so a new one shares the storage\nwithout a migration — which is how the second one arrived, and how a\nlater image-only feature (a DINOv2-class vector, a learned\nperceptual code) would."
     },
     {
       "path": "asterism_core::domain::visual::cosine_normalized",

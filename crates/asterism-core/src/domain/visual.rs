@@ -85,14 +85,31 @@ impl TagHeadRef {
 
 /// What kind of feature a stored vector is.
 ///
-/// One kind exists today. The enum exists so that a later image-only
-/// feature (a DINOv2-class vector, a learned perceptual code) can share
-/// the storage without a migration — the kind is part of the row key.
+/// The kind is part of the row key, so a new one shares the storage
+/// without a migration — which is how the second one arrived, and how a
+/// later image-only feature (a DINOv2-class vector, a learned
+/// perceptual code) would.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VisualFeatureKind {
-    /// A joint image/text embedding: comparable with encoded text
-    /// (tag names, captions) and with other images.
+    /// The pixels, encoded into a joint image/text space: comparable
+    /// with encoded text (tag names, captions) and with other images.
     Semantic,
+    /// The asset's own words, encoded into that same space (#32) — so a
+    /// query in words nobody wrote down can still reach the asset whose
+    /// words are about the same thing.
+    ///
+    /// Not the whole of what
+    /// [`derive_text`](crate::domain::derived_text::derive_text)
+    /// composes, and the difference is measured rather than chosen: the
+    /// encoder reads a fixed window, and two documents that agree for
+    /// their first ~300 characters and differ after it encode
+    /// identically [measured against the shipped package: 168
+    /// characters still separated them, 301 did not]. A document with a
+    /// body of any length closes that window inside its first section,
+    /// so everything after would be invisible to the vector while
+    /// looking indexed. What is encoded is the short half —
+    /// [`derive_words`](crate::domain::derived_text::derive_words).
+    Words,
 }
 
 impl VisualFeatureKind {
@@ -100,6 +117,7 @@ impl VisualFeatureKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Semantic => "semantic",
+            Self::Words => "words",
         }
     }
 
@@ -107,6 +125,7 @@ impl VisualFeatureKind {
     pub fn parse(slug: &str) -> Result<Self, DomainError> {
         match slug {
             "semantic" => Ok(Self::Semantic),
+            "words" => Ok(Self::Words),
             other => Err(DomainError::Validation(format!(
                 "unknown visual feature kind: {other:?}"
             ))),
@@ -130,6 +149,17 @@ pub struct VisualFeature {
     pub vector: Vec<f32>,
     /// When extraction ran (epoch ms).
     pub extracted_at_ms: i64,
+    /// Which reading of the row composed the input, for a kind whose
+    /// input is composed — `0` for [`Semantic`](VisualFeatureKind::Semantic),
+    /// whose input is the pixels and is not read by anything that can
+    /// change its mind.
+    ///
+    /// The walk that fills [`Words`](VisualFeatureKind::Words) compares
+    /// this against
+    /// [`WORDS_COMPOSITION_VERSION`](crate::domain::derived_text::WORDS_COMPOSITION_VERSION),
+    /// so raising that constant is what makes a wider composition reach
+    /// vectors that already exist.
+    pub composition_ver: i64,
 }
 
 impl VisualFeature {
@@ -142,6 +172,7 @@ impl VisualFeature {
         kind: VisualFeatureKind,
         vector: Vec<f32>,
         extracted_at_ms: i64,
+        composition_ver: i64,
     ) -> Result<Self, DomainError> {
         if vector.len() != identity.dim as usize {
             return Err(DomainError::Validation(format!(
@@ -158,6 +189,7 @@ impl VisualFeature {
             kind,
             vector,
             extracted_at_ms,
+            composition_ver,
         })
     }
 }
@@ -274,6 +306,7 @@ mod tests {
             VisualFeatureKind::Semantic,
             vec![0.5; 4],
             0,
+            0,
         );
         assert!(ok.is_ok());
         let wrong = VisualFeature::new(
@@ -282,6 +315,7 @@ mod tests {
             identity(),
             VisualFeatureKind::Semantic,
             vec![0.5; 3],
+            0,
             0,
         );
         assert!(wrong.is_err(), "a length mismatch must be loud");

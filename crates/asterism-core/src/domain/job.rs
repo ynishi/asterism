@@ -418,6 +418,23 @@ pub enum JobKind {
     ///
     /// [scan]: crate::domain::repository::AssetRepository::scan_perceptual_prints
     NearDuplicateRebuild,
+    /// Encodes what an asset says about itself into the same space its
+    /// pixels are encoded into (#32), so a query in words can reach a
+    /// picture nobody described in those words.
+    ///
+    /// Two payload shapes, the split
+    /// [`VisualFeature`](Self::VisualFeature) uses:
+    /// `{ "asset_id": "<uuid>" }` encodes one asset, chained from the
+    /// tagger because that is what settles an asset's words, and
+    /// `{ "batch": true }` walks the rows with no vector yet.
+    ///
+    /// Gated on a bound model like the visual jobs, and for the same
+    /// reason: without one there is nothing to encode with. Unlike
+    /// them it takes no mime — every asset has words or has none, and
+    /// which it is comes from
+    /// [`derive_words`](crate::domain::derived_text::derive_words)
+    /// rather than from what the bytes are.
+    WordsFeature,
     /// Encodes an image's pixels into the stored feature vector the
     /// visual layer (#112) retrieves by.
     ///
@@ -521,6 +538,7 @@ impl JobKind {
             Self::DisclosureStamp => "disclosure_stamp",
             Self::PerceptualHash => "perceptual_hash",
             Self::NearDuplicateRebuild => "near_duplicate_rebuild",
+            Self::WordsFeature => "words_feature",
             Self::VisualFeature => "visual_feature",
             Self::VisualEdgeRebuild => "visual_edge_rebuild",
             Self::VisualTagSuggest => "visual_tag_suggest",
@@ -555,6 +573,7 @@ impl JobKind {
             "disclosure_stamp" => Ok(Self::DisclosureStamp),
             "perceptual_hash" => Ok(Self::PerceptualHash),
             "near_duplicate_rebuild" => Ok(Self::NearDuplicateRebuild),
+            "words_feature" => Ok(Self::WordsFeature),
             "visual_feature" => Ok(Self::VisualFeature),
             "visual_edge_rebuild" => Ok(Self::VisualEdgeRebuild),
             "visual_tag_suggest" => Ok(Self::VisualTagSuggest),

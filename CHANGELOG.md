@@ -10,6 +10,56 @@ and this project adheres to
 
 ### Added
 
+- **A query can reach what nobody wrote down** (#32). The store answered "the
+  one with the …" only when the remembered words happened to be words somebody
+  had written down — full text and channel tags are exact instruments, and they
+  find what was written and nothing else. An asset's own words are now encoded
+  into the same joint space its pixels already go into, so a query can propose
+  the picture nobody described in those words. Full text still answers first and
+  this only ever appends: BM25 and a cosine are not comparable numbers, and the
+  order is the arrangement rather than a ranking anybody invented. A profile
+  with no model bound, or a query naming no persona, gets full text alone — what
+  search answered before this layer existed.
+- **The measurement that chose the shape** (#32). #112 had already answered what
+  the issue called its blocking decision, since the packaged SigLIP2 binds both
+  towers and tag suggestion has been calling `encode_text` in production since
+  it landed — but nothing had ever measured text against text, only image-image
+  and text-image. Over 24 fixture scenes, as cosines where higher is closer: the
+  words of pictures sharing a subject sat at 0.905 at their least alike, of
+  pictures sharing none at 0.877 at their most, and a query about nothing in the
+  library reached at most 0.722. Asked as retrieval, 35 of the 49 answers a top
+  five could hold were in one, while the closest precision and recall came to
+  each other was 0.585 and 0.633. So the floor at 0.73 is there for the honest
+  miss and not for ranking, and the layer proposes in rank order — which is what
+  "vectors propose, metadata disposes" turns out to mean when it is measured.
+  **These are generated scenes and a query that is a phrase the words already
+  contain**, so they are the floor of what the layer can do; the twenty real
+  recall queries #32 asks for as its go/no-go have not been collected, and this
+  ships without that verdict.
+- **What the encoder's window decided** (#32). It reads a fixed number of tokens
+  and pads; two documents that agreed for roughly 300 characters and differed
+  after it encoded identically, where at 168 they still separated. The full-text
+  composition puts the file body first and bounds it nowhere, so an asset with a
+  body of any length closes that window inside its first section — encoding it
+  would store a vector that read the opening and reported on the whole row.
+  `derive_words` composes the short half instead: title, cover, labels,
+  keywords, note. The body, the material metadata, the declared meta and the
+  comment thread are left out, which is a real gap rather than a tidy scope — a
+  prompt lives in the metadata of a generated image — and only full text reaches
+  them.
+- **Vectors say which reading composed them** (#32). V106 gives `visual_feature`
+  a column for the composition a vector was derived by, and the words walk asks
+  whether a vector exists _at the current composition_ rather than whether one
+  exists — absence and staleness are one predicate because they are one
+  question. This is the failure `asset_body.derived_version` was added to close
+  on the full-text side, and it closed it after the first derivation walk had
+  already left every text asset holding a body composed from its file alone.
+  Failure records carry the stamp too, so a row that had nothing to say under
+  one reading is asked again under a wider one. And every site that re-indexes a
+  row whose words changed now re-derives both readings — the handlers through
+  one call, and the application verb that writes a title or a label beside its
+  own re-index — since the walk cannot see a vector composed from yesterday's
+  title: it is present, and at the current composition.
 - **A profile says which absences are the platform's** (#40). A record with no
   seed in it does not say why, and there are three reasons behind that one
   absence: we did not capture it, the platform does not report it, the parameter

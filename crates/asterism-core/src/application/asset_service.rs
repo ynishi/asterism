@@ -950,6 +950,35 @@ impl AssetService {
     /// the database are refusing writes, and the caller's own write is
     /// the thing that matters.
     async fn reindex(&self, id: &AssetId) {
+        // The other reading of the same population (#32). Five of the
+        // six fields named above are the whole of what `derive_words`
+        // composes, so a verb that writes one of them leaves the stored
+        // vector describing a row that no longer exists — and unlike
+        // the document, nothing later notices: the words walk asks
+        // whether a vector exists at the current composition, and one
+        // composed from yesterday's title is both present and current.
+        //
+        // Enqueued first and separately from the index, because the two
+        // fail independently and the fallback below is the index's
+        // alone. A vector left stale is wrong in the same way the
+        // document would be, but there is no stamp to clear that would
+        // put it back in front of a walk — which is the asymmetry, and
+        // the reason this one is logged rather than recovered.
+        if let Err(err) = self
+            .jobs
+            .enqueue(
+                JobKind::WordsFeature,
+                serde_json::json!({ "asset_id": id.to_string() }),
+            )
+            .await
+        {
+            tracing::warn!(
+                event = "diag.words.enqueue_failed",
+                asset_id = %id,
+                error = %err,
+                "the row keeps a vector composed from text that has changed"
+            );
+        }
         let Err(err) = self
             .jobs
             .enqueue(

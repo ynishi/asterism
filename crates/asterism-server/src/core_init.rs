@@ -1586,6 +1586,20 @@ async fn bind_visual_model(
             .enqueue(JobKind::VisualFeature, serde_json::json!({ "batch": true }))
             .await?;
     }
+    // The words walk (#32), seeded here for two reasons rather than
+    // one. A library that existed before this layer has no vectors and
+    // nothing else would ever ask for them: the per-asset job fires
+    // from a write, so an untouched row waits forever. And the
+    // composition stamp is only a protocol if something re-offers the
+    // library when it moves — raising `WORDS_COMPOSITION_VERSION` puts
+    // every existing row below the current reading, and this is what
+    // hands them to the walk. Without this the stamp is a column
+    // nothing consults.
+    if !queue.has_pending_batch(JobKind::WordsFeature).await? {
+        queue
+            .enqueue(JobKind::WordsFeature, serde_json::json!({ "batch": true }))
+            .await?;
+    }
     // Seeded beside the encode walk since #132: the stamp is per-head,
     // so a newly bound head re-offers the already-encoded library —
     // without this seed, vectors stamped under the previous head would

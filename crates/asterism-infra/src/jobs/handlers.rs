@@ -214,7 +214,7 @@ pub async fn cover_gen(env: &JobEnv, payload: &serde_json::Value) -> Result<Stri
                     .assets
                     .set_cover(&asset.id, &CoverText::new(cover)?)
                     .await?;
-                enqueue_reindex(env, &asset.id).await?;
+                enqueue_rederive(env, &asset.id).await?;
                 Ok("cover taken from earliest member".into())
             }
             None => Ok("container has no covered member yet, skipped".into()),
@@ -250,12 +250,12 @@ pub async fn cover_gen(env: &JobEnv, payload: &serde_json::Value) -> Result<Stri
         .assets
         .set_cover(&asset.id, &CoverText::new(cover)?)
         .await?;
-    enqueue_reindex(env, &asset.id).await?;
+    enqueue_rederive(env, &asset.id).await?;
     Ok("cover generated".into())
 }
 
-/// Re-composes one asset's search document after a handler wrote a
-/// field the document is derived from.
+/// Re-derives both readings of one asset's text after a handler wrote
+/// a field they are derived from.
 ///
 /// Every fan-out at ingest enqueues `IndexRebuild` alongside the jobs
 /// below it, and those jobs then write the fields the document is made
@@ -263,10 +263,27 @@ pub async fn cover_gen(env: &JobEnv, payload: &serde_json::Value) -> Result<Stri
 /// order the queue drains them in, the document composed first was
 /// composed from less than the row now says, so the write is what has
 /// to re-enqueue.
-async fn enqueue_reindex(env: &JobEnv, asset_id: &AssetId) -> Result<(), DomainError> {
+///
+/// The vector (#32) is re-enqueued in the same call rather than beside
+/// each of these, because every site that reaches here is saying one
+/// thing — this row's words changed — and a site that remembered the
+/// index and forgot the vector would leave the two readings describing
+/// different rows. Nothing later catches that: the words walk asks
+/// whether a vector exists at the current composition, and one
+/// composed from yesterday's title is both present and current.
+///
+/// The vector half settles cheaply when no model is bound, the way
+/// every job on that path does.
+async fn enqueue_rederive(env: &JobEnv, asset_id: &AssetId) -> Result<(), DomainError> {
     env.queue
         .enqueue(
             asterism_core::domain::job::JobKind::IndexRebuild,
+            serde_json::json!({ "asset_id": asset_id.to_string() }),
+        )
+        .await?;
+    env.queue
+        .enqueue(
+            asterism_core::domain::job::JobKind::WordsFeature,
             serde_json::json!({ "asset_id": asset_id.to_string() }),
         )
         .await?;
@@ -373,7 +390,7 @@ pub async fn auto_tag(env: &JobEnv, payload: &serde_json::Value) -> Result<Strin
     // Same ordering argument on the search axis: keywords are one of
     // the sections the derived text is composed from, and the document
     // written at ingest was composed before this handler wrote them.
-    enqueue_reindex(env, &asset.id).await?;
+    enqueue_rederive(env, &asset.id).await?;
     Ok(format!("{} keyword(s) tagged", names.len()))
 }
 
@@ -542,6 +559,7 @@ async fn encode_material(
                 &identity,
                 VisualFeatureKind::Semantic,
                 "no local bytes",
+                0,
             )
             .await?;
         return Ok(EncodeOutcome::Retired);
@@ -583,6 +601,9 @@ async fn encode_material(
                 VisualFeatureKind::Semantic,
                 vector,
                 chrono::Utc::now().timestamp_millis(),
+                // The pixels are not composed by anything, so there is
+                // no reading of them to record.
+                0,
             )?;
             env.deps.visual_features.set_visual_feature(feature).await?;
             Ok(EncodeOutcome::Encoded)
@@ -596,6 +617,148 @@ async fn encode_material(
                     &identity,
                     VisualFeatureKind::Semantic,
                     &err.to_string(),
+                    0,
+                )
+                .await?;
+            Ok(EncodeOutcome::Retired)
+        }
+    }
+}
+
+/// Page of the words walk. Wider than the encoder's: the work per row
+/// is a string and one text encode, where an image row is a read, a
+/// decode and a vision encode.
+const WORDS_FEATURE_PAGE: u32 = 64;
+
+/// Encodes what an asset says about itself (#32).
+///
+/// `{ "asset_id": ... }` encodes one asset; `{ "batch": true }` walks
+/// the rows with no vector yet, chain-enqueueing while a full page also
+/// answered something.
+pub async fn words_feature(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    let Some(encoder) = env.deps.visual_encoder.get().cloned() else {
+        return Ok("no model configured, skipped".into());
+    };
+    if payload.get("batch").and_then(|v| v.as_bool()) == Some(true) {
+        return words_feature_batch(env, &encoder).await;
+    }
+    let Some(asset) = load_target(env, payload).await? else {
+        return Ok("asset gone, skipped".into());
+    };
+    match encode_words(env, &encoder, &asset).await? {
+        EncodeOutcome::Encoded => Ok("words encoded".into()),
+        EncodeOutcome::Retired => Ok("nothing said about this row, retired".into()),
+        EncodeOutcome::Deferred => Ok("deferred".into()),
+    }
+}
+
+/// One page of the words walk. No cursor, for the reason the encode
+/// walk has none: every answered row leaves the predicate.
+async fn words_feature_batch(
+    env: &JobEnv,
+    encoder: &std::sync::Arc<dyn VisualEncoder>,
+) -> Result<String, DomainError> {
+    let identity = encoder.identity().clone();
+    let page = env
+        .deps
+        .visual_features
+        .unworded(
+            &identity,
+            asterism_core::domain::derived_text::WORDS_COMPOSITION_VERSION,
+            WORDS_FEATURE_PAGE,
+        )
+        .await?;
+    if page.is_empty() {
+        return Ok("words backfill: nothing left to encode".into());
+    }
+    let full = page.len() as u32 == WORDS_FEATURE_PAGE;
+    let (mut encoded, mut retired) = (0usize, 0usize);
+    for asset_id in page {
+        // A row that vanished between the page and here is not an
+        // error; the next pass will not offer it.
+        let Some(asset) = env.deps.assets.find(&asset_id).await? else {
+            continue;
+        };
+        match encode_words(env, encoder, &asset).await? {
+            EncodeOutcome::Encoded => encoded += 1,
+            EncodeOutcome::Retired | EncodeOutcome::Deferred => retired += 1,
+        }
+    }
+    if full && (encoded + retired) > 0 {
+        env.queue
+            .enqueue(
+                asterism_core::domain::job::JobKind::WordsFeature,
+                serde_json::json!({ "batch": true }),
+            )
+            .await?;
+    }
+    Ok(format!(
+        "words backfill: encoded={encoded} retired={retired}"
+    ))
+}
+
+/// Composes one asset's words and encodes them, recording what came
+/// back — including the row that has nothing to say.
+async fn encode_words(
+    env: &JobEnv,
+    encoder: &std::sync::Arc<dyn VisualEncoder>,
+    asset: &Asset,
+) -> Result<EncodeOutcome, DomainError> {
+    let identity = encoder.identity().clone();
+    // A row nobody has titled, labelled or tagged has no words, and a
+    // failure record is what stops the walk offering it every pass. It
+    // is not a failure of the encoder — the reason says which.
+    let Some(words) = asterism_core::domain::derived_text::derive_words(asset) else {
+        env.deps
+            .visual_features
+            .mark_unextractable(
+                &asset.id,
+                0,
+                &identity,
+                VisualFeatureKind::Words,
+                "the row says nothing about itself",
+                asterism_core::domain::derived_text::WORDS_COMPOSITION_VERSION,
+            )
+            .await?;
+        return Ok(EncodeOutcome::Retired);
+    };
+
+    let _permit = VISUAL_ENCODE_SLOTS
+        .acquire()
+        .await
+        .expect("semaphore never closed");
+    let enc = encoder.clone();
+    let vector = tokio::task::spawn_blocking(move || enc.encode_text(&words))
+        .await
+        .map_err(|e| DomainError::Validation(format!("encode task failed: {e}")))?;
+
+    match vector {
+        Ok(vector) => {
+            let feature = VisualFeature::new(
+                asset.id,
+                0,
+                identity,
+                VisualFeatureKind::Words,
+                vector,
+                chrono::Utc::now().timestamp_millis(),
+                asterism_core::domain::derived_text::WORDS_COMPOSITION_VERSION,
+            )?;
+            env.deps.visual_features.set_visual_feature(feature).await?;
+            Ok(EncodeOutcome::Encoded)
+        }
+        Err(err) => {
+            env.deps
+                .visual_features
+                .mark_unextractable(
+                    &asset.id,
+                    0,
+                    &identity,
+                    VisualFeatureKind::Words,
+                    &err.to_string(),
+                    asterism_core::domain::derived_text::WORDS_COMPOSITION_VERSION,
                 )
                 .await?;
             Ok(EncodeOutcome::Retired)
@@ -1582,7 +1745,7 @@ pub async fn material_hash(
     // derived text, and it did not exist when the ingest-time document
     // was composed, so a hashing pass that wrote anything re-indexes.
     if hashed > 0 {
-        enqueue_reindex(env, &asset.id).await?;
+        enqueue_rederive(env, &asset.id).await?;
     }
     Ok(format!(
         "material_hash: hashed={hashed} skipped={skipped} conflicts={conflicts} \
@@ -2167,7 +2330,7 @@ pub async fn material_text(
     }
 
     for asset_id in &touched {
-        enqueue_reindex(env, asset_id).await?;
+        enqueue_rederive(env, asset_id).await?;
     }
 
     // Chain only on a full page, for the reason the hash walk gives: a
@@ -3484,7 +3647,7 @@ pub async fn asset_fold(env: &JobEnv, payload: &serde_json::Value) -> Result<Str
             // does by hand for the ruled path; without it a fold reached
             // through duplicate detection leaves the absorbed words
             // unfindable under the row that now holds them.
-            if let Err(err) = enqueue_reindex(env, &keeper).await {
+            if let Err(err) = enqueue_rederive(env, &keeper).await {
                 tracing::warn!(
                     event = "diag.fold.keeper_reindex_failed",
                     asset_id = %keeper,

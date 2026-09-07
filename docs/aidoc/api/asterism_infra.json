@@ -513,6 +513,11 @@
       "docs": "Proposes channel tags for one encoded image (#112, P3).\n\n`{ \"asset_id\": ... }` is chained from a completed encode;\n`{ \"batch\": true }` walks encoded vectors the pass has not stamped.\nThe pass writes `suggested` evidence only where no row exists (a\nperson's ruling is structurally out of reach), never links a tag —\nacceptance is what writes `asset_tag` — and stamps the vector\nwhether or not anything cleared the floor, so a scene with no\nmatching vocabulary is offered exactly once."
     },
     {
+      "path": "asterism_infra::jobs::handlers::words_feature",
+      "kind": "function",
+      "docs": "Encodes what an asset says about itself (#32).\n\n`{ \"asset_id\": ... }` encodes one asset; `{ \"batch\": true }` walks\nthe rows with no vector yet, chain-enqueueing while a full page also\nanswered something."
+    },
+    {
       "path": "asterism_infra::jobs::jobs_depth",
       "kind": "function",
       "docs": "Reads [`JobsDepth`] off the apalis `Jobs` table.\n\n`Killed` / `Retry` rows count towards none of the four fields, the\nsame way [`jobs_snapshot`] leaves them out of its four counters. A\ndrain check therefore asks `pending + running == 0`: those are the\ntwo states that still owe work."
@@ -820,7 +825,7 @@
     {
       "path": "asterism_infra::search::visual_retriever",
       "kind": "module",
-      "docs": "The retriever that answers `Similar` from stored vectors (#112).\n\nA composite over the text retriever: `Text` delegates unchanged,\n`Similar` becomes a brute-force cosine scan over the persona's\nstored feature vectors under the bound model. Brute force on\npurpose — at personal-library scale the whole scan is a few\nmegabytes of f32, and an ANN structure earns its complexity only\nwhen the P2-5 measurements say the scan misses a latency target.\n\nDegradation is layered the way the rest of the feature degrades:\nno bound encoder means `Similar` declines exactly as the text-only\nbuild declines it; a bound encoder with no stored vector for the\nquery asset returns the empty set — \"not encoded yet\" is an honest\nnothing, not an error."
+      "docs": "The retriever that answers from stored vectors: `Similar` from an\nasset's pixels (#112), and the tail of `Text` from what assets say\nabout themselves (#32).\n\nA composite over the text retriever. `Similar` becomes a\nbrute-force cosine scan over the persona's stored feature vectors\nunder the bound model. `Text` runs full text first and appends what\nthe meaning layer proposes for assets full text did not name — the\ntwo are not competing rankings, they are an instrument and a\nsuggestion in that order.\n\nBrute force on purpose — at personal-library scale the whole scan is\na few megabytes of f32, and an ANN structure earns its complexity\nonly when the P2-5 measurements say the scan misses a latency\ntarget.\n\nDegradation is layered the way the rest of the feature degrades. No\nbound encoder means `Similar` declines exactly as the text-only\nbuild declines it, and `Text` answers with full text alone — which\nis what it answered with before this layer existed, so a build or a\nprofile without a model is not a build with a broken search. A bound\nencoder with no stored vector for the query asset returns the empty\nset: \"not encoded yet\" is an honest nothing, not an error."
     },
     {
       "path": "asterism_infra::search::visual_retriever::VisualAwareRetriever",

@@ -2676,6 +2676,11 @@ pub trait VisualFeatureRepository: Send + Sync {
     /// Records that extraction cannot produce a vector for this row
     /// (undecodable bytes, unreadable original), so the walk stops
     /// offering it. The reason is diagnostic text, not vocabulary.
+    /// `composition` is stamped on the failure the way it is on a
+    /// vector, and for the same reason: a row that had nothing to say
+    /// under one reading may have something under a wider one, and a
+    /// failure recorded without a version would either be re-tried
+    /// forever or never.
     async fn mark_unextractable(
         &self,
         asset_id: &AssetId,
@@ -2683,6 +2688,7 @@ pub trait VisualFeatureRepository: Send + Sync {
         identity: &ModelIdentity,
         kind: VisualFeatureKind,
         reason: &str,
+        composition: i64,
     ) -> Result<(), DomainError>;
 
     /// The stored vector for one asset's material, if extraction has
@@ -2714,6 +2720,38 @@ pub trait VisualFeatureRepository: Send + Sync {
         kind: VisualFeatureKind,
         limit: u32,
     ) -> Result<Vec<VisualScanCandidate>, DomainError>;
+
+    /// Assets whose `words` vector is missing or was composed by an
+    /// older reading, oldest first, at most `limit` of them — that
+    /// walk's page (#32).
+    ///
+    /// `composition` is
+    /// [`WORDS_COMPOSITION_VERSION`](crate::domain::derived_text::WORDS_COMPOSITION_VERSION);
+    /// a row below it is work, which is what makes a wider composition
+    /// reach the library instead of only the assets that arrive after
+    /// it. Absence and staleness are one predicate because they are one
+    /// question — is there a vector here composed the way this build
+    /// composes.
+    ///
+    /// Assets rather than materials, and no mime filter: what is
+    /// encoded is what the row says about itself, which every asset has
+    /// or does not have regardless of what its bytes are. A recording
+    /// with a title and a note has words; a picture nobody has touched
+    /// since import has none, and
+    /// [`derive_words`](crate::domain::derived_text::derive_words)
+    /// answers `None` for it rather than this walk filtering it out —
+    /// the walk cannot know without composing, and composing is the
+    /// caller's.
+    ///
+    /// Trashed and folded assets are excluded, matching
+    /// [`vectors_of_persona`](Self::vectors_of_persona): a row the
+    /// scan will never read is not work.
+    async fn unworded(
+        &self,
+        identity: &ModelIdentity,
+        composition: i64,
+        limit: u32,
+    ) -> Result<Vec<AssetId>, DomainError>;
 
     /// Deletes every stored feature (vectors and failure records) one
     /// model produced, returning the row count. The storage half of
@@ -3078,12 +3116,16 @@ pub const RETRIEVAL_K_CEILING: u32 = 500;
 ///
 /// Each variant is a different way of pointing at assets, not a
 /// different backend: the same [`AssetRetriever`] answers all of them
-/// with whatever machinery it has (BM25 today, embeddings / VLM /
-/// agent-driven expansion later).
+/// with whatever machinery it has — BM25 and embeddings today, VLM or
+/// agent-driven expansion later.
 #[derive(Debug, Clone)]
 pub enum RetrievalIntent {
     /// Free text — a phrase, a sentence, a half-remembered word.
-    /// The current Tantivy path serves this one.
+    ///
+    /// Answered by two instruments in one shortlist: the Tantivy path
+    /// first, then whatever the meaning layer (#32) proposes for
+    /// assets it did not name. A caller asks for text and does not
+    /// choose between them.
     Text(String),
     /// "More like this one." Entry point for embedding / VLM routes.
     Similar(AssetId),
@@ -3110,9 +3152,10 @@ pub struct RetrievalQuery {
 ///
 /// Kept implementation-neutral so a future retriever can explain
 /// itself without the shape changing: a full-text hit has a snippet,
-/// a tag-expansion route has the tags it went through, an
-/// agent-driven route has its reasoning. A caller that only knows how
-/// to render `Snippet` still compiles against every other route.
+/// a tag-expansion route has the tags it went through, and a route
+/// that reached an asset some other way says so in words. A caller
+/// that only knows how to render `Snippet` still compiles against
+/// every other route.
 #[derive(Debug, Clone)]
 pub enum Evidence {
     /// Window of the body around the matched terms (highlighted with
@@ -3120,7 +3163,8 @@ pub enum Evidence {
     Snippet(String),
     /// Reached through these tags (RichTag / agent expansion routes).
     Tags(Vec<TagId>),
-    /// Picked for this stated reason (agent-driven routes).
+    /// Picked for this stated reason — the meaning layer naming the
+    /// instrument that reached the row, an agent naming its own.
     Rationale(String),
     /// The retriever offered no explanation.
     None,

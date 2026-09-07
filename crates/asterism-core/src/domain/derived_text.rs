@@ -113,6 +113,91 @@ use crate::domain::provenance::TRACE_KEY;
 /// surface reach documents that already exist.
 pub const COMPOSITION_VERSION: i64 = 1;
 
+/// Which reading of an asset a stored `words` vector was composed by
+/// (#32) — the same protocol as [`COMPOSITION_VERSION`], for the other
+/// derived reading.
+///
+/// Stored on `visual_feature.composition_ver`. `0` is a vector written
+/// before the column existed, and any value below the current one is
+/// work for the words walk. Raise it by one whenever [`derive_words`]
+/// starts composing from a section it did not read before.
+///
+/// It is a separate number from the one above because the two
+/// functions change for different reasons and neither should re-run
+/// the other's library: full text gaining the comment thread is not a
+/// reason to re-encode every vector, and this composition gaining a
+/// section is not a reason to re-index every document.
+pub const WORDS_COMPOSITION_VERSION: i64 = 1;
+
+/// Builds the short text an encoder can read whole (#32), or `None`
+/// when the row has no words of its own.
+///
+/// # Why this is not [`derive_text`]
+///
+/// The same asset, read for a different instrument. Full text is an
+/// index over everything the row says, and longer is strictly better
+/// there: a term buried in a transcript's last paragraph is still found
+/// by the term. An embedding is not an index over terms — it is one
+/// vector for the whole input, read through a fixed window — and past
+/// that window the input is not weighed less, it is not read at all.
+/// Measured against the shipped package, two documents that agreed for
+/// roughly 300 characters and differed after it encoded identically,
+/// where at 168 they still separated.
+///
+/// [`derive_text`] puts the file body first and bounds it nowhere, so
+/// for an asset with a body of any length that is where the window
+/// closes — and everything the composition adds after it, which is
+/// every section a picture has, would be outside a vector that looked
+/// as though it had read the row.
+///
+/// So this composes the short half: what the asset is called, what it
+/// was labelled, and the words the tagger pulled out of it. A caption
+/// and its keywords are what a person's remembered phrase is most
+/// likely to be *about*, and they fit.
+///
+/// # What it leaves out, and what that costs
+///
+/// The file body, the material metadata, the declared meta and the
+/// comment thread. Each is where a remembered phrase might genuinely
+/// live — a prompt is in the metadata for a generated image, and a
+/// declared statement is somebody's own words about the row — and none
+/// of them fits. That is a real gap, not a tidy scope: full text still
+/// reaches all four, and this layer is the one that proposes when full
+/// text finds nothing.
+///
+/// Tags, for the reason the module doc gives, plus one this function
+/// adds: `auto_tag` writes the same words to `keywords` and to the tag
+/// links, so the tagger's vocabulary is already here. A tag a person
+/// attached by hand is not, and a tag rename does not re-compose
+/// anything — which is the trade the module doc describes, taken the
+/// same way.
+///
+/// # Changing this
+///
+/// Raise [`WORDS_COMPOSITION_VERSION`] by one. That is the whole
+/// protocol, and it is stated where the constant is: a stored vector
+/// carries the version that composed it, the walk offers back every
+/// row below the current one, and the startup seed is what hands the
+/// existing library to that walk. Without the bump the old vectors
+/// stay, answering a question this function no longer asks, and
+/// nothing can tell them from the new ones.
+pub fn derive_words(asset: &Asset) -> Option<String> {
+    let mut sections: Vec<String> = Vec::new();
+    push(&mut sections, asset.title.as_deref());
+    push(&mut sections, asset.cover.as_ref().map(|c| c.as_str()));
+    for label in &asset.labels {
+        push(&mut sections, Some(label.as_str()));
+    }
+    for keyword in &asset.keywords {
+        push(&mut sections, Some(keyword.as_str()));
+    }
+    push(
+        &mut sections,
+        asset.register_note.as_ref().map(|n| n.as_str()),
+    );
+    (!sections.is_empty()).then(|| sections.join("\n"))
+}
+
 /// Builds the indexable text for one asset, or `None` when the row has
 /// nothing to say.
 ///
@@ -133,6 +218,9 @@ pub const COMPOSITION_VERSION: i64 = 1;
 /// Blank sections are dropped rather than joined, so the result never
 /// carries a run of empty lines, and a value that is only whitespace
 /// counts as absent.
+///
+/// A shorter reading of the same row, for the encoder rather than the
+/// index, is [`derive_words`] above.
 pub fn derive_text(
     asset: &Asset,
     file_body: Option<&str>,
@@ -261,7 +349,9 @@ mod tests {
     use crate::domain::attribution::AttributionContext;
     use crate::domain::material::Material;
     use crate::domain::source_locator::SourceLocator;
-    use crate::domain::value::{CoverText, Label, PersonaId, SourceKind, SourceRef};
+    use crate::domain::value::{
+        CoverText, Keyword, Label, PersonaId, RegisterNote, SourceKind, SourceRef,
+    };
     use chrono::Utc;
 
     /// A bare asset with no derivable text — the shape each test adds
@@ -274,6 +364,56 @@ mod tests {
             Utc::now(),
             &AttributionContext::unrecorded(),
         )
+    }
+
+    /// A row with nothing said about it has no words, and that is not
+    /// an error: a picture nobody has titled, labelled or tagged is a
+    /// picture this layer cannot reach, which is a fact about the row
+    /// rather than a failure of the walk.
+    #[test]
+    fn an_asset_nobody_has_described_has_no_words() {
+        assert_eq!(derive_words(&asset()), None);
+    }
+
+    /// What the encoder is handed, in the order it is handed it.
+    #[test]
+    fn words_are_the_short_half_in_a_fixed_order() {
+        let mut a = asset();
+        a.title = Some("Studio plate 3".into());
+        a.cover = Some(CoverText::new("a red circle beside a blue square").unwrap());
+        a.labels = vec![Label::new("keep").unwrap()];
+        a.keywords = vec![
+            Keyword::new("red circle").unwrap(),
+            Keyword::new("blue square").unwrap(),
+        ];
+        a.register_note = Some(RegisterNote::new("shot for the cover test").unwrap());
+
+        assert_eq!(
+            derive_words(&a).unwrap(),
+            "Studio plate 3\na red circle beside a blue square\nkeep\n\
+             red circle\nblue square\nshot for the cover test"
+        );
+    }
+
+    /// The section list is the whole difference from [`derive_text`],
+    /// so it is asserted rather than described: a body, its metadata and
+    /// its comments reach full text and not this.
+    #[test]
+    fn words_leave_out_what_would_not_fit() {
+        let mut a = asset();
+        a.title = Some("Transcript".into());
+        with_material_meta(&mut a, Some(r#"{"prompt":"a studio portrait"}"#), None);
+
+        let body = "the opening line of a long transcript";
+        let comments = vec!["a comment nobody would search for".to_string()];
+
+        let words = derive_words(&a).expect("the title is a word");
+        assert_eq!(words, "Transcript");
+
+        let full = derive_text(&a, Some(body), &comments).expect("full text");
+        assert!(full.contains(body), "the body reaches full text");
+        assert!(full.contains("a studio portrait"), "so does the metadata");
+        assert!(full.contains("nobody would search for"), "so do comments");
     }
 
     /// Attaches a primary material carrying the two metadata columns

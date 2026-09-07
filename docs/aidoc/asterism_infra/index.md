@@ -66,7 +66,7 @@ this crate.
 - [`search::fan_out`](search__fan_out.md): One [`AssetIndexer`] over several.
 - [`search::tantivy_index`](search__tantivy_index.md): [`AssetRetriever`] + [`AssetIndexer`] adapter backed by an on-disk
 - [`search::tokenizer`](search__tokenizer.md): Registers the `mixed_body` tokenizer on a Tantivy index.
-- [`search::visual_retriever`](search__visual_retriever.md): The retriever that answers `Similar` from stored vectors (#112).
+- [`search::visual_retriever`](search__visual_retriever.md): The retriever that answers from stored vectors: `Similar` from an
 - [`source_text`](source_text.md): Filesystem adapter for `SourceTextReader` — resolves asset
 - [`sqlite`](sqlite.md): SQLite backend — connection lifecycle and schema migration built on
 - [`sqlite::map`](sqlite__map.md): Row ↔ domain conversion helpers.

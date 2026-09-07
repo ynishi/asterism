@@ -514,9 +514,19 @@ async fn handle_asterism_job(
             handlers::near_duplicate_rebuild(&env, &job.payload).await,
             false,
         ),
-        // Both visual jobs need a configured encoder — for the vectors,
-        // and for knowing *which* model's vectors to scan. An unbound
-        // cell classifies as skipped, the `DisclosureStamp` shape.
+        // The jobs below all need a configured encoder — for the
+        // vectors, and for knowing *which* model's vectors to scan. An
+        // unbound cell classifies as skipped, the `DisclosureStamp`
+        // shape. The first of them encodes text rather than pixels and
+        // is gated for the same reason: there is nothing to encode
+        // with until a model is bound.
+        Ok(JobKind::WordsFeature) => match env.deps.visual_encoder.get() {
+            Some(_) => (handlers::words_feature(&env, &job.payload).await, false),
+            None => (
+                Ok("words_feature skipped: no model configured".to_string()),
+                true,
+            ),
+        },
         Ok(JobKind::VisualFeature) => match env.deps.visual_encoder.get() {
             Some(_) => (handlers::visual_feature(&env, &job.payload).await, false),
             None => (
