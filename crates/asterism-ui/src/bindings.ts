@@ -268,6 +268,8 @@ export type SavedQueryDto = { id: string; persona_id: string; name: string; filt
 
 export type AssetCountEntryDto = { key: string; count: number; };
 
+export type FoundBy = 'meaning' | 'neighbour';
+
 export type DuplicateAxis = 'artefact' | 'content' | 'meta';
 
 export type DuplicateGroupDto = { axis: 'artefact' | 'content' | 'meta'; content_hash: string; members: { id: string; persona_id: string; modality: string | null; occurred_at_ms: number; cover: string | null; labels: string[]; file_size_bytes: number | null; duration_ms: number | null; pixel_count: number | null; mime: string | null; media: string; source_locator: string; group_ids: string[]; primary_group_position: number | null; created_at_ms: number; updated_at_ms: number; rating: number | null; palette: string[] | null; has_note: boolean; has_thread: boolean; role: string; title: string | null; member_count: number; score: number | null; found_by: 'meaning' | 'neighbour' | null; snippet: string | null; author_kind: string | null; author_subject: string | null; operator_ai: string | null; }[]; };
