@@ -1,17 +1,26 @@
-//! The retriever that answers `Similar` from stored vectors (#112).
+//! The retriever that answers from stored vectors: `Similar` from an
+//! asset's pixels (#112), and the tail of `Text` from what assets say
+//! about themselves (#32).
 //!
-//! A composite over the text retriever: `Text` delegates unchanged,
-//! `Similar` becomes a brute-force cosine scan over the persona's
-//! stored feature vectors under the bound model. Brute force on
-//! purpose — at personal-library scale the whole scan is a few
-//! megabytes of f32, and an ANN structure earns its complexity only
-//! when the P2-5 measurements say the scan misses a latency target.
+//! A composite over the text retriever. `Similar` becomes a
+//! brute-force cosine scan over the persona's stored feature vectors
+//! under the bound model. `Text` runs full text first and appends what
+//! the meaning layer proposes for assets full text did not name — the
+//! two are not competing rankings, they are an instrument and a
+//! suggestion in that order.
 //!
-//! Degradation is layered the way the rest of the feature degrades:
-//! no bound encoder means `Similar` declines exactly as the text-only
-//! build declines it; a bound encoder with no stored vector for the
-//! query asset returns the empty set — "not encoded yet" is an honest
-//! nothing, not an error.
+//! Brute force on purpose — at personal-library scale the whole scan is
+//! a few megabytes of f32, and an ANN structure earns its complexity
+//! only when the P2-5 measurements say the scan misses a latency
+//! target.
+//!
+//! Degradation is layered the way the rest of the feature degrades. No
+//! bound encoder means `Similar` declines exactly as the text-only
+//! build declines it, and `Text` answers with full text alone — which
+//! is what it answered with before this layer existed, so a build or a
+//! profile without a model is not a build with a broken search. A bound
+//! encoder with no stored vector for the query asset returns the empty
+//! set: "not encoded yet" is an honest nothing, not an error.
 
 use std::sync::{Arc, OnceLock};
 
@@ -111,11 +120,91 @@ impl VisualAwareRetriever {
     }
 }
 
+/// How close a query has to sit before this layer proposes an asset.
+///
+/// **Not a ranking threshold.** The measurement says no threshold holds
+/// both precision and recall here — at 0.79 they cross at 0.585 and
+/// 0.633 — which is why this layer proposes in rank order and lets
+/// metadata dispose, the arrangement #32 asks for. What this floor is
+/// for is the honest miss: the point below which a query the library
+/// cannot answer returns nothing instead of padding. On the fixture
+/// set, a query about nothing in the library sat at most 0.722 from
+/// anything in it [measured: `text_recall_eval`, 24 scenes, seed 42].
+///
+/// A number from generated scenes, so it is the shape of the answer
+/// rather than the answer. The twenty real queries #32 asks for are
+/// what would move it.
+const MEANING_FLOOR: f32 = 0.72;
+
+impl VisualAwareRetriever {
+    /// Full text first, then what the meaning layer proposes for
+    /// assets full text did not name (#32).
+    ///
+    /// The order is the claim: what was written down is answered by the
+    /// instrument that indexes what was written down, and this layer
+    /// only ever appends. An asset full text already found is not
+    /// re-proposed — it is in the answer, and a second entry would say
+    /// nothing except that two routes agreed.
+    async fn text_and_meaning(
+        &self,
+        text: &str,
+        q: &RetrievalQuery,
+    ) -> Result<Retrieved, DomainError> {
+        let found = self.text.retrieve(q).await?;
+        // Two ways this route is simply absent, and both leave full
+        // text as the whole answer rather than failing: no bound model
+        // (the build has no encoder), and no persona to scan (the scan
+        // is persona-scoped, and a query that names none is asking
+        // across a boundary this layer does not cross).
+        let (Some(encoder), Some(persona)) = (self.encoder.get(), q.scope) else {
+            return Ok(found);
+        };
+        let identity = encoder.identity().clone();
+        let query_vector = encoder.encode_text(text)?;
+        let vectors = self
+            .visual
+            .vectors_of_persona(&persona, &identity, VisualFeatureKind::Words)
+            .await?;
+
+        let already: std::collections::HashSet<AssetId> =
+            found.candidates.iter().map(|c| c.asset_id).collect();
+        let mut proposed: Vec<(AssetId, f32)> = vectors
+            .into_iter()
+            .filter(|(id, _)| !already.contains(id))
+            .map(|(id, v)| (id, cosine_normalized(&query_vector, &v)))
+            .filter(|(_, score)| *score >= MEANING_FLOOR)
+            .collect();
+        proposed.sort_by(|a, b| b.1.total_cmp(&a.1));
+
+        let k = q.k.clamp(1, RETRIEVAL_K_CEILING) as usize;
+        let room = k.saturating_sub(found.candidates.len());
+        let truncated = found.truncated || proposed.len() > room;
+        let mut candidates = found.candidates;
+        candidates.extend(proposed.into_iter().take(room).map(|(asset_id, score)| {
+            Candidate {
+                asset_id,
+                persona_id: persona,
+                score,
+                // Which route reached it, which is the half a reader
+                // cannot infer from the score. The text itself is not
+                // carried here and does not need to be: `derive_words`
+                // is a function of the asset, so the words this matched
+                // on are recomposable from the row at any later moment.
+                evidence: Evidence::Rationale("the asset's own words".into()),
+            }
+        }));
+        Ok(Retrieved {
+            candidates,
+            truncated,
+        })
+    }
+}
+
 #[async_trait]
 impl AssetRetriever for VisualAwareRetriever {
     async fn retrieve(&self, q: &RetrievalQuery) -> Result<Retrieved, DomainError> {
         match &q.intent {
-            RetrievalIntent::Text(_) => self.text.retrieve(q).await,
+            RetrievalIntent::Text(text) => self.text_and_meaning(&text.clone(), q).await,
             RetrievalIntent::Similar(asset_id) => self.similar(&asset_id.clone(), q).await,
         }
     }
@@ -152,6 +241,39 @@ mod tests {
     impl AssetRetriever for NoText {
         async fn retrieve(&self, _q: &RetrievalQuery) -> Result<Retrieved, DomainError> {
             Err(DomainError::Validation("text route not under test".into()))
+        }
+    }
+
+    /// An encoder that returns the vector it was built with, whatever
+    /// it is asked to encode — so a test states the query's position in
+    /// the space directly instead of through a real tokenizer.
+    struct FixedText {
+        identity: ModelIdentity,
+        vector: Vec<f32>,
+    }
+
+    impl VisualEncoder for FixedText {
+        fn identity(&self) -> &ModelIdentity {
+            &self.identity
+        }
+        fn encode_image(&self, _: &[u8], _: u32, _: u32) -> Result<Vec<f32>, DomainError> {
+            unreachable!("the words route never encodes an image")
+        }
+        fn encode_text(&self, _: &str) -> Result<Vec<f32>, DomainError> {
+            Ok(self.vector.clone())
+        }
+    }
+
+    /// A text retriever answering with exactly what it was given.
+    struct FoundText(Vec<Candidate>);
+
+    #[async_trait]
+    impl AssetRetriever for FoundText {
+        async fn retrieve(&self, _q: &RetrievalQuery) -> Result<Retrieved, DomainError> {
+            Ok(Retrieved {
+                candidates: self.0.clone(),
+                truncated: false,
+            })
         }
     }
 
@@ -194,6 +316,195 @@ mod tests {
             PersonaId::from_uuid(persona),
             ids.into_iter().map(AssetId::from_uuid).collect(),
         )
+    }
+
+    /// Full text answers first and the meaning layer only appends —
+    /// and an asset full text already named is not proposed twice.
+    #[tokio::test]
+    async fn meaning_appends_to_full_text_and_never_repeats_it() {
+        let (isle, driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let visual = SqliteVisualFeatureRepository::new(isle.clone());
+        let assets = SqliteAssetRepository::new(isle.clone());
+        let (persona, ids) = seed(&isle).await;
+
+        // Two assets sit exactly where the query does, one sits away
+        // from it. Full text names the first of the two.
+        for (id, vector) in [
+            (ids[0], vec![1.0, 0.0, 0.0]),
+            (ids[1], vec![1.0, 0.0, 0.0]),
+            (ids[2], vec![0.0, 1.0, 0.0]),
+        ] {
+            visual
+                .set_visual_feature(
+                    VisualFeature::new(id, 0, identity(), VisualFeatureKind::Words, vector, 0)
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+        }
+
+        let from_text = vec![Candidate {
+            asset_id: ids[0],
+            persona_id: persona,
+            score: 9.0,
+            evidence: Evidence::Snippet("the words that were written down".into()),
+        }];
+        let cell: Arc<OnceLock<Arc<dyn VisualEncoder>>> = Arc::new(OnceLock::new());
+        let retriever = VisualAwareRetriever::new(
+            Arc::new(FoundText(from_text)),
+            visual.clone(),
+            assets.clone(),
+            cell.clone(),
+        );
+        let query = RetrievalQuery {
+            intent: RetrievalIntent::Text("anything".into()),
+            scope: Some(persona),
+            k: 10,
+        };
+
+        // Unbound cell: full text is the whole answer, which is what a
+        // build without this layer gives rather than an error.
+        let out = retriever.retrieve(&query).await.unwrap();
+        assert_eq!(out.candidates.len(), 1);
+        assert_eq!(out.candidates[0].asset_id, ids[0]);
+
+        cell.set(Arc::new(FixedText {
+            identity: identity(),
+            vector: vec![1.0, 0.0, 0.0],
+        }))
+        .map_err(|_| ())
+        .unwrap();
+
+        let out = retriever.retrieve(&query).await.unwrap();
+        assert_eq!(
+            out.candidates
+                .iter()
+                .map(|c| c.asset_id)
+                .collect::<Vec<_>>(),
+            vec![ids[0], ids[1]],
+            "what full text found comes first, and only what it missed is added"
+        );
+        assert!(
+            matches!(out.candidates[0].evidence, Evidence::Snippet(_)),
+            "full text keeps its own evidence"
+        );
+        assert!(
+            matches!(out.candidates[1].evidence, Evidence::Rationale(_)),
+            "and the appended one says which route reached it"
+        );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// A query the library cannot answer returns what full text
+    /// returned, and not one padded row.
+    #[tokio::test]
+    async fn a_query_below_the_floor_proposes_nothing() {
+        let (isle, driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let visual = SqliteVisualFeatureRepository::new(isle.clone());
+        let assets = SqliteAssetRepository::new(isle.clone());
+        let (persona, ids) = seed(&isle).await;
+
+        visual
+            .set_visual_feature(
+                VisualFeature::new(
+                    ids[0],
+                    0,
+                    identity(),
+                    VisualFeatureKind::Words,
+                    vec![0.0, 1.0, 0.0],
+                    0,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let cell: Arc<OnceLock<Arc<dyn VisualEncoder>>> = Arc::new(OnceLock::new());
+        cell.set(Arc::new(FixedText {
+            identity: identity(),
+            // Orthogonal to the only stored vector: a cosine of 0,
+            // which is as far below the floor as this space goes.
+            vector: vec![1.0, 0.0, 0.0],
+        }))
+        .map_err(|_| ())
+        .unwrap();
+        let retriever = VisualAwareRetriever::new(
+            Arc::new(FoundText(Vec::new())),
+            visual.clone(),
+            assets.clone(),
+            cell.clone(),
+        );
+
+        let out = retriever
+            .retrieve(&RetrievalQuery {
+                intent: RetrievalIntent::Text("nothing here answers this".into()),
+                scope: Some(persona),
+                k: 10,
+            })
+            .await
+            .unwrap();
+        assert!(
+            out.candidates.is_empty(),
+            "a miss says so rather than padding: {:?}",
+            out.candidates
+        );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// A query naming no persona is asking across a boundary this scan
+    /// does not cross, so it gets full text and no proposal.
+    #[tokio::test]
+    async fn a_query_with_no_persona_gets_full_text_alone() {
+        let (isle, driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let visual = SqliteVisualFeatureRepository::new(isle.clone());
+        let assets = SqliteAssetRepository::new(isle.clone());
+        let (_persona, ids) = seed(&isle).await;
+
+        visual
+            .set_visual_feature(
+                VisualFeature::new(
+                    ids[0],
+                    0,
+                    identity(),
+                    VisualFeatureKind::Words,
+                    vec![1.0, 0.0, 0.0],
+                    0,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let cell: Arc<OnceLock<Arc<dyn VisualEncoder>>> = Arc::new(OnceLock::new());
+        cell.set(Arc::new(FixedText {
+            identity: identity(),
+            vector: vec![1.0, 0.0, 0.0],
+        }))
+        .map_err(|_| ())
+        .unwrap();
+        let retriever = VisualAwareRetriever::new(
+            Arc::new(FoundText(Vec::new())),
+            visual.clone(),
+            assets.clone(),
+            cell.clone(),
+        );
+
+        let out = retriever
+            .retrieve(&RetrievalQuery {
+                intent: RetrievalIntent::Text("a query with no scope".into()),
+                scope: None,
+                k: 10,
+            })
+            .await
+            .unwrap();
+        assert!(
+            out.candidates.is_empty(),
+            "the vector sits exactly where the query does, and is still not proposed"
+        );
+
+        driver.shutdown().await.unwrap();
     }
 
     #[tokio::test]
