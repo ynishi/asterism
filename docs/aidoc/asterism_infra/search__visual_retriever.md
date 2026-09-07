@@ -42,5 +42,5 @@ set: "not encoded yet" is an honest nothing, not an error.
 
 ## Types
 
-- `VisualAwareRetriever` — Composite retriever: text unchanged, `Similar` from stored vectors.
+- `VisualAwareRetriever` — Composite retriever: text with the meaning layer appended to it,
 

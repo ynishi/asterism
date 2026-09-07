@@ -1140,7 +1140,7 @@
     {
       "path": "asterism_contract::query::SearchAssetsQuery",
       "kind": "struct",
-      "docs": "Full-text / fuzzy search. Shares the same filter and pagination shape\nas [`ListAssetsQuery`].\n\nResults are ranked by relevance (BM25) and that ranking **is** the\norder: [`filter.sort`](ListAssetsQuery::sort) is refused with a\nvalidation error rather than accepted and dropped. Sorted listings are\nthe list path's job (`asset_list` / `POST /asterism/assets`), which\ntakes the same filter surface. The unblock point, if search ever gains\nan axis, is the guard in `AssetService::search`."
+      "docs": "Full-text / fuzzy search. Shares the same filter and pagination shape\nas [`ListAssetsQuery`].\n\nResults come back in relevance order and that sequence **is** the\nanswer: [`filter.sort`](ListAssetsQuery::sort) is refused with a\nvalidation error rather than accepted and dropped.\n\nRe-sorting the page client-side is the same mistake in another\nplace. The sequence is the full-text ranking with whatever the\nmeaning layer proposed appended after it — appended, never ranked\nagainst it — so it is one arrangement rather than one scale, and\n[`score`](crate::dto::AssetCardDto::score) says why its numbers\ncannot be read as a single series. Sorted listings are\nthe list path's job (`asset_list` / `POST /asterism/assets`), which\ntakes the same filter surface. The unblock point, if search ever gains\nan axis, is the guard in `AssetService::search`."
     },
     {
       "path": "asterism_contract::query::TagMatch",

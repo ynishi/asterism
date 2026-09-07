@@ -830,7 +830,7 @@
     {
       "path": "asterism_infra::search::visual_retriever::VisualAwareRetriever",
       "kind": "struct",
-      "docs": "Composite retriever: text unchanged, `Similar` from stored vectors."
+      "docs": "Composite retriever: text with the meaning layer appended to it,\n`Similar` from stored vectors."
     },
     {
       "path": "asterism_infra::source_text",
