@@ -92,8 +92,10 @@ scoring is a change to the index schema, not to this function.
 ## Functions
 
 - `derive_text` — Builds the indexable text for one asset, or `None` when the row has
+- `derive_words` — Builds the short text an encoder can read whole (#32), or `None`
 
 ## Constants
 
 - `COMPOSITION_VERSION` — Which reading of an asset a cached body was composed by.
+- `WORDS_COMPOSITION_VERSION` — Which reading of an asset a stored `words` vector was composed by
 

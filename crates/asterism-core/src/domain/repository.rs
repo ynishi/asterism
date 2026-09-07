@@ -2676,6 +2676,11 @@ pub trait VisualFeatureRepository: Send + Sync {
     /// Records that extraction cannot produce a vector for this row
     /// (undecodable bytes, unreadable original), so the walk stops
     /// offering it. The reason is diagnostic text, not vocabulary.
+    /// `composition` is stamped on the failure the way it is on a
+    /// vector, and for the same reason: a row that had nothing to say
+    /// under one reading may have something under a wider one, and a
+    /// failure recorded without a version would either be re-tried
+    /// forever or never.
     async fn mark_unextractable(
         &self,
         asset_id: &AssetId,
@@ -2683,6 +2688,7 @@ pub trait VisualFeatureRepository: Send + Sync {
         identity: &ModelIdentity,
         kind: VisualFeatureKind,
         reason: &str,
+        composition: i64,
     ) -> Result<(), DomainError>;
 
     /// The stored vector for one asset's material, if extraction has
@@ -2715,8 +2721,17 @@ pub trait VisualFeatureRepository: Send + Sync {
         limit: u32,
     ) -> Result<Vec<VisualScanCandidate>, DomainError>;
 
-    /// Assets with no `words` vector under this identity, oldest first,
-    /// at most `limit` of them — that walk's page (#32).
+    /// Assets whose `words` vector is missing or was composed by an
+    /// older reading, oldest first, at most `limit` of them — that
+    /// walk's page (#32).
+    ///
+    /// `composition` is
+    /// [`WORDS_COMPOSITION_VERSION`](crate::domain::derived_text::WORDS_COMPOSITION_VERSION);
+    /// a row below it is work, which is what makes a wider composition
+    /// reach the library instead of only the assets that arrive after
+    /// it. Absence and staleness are one predicate because they are one
+    /// question — is there a vector here composed the way this build
+    /// composes.
     ///
     /// Assets rather than materials, and no mime filter: what is
     /// encoded is what the row says about itself, which every asset has
@@ -2734,6 +2749,7 @@ pub trait VisualFeatureRepository: Send + Sync {
     async fn unworded(
         &self,
         identity: &ModelIdentity,
+        composition: i64,
         limit: u32,
     ) -> Result<Vec<AssetId>, DomainError>;
 

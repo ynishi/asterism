@@ -265,7 +265,7 @@
 - [asterism-infra::search::fan_out](asterism_infra/search__fan_out.md): One [`AssetIndexer`] over several.
 - [asterism-infra::search::tantivy_index](asterism_infra/search__tantivy_index.md): [`AssetRetriever`] + [`AssetIndexer`] adapter backed by an on-disk
 - [asterism-infra::search::tokenizer](asterism_infra/search__tokenizer.md): Registers the `mixed_body` tokenizer on a Tantivy index.
-- [asterism-infra::search::visual_retriever](asterism_infra/search__visual_retriever.md): The retriever that answers `Similar` from stored vectors (#112).
+- [asterism-infra::search::visual_retriever](asterism_infra/search__visual_retriever.md): The retriever that answers from stored vectors: `Similar` from an
 - [asterism-infra::source_text](asterism_infra/source_text.md): Filesystem adapter for `SourceTextReader` — resolves asset
 - [asterism-infra::sqlite](asterism_infra/sqlite.md): SQLite backend — connection lifecycle and schema migration built on
 - [asterism-infra::sqlite::map](asterism_infra/sqlite__map.md): Row ↔ domain conversion helpers.

@@ -113,6 +113,22 @@ use crate::domain::provenance::TRACE_KEY;
 /// surface reach documents that already exist.
 pub const COMPOSITION_VERSION: i64 = 1;
 
+/// Which reading of an asset a stored `words` vector was composed by
+/// (#32) — the same protocol as [`COMPOSITION_VERSION`], for the other
+/// derived reading.
+///
+/// Stored on `visual_feature.composition_ver`. `0` is a vector written
+/// before the column existed, and any value below the current one is
+/// work for the words walk. Raise it by one whenever [`derive_words`]
+/// starts composing from a section it did not read before.
+///
+/// It is a separate number from the one above because the two
+/// functions change for different reasons and neither should re-run
+/// the other's library: full text gaining the comment thread is not a
+/// reason to re-encode every vector, and this composition gaining a
+/// section is not a reason to re-index every document.
+pub const WORDS_COMPOSITION_VERSION: i64 = 1;
+
 /// Builds the short text an encoder can read whole (#32), or `None`
 /// when the row has no words of its own.
 ///

@@ -336,7 +336,7 @@ mod tests {
         ] {
             visual
                 .set_visual_feature(
-                    VisualFeature::new(id, 0, identity(), VisualFeatureKind::Words, vector, 0)
+                    VisualFeature::new(id, 0, identity(), VisualFeatureKind::Words, vector, 0, 0)
                         .unwrap(),
                 )
                 .await
@@ -414,6 +414,7 @@ mod tests {
                     VisualFeatureKind::Words,
                     vec![0.0, 1.0, 0.0],
                     0,
+                    0,
                 )
                 .unwrap(),
             )
@@ -471,6 +472,7 @@ mod tests {
                     VisualFeatureKind::Words,
                     vec![1.0, 0.0, 0.0],
                     0,
+                    0,
                 )
                 .unwrap(),
             )
@@ -521,8 +523,16 @@ mod tests {
         ] {
             visual
                 .set_visual_feature(
-                    VisualFeature::new(id, 0, identity(), VisualFeatureKind::Semantic, vector, 0)
-                        .unwrap(),
+                    VisualFeature::new(
+                        id,
+                        0,
+                        identity(),
+                        VisualFeatureKind::Semantic,
+                        vector,
+                        0,
+                        0,
+                    )
+                    .unwrap(),
                 )
                 .await
                 .unwrap();

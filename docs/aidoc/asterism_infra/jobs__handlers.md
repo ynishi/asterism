@@ -35,4 +35,5 @@ for later modalities.
 - `visual_edge_rebuild` — Recomputes one asset's visual-similarity edges from stored vectors.
 - `visual_feature` — Encodes one image's pixels into the stored feature vector.
 - `visual_tag_suggest` — Proposes channel tags for one encoded image (#112, P3).
+- `words_feature` — Encodes what an asset says about itself (#32).
 

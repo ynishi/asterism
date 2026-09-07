@@ -149,6 +149,17 @@ pub struct VisualFeature {
     pub vector: Vec<f32>,
     /// When extraction ran (epoch ms).
     pub extracted_at_ms: i64,
+    /// Which reading of the row composed the input, for a kind whose
+    /// input is composed — `0` for [`Semantic`](VisualFeatureKind::Semantic),
+    /// whose input is the pixels and is not read by anything that can
+    /// change its mind.
+    ///
+    /// The walk that fills [`Words`](VisualFeatureKind::Words) compares
+    /// this against
+    /// [`WORDS_COMPOSITION_VERSION`](crate::domain::derived_text::WORDS_COMPOSITION_VERSION),
+    /// so raising that constant is what makes a wider composition reach
+    /// vectors that already exist.
+    pub composition_ver: i64,
 }
 
 impl VisualFeature {
@@ -161,6 +172,7 @@ impl VisualFeature {
         kind: VisualFeatureKind,
         vector: Vec<f32>,
         extracted_at_ms: i64,
+        composition_ver: i64,
     ) -> Result<Self, DomainError> {
         if vector.len() != identity.dim as usize {
             return Err(DomainError::Validation(format!(
@@ -177,6 +189,7 @@ impl VisualFeature {
             kind,
             vector,
             extracted_at_ms,
+            composition_ver,
         })
     }
 }
@@ -293,6 +306,7 @@ mod tests {
             VisualFeatureKind::Semantic,
             vec![0.5; 4],
             0,
+            0,
         );
         assert!(ok.is_ok());
         let wrong = VisualFeature::new(
@@ -301,6 +315,7 @@ mod tests {
             identity(),
             VisualFeatureKind::Semantic,
             vec![0.5; 3],
+            0,
             0,
         );
         assert!(wrong.is_err(), "a length mismatch must be loud");

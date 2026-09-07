@@ -61,13 +61,14 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
         let identity = feature.identity.clone();
         let kind = feature.kind.as_str();
         let (ord, extracted_at) = (feature.ord, feature.extracted_at_ms);
+        let composition = feature.composition_ver;
         self.isle
             .call(move |conn| {
                 conn.execute(
                     "INSERT OR REPLACE INTO visual_feature
                        (asset_id, ord, model_id, feature_kind, preprocess_ver,
-                        dim, vector, status, reason, extracted_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'computed', NULL, ?8)",
+                        dim, vector, status, reason, extracted_at, composition_ver)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'computed', NULL, ?8, ?9)",
                     params![
                         asset,
                         ord,
@@ -77,6 +78,7 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
                         identity.dim,
                         blob,
                         extracted_at,
+                        composition,
                     ],
                 )?;
                 Ok(())
@@ -92,6 +94,7 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
         identity: &ModelIdentity,
         kind: VisualFeatureKind,
         reason: &str,
+        composition: i64,
     ) -> Result<(), DomainError> {
         let asset = *asset_id.as_uuid();
         let identity = identity.clone();
@@ -103,8 +106,8 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
                 conn.execute(
                     "INSERT OR REPLACE INTO visual_feature
                        (asset_id, ord, model_id, feature_kind, preprocess_ver,
-                        dim, vector, status, reason, extracted_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, 'failed', ?6, ?7)",
+                        dim, vector, status, reason, extracted_at, composition_ver)
+                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, 'failed', ?6, ?7, ?8)",
                     params![
                         asset,
                         ord,
@@ -113,6 +116,7 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
                         identity.preprocess_ver,
                         reason,
                         now,
+                        composition,
                     ],
                 )?;
                 Ok(())
@@ -131,18 +135,24 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
         let asset = *asset_id.as_uuid();
         let ident = identity.clone();
         let kind_slug = kind.as_str();
-        let row: Option<(Vec<u8>, i64)> = self
+        let row: Option<(Vec<u8>, i64, i64)> = self
             .isle
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT vector, extracted_at FROM visual_feature
+                    "SELECT vector, extracted_at, composition_ver FROM visual_feature
                       WHERE asset_id = ?1 AND ord = ?2 AND model_id = ?3
                         AND feature_kind = ?4 AND preprocess_ver = ?5
                         AND status = 'computed'",
                 )?;
                 let mut rows = stmt.query_map(
                     params![asset, ord, ident.model_id, kind_slug, ident.preprocess_ver],
-                    |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, i64>(1)?)),
+                    |r| {
+                        Ok((
+                            r.get::<_, Vec<u8>>(0)?,
+                            r.get::<_, i64>(1)?,
+                            r.get::<_, i64>(2)?,
+                        ))
+                    },
                 )?;
                 rows.next().transpose()
             })
@@ -150,7 +160,7 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
             .map_err(infra_err)?;
         match row {
             None => Ok(None),
-            Some((blob, extracted_at)) => {
+            Some((blob, extracted_at, composition_ver)) => {
                 let vector = blob_to_vector(&blob)?;
                 Ok(Some(VisualFeature::new(
                     *asset_id,
@@ -159,6 +169,7 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
                     kind,
                     vector,
                     extracted_at,
+                    composition_ver,
                 )?))
             }
         }
@@ -264,6 +275,7 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
     async fn unworded(
         &self,
         identity: &ModelIdentity,
+        composition: i64,
         limit: u32,
     ) -> Result<Vec<AssetId>, DomainError> {
         let ident = identity.clone();
@@ -278,10 +290,16 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
                 // `ord = 0` in the stored key is the convention the
                 // table keeps, not a claim about a material.
                 //
-                // Absence is the pending state here as it is above, so
-                // a computed or failed row leaves the walk. An asset
-                // with nothing to say earns a failure row on its first
-                // pass and is offered no second one.
+                // Absence *or* staleness is the pending state, which is
+                // one condition because it is one question: is there a
+                // vector here composed the way this build composes. A
+                // row written by an older reading is as much work as no
+                // row at all, and it is the case a predicate testing
+                // only for absence can never see.
+                //
+                // An asset with nothing to say earns a failure row on
+                // its first pass, at the current composition, and is
+                // offered no second one until the composition moves.
                 let mut stmt = conn.prepare(
                     "SELECT a.id
                        FROM asset a
@@ -289,14 +307,16 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
                         AND NOT EXISTS (
                             SELECT 1 FROM visual_feature vf
                              WHERE vf.asset_id = a.id AND vf.ord = 0
-                               AND vf.model_id = ?1 AND vf.feature_kind = ?2)
+                               AND vf.model_id = ?1 AND vf.feature_kind = ?2
+                               AND vf.composition_ver >= ?3)
                       ORDER BY a.id
-                      LIMIT ?3",
+                      LIMIT ?4",
                 )?;
                 let rows = stmt
-                    .query_map(params![ident.model_id, kind, limit as i64], |r| {
-                        r.get::<_, Uuid>(0)
-                    })?
+                    .query_map(
+                        params![ident.model_id, kind, composition, limit as i64],
+                        |r| r.get::<_, Uuid>(0),
+                    )?
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(rows)
             })
@@ -448,7 +468,143 @@ mod tests {
     }
 
     fn feature(asset: AssetId, vector: Vec<f32>) -> VisualFeature {
-        VisualFeature::new(asset, 0, identity(), VisualFeatureKind::Semantic, vector, 7).unwrap()
+        VisualFeature::new(
+            asset,
+            0,
+            identity(),
+            VisualFeatureKind::Semantic,
+            vector,
+            7,
+            0,
+        )
+        .unwrap()
+    }
+
+    /// The words walk's whole point (#32): a vector composed by an
+    /// older reading is as much work as no vector at all, and a
+    /// predicate testing only for absence cannot see it.
+    ///
+    /// This is the failure `asset_body.derived_version` was added to
+    /// close on the full-text side, after the first derivation walk had
+    /// already left every text asset holding a body composed from its
+    /// file alone. The same shape, asserted before it can happen here.
+    #[tokio::test]
+    async fn the_words_walk_offers_a_stale_composition_and_not_a_current_one() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteVisualFeatureRepository::new(isle.clone());
+        let (_persona, a, b) = seed_two_images(&isle).await;
+
+        // Both rows exist. One was composed by an older reading.
+        for (asset, composition) in [(a, 1), (b, 2)] {
+            repo.set_visual_feature(
+                VisualFeature::new(
+                    asset,
+                    0,
+                    identity(),
+                    VisualFeatureKind::Words,
+                    vec![0.0; 4],
+                    0,
+                    composition,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(
+            repo.unworded(&identity(), 2, 16).await.unwrap(),
+            vec![a],
+            "the older composition is work and the current one is not"
+        );
+        assert!(
+            repo.unworded(&identity(), 1, 16).await.unwrap().is_empty(),
+            "and at the reading that wrote them, neither is"
+        );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// A row with nothing to say is answered once, not offered every
+    /// pass — and the answer is stamped, so a wider reading asks it
+    /// again rather than trusting a verdict reached without the
+    /// sections it now reads.
+    #[tokio::test]
+    async fn a_wordless_row_is_answered_once_per_composition() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteVisualFeatureRepository::new(isle.clone());
+        let (_persona, a, b) = seed_two_images(&isle).await;
+
+        repo.mark_unextractable(
+            &a,
+            0,
+            &identity(),
+            VisualFeatureKind::Words,
+            "the row says nothing about itself",
+            1,
+        )
+        .await
+        .unwrap();
+        repo.set_visual_feature(
+            VisualFeature::new(
+                b,
+                0,
+                identity(),
+                VisualFeatureKind::Words,
+                vec![0.0; 4],
+                0,
+                1,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            repo.unworded(&identity(), 1, 16).await.unwrap().is_empty(),
+            "a failure retires the row as firmly as a vector does"
+        );
+        assert_eq!(
+            repo.unworded(&identity(), 2, 16).await.unwrap().len(),
+            2,
+            "and a wider reading re-opens both, the answered one included"
+        );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// The stamp survives the round trip, which is what the walk's
+    /// comparison rests on.
+    #[tokio::test]
+    async fn the_composition_reads_back_off_the_row() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteVisualFeatureRepository::new(isle.clone());
+        let (_persona, a, _b) = seed_two_images(&isle).await;
+
+        repo.set_visual_feature(
+            VisualFeature::new(
+                a,
+                0,
+                identity(),
+                VisualFeatureKind::Words,
+                vec![1.0, 0.0, 0.0, 0.0],
+                7,
+                3,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let stored = repo
+            .feature_of(&a, 0, &identity(), VisualFeatureKind::Words)
+            .await
+            .unwrap()
+            .expect("the row is there");
+        assert_eq!(stored.composition_ver, 3);
+        assert_eq!(stored.kind, VisualFeatureKind::Words);
+
+        driver.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -507,6 +663,7 @@ mod tests {
             &identity(),
             VisualFeatureKind::Semantic,
             "undecodable",
+            0,
         )
         .await
         .unwrap();
@@ -548,6 +705,7 @@ mod tests {
             &identity(),
             VisualFeatureKind::Semantic,
             "unreadable",
+            0,
         )
         .await
         .unwrap();
@@ -572,7 +730,7 @@ mod tests {
         repo.set_visual_feature(feature(a, vec![0.0; 4]))
             .await
             .unwrap();
-        repo.mark_unextractable(&b, 0, &identity(), VisualFeatureKind::Semantic, "x")
+        repo.mark_unextractable(&b, 0, &identity(), VisualFeatureKind::Semantic, "x", 0)
             .await
             .unwrap();
         let other = ModelIdentity {
@@ -587,6 +745,7 @@ mod tests {
                 VisualFeatureKind::Semantic,
                 vec![0.0; 4],
                 9,
+                0,
             )
             .unwrap(),
         )

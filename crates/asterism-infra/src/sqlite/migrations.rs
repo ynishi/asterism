@@ -7705,6 +7705,31 @@ UPDATE material SET
 WHERE mime IS NULL OR mime NOT LIKE 'image/%';
 "#;
 
+/// Which reading of an asset produced a stored vector (#32).
+///
+/// A vector is a derived value and the thing it is derived by is a
+/// function in this build, so a row holding one says nothing useful
+/// unless it also says which version of that function produced it.
+/// Without it, "already encoded" and "encoded by a build that only
+/// read the title" are the same state, and the walk — whose predicate
+/// is the absence of a row — can never find the second.
+///
+/// That is the gap `asset_body.derived_version` was added to close on
+/// the full-text side, and it closed it after the first derivation
+/// walk had already left every text asset holding a body composed from
+/// its file alone. The same shape, one column, before the same thing
+/// happens here.
+///
+/// `0` for every row that exists now: the `words` vectors written
+/// before this column did not record what composed them, so they are
+/// work, and the `semantic` vectors have no composition to record —
+/// pixels are not read by a function whose reading can change. The
+/// walk that consults this is the words one; the encode walk does not
+/// look at it.
+const V106_VISUAL_FEATURE_COMPOSITION: &str = r#"
+ALTER TABLE visual_feature ADD COLUMN composition_ver INTEGER NOT NULL DEFAULT 0;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7813,6 +7838,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V103_FORGE_ACTOR_DISPLAY_NAME),
     Step::Sql(V104_TEAM_ASSET_LINK),
     Step::Sql(V105_MATERIAL_PERCEPTUAL_HASH),
+    Step::Sql(V106_VISUAL_FEATURE_COMPOSITION),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
