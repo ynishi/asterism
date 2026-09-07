@@ -43,7 +43,14 @@ and this project adheres to
   row it came from rather than the one the query named, since under no scope
   there is no one persona to assume. The query is encoded through the same
   one-at-a-time permit the backfill walk takes, so a search cannot run the model
-  beside a job.
+  beside a job. What an agent reads to choose `asset_search` says this too
+  (#258): the tool description had gone on calling search a full-text index
+  alone, so nothing told an agent that a query sharing no words with its target
+  could be answered — and it now says what a build with no model bound answers,
+  since promising the second instrument unconditionally would be false in the
+  default build. The comments explaining why `filter.sort` is refused argue from
+  the answer sequence rather than from BM25, the sequence being the full-text
+  ranking with the appended tail after it and not one scale to re-sort by.
 - **The measurement that chose the shape** (#32). #112 had already answered what
   the issue called its blocking decision, since the packaged SigLIP2 binds both
   towers and tag suggestion has been calling `encode_text` in production since

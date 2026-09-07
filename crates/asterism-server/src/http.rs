@@ -1219,11 +1219,12 @@ async fn empty_trash(
     ))
 }
 
-/// `POST /asterism/assets/search` — relevance-ranked full text.
+/// `POST /asterism/assets/search` — relevance-ranked retrieval.
 ///
 /// The body carries the list query as its `filter`, so `filter.sort` is
 /// expressible; it is answered with `400` rather than dropped, because
-/// the BM25 ranking is the order. Sorted listings go to
+/// the answer sequence is the order — the full-text ranking, then
+/// whatever the meaning layer appended to it. Sorted listings go to
 /// `POST /asterism/assets`, which takes the same filter surface.
 async fn search_assets(
     State(ctx): State<Arc<ServerCtx>>,

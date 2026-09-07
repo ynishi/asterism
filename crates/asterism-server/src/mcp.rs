@@ -167,7 +167,7 @@ impl AsterismMcp {
     }
 
     #[tool(
-        description = "Ranked shortlist for \"find me something like this\" (Tantivy BM25, Japanese + English tokenization, typo-tolerant). Returns the closest N candidates, best match first, narrowed by `filter`. **This does not answer \"which assets match\".** It looks at a bounded number of candidates, so assets past that ceiling never appear however deep you page: `matched` counts candidates that survived the filter, `candidates_considered` says how many were looked at, and `truncated` says the shortlist filled up. There is no `total` because there is no total to give. For an exhaustive, countable answer use `asset_list` with `filter.text_match` — the same text as a SQL predicate (substring match, any length), which can be counted, sorted on any axis and paged to any depth. Order here is relevance and only relevance: `filter.sort` is rejected rather than ignored."
+        description = "Ranked shortlist for \"find me something like this\". The full-text index answers first (Tantivy BM25, Japanese + English tokenization, typo-tolerant); where a model is bound, a meaning layer then appends assets whose own words sit close to the query in an encoder's space, so a query sharing no words with what it looks for can still be answered. With no model bound the answer is full text alone, which is what it was before that layer existed. Returns the closest N candidates narrowed by `filter`, best first within each instrument — appended rows come after the full-text hits and are never re-ranked against them. Each card says which instrument reached it in `found_by` (absent is the full-text index), and its `score` is on the scale that route names: a BM25 score and a cosine are not one series, and the smaller of the two is not thereby the worse match. **This does not answer \"which assets match\".** It looks at a bounded number of candidates, so assets past that ceiling never appear however deep you page: `matched` counts candidates that survived the filter, `candidates_considered` says how many were looked at, and `truncated` says the shortlist filled up. There is no `total` because there is no total to give. For an exhaustive, countable answer use `asset_list` with `filter.text_match` — the same text as a SQL predicate (substring match, any length), which can be counted, sorted on any axis and paged to any depth. Order here is relevance and only relevance: `filter.sort` is rejected rather than ignored."
     )]
     async fn asset_search(
         &self,
@@ -520,8 +520,9 @@ loopback HTTP on the same port.
 1. `catalog_overview` — discover the persona / modality / tag / group
    vocabulary before filtering. Returned ids/slugs feed
    `asset_list` / `asset_search`.
-2. `asset_search` (Tantivy BM25, JP + EN) or `asset_list`
-   (server-side sort + facets) — find assets.
+2. `asset_search` (full text over Tantivy BM25, JP + EN; with a model
+   bound, a meaning layer appends what the words alone would miss) or
+   `asset_list` (server-side sort + facets) — find assets.
 3. `asset_get` — one asset's full record (metadata, materials, tags,
    labels, session membership, `extra._trace`).
 4. `asset_lineage` — trace a derivation chain (nodes with depth, roots,

@@ -494,9 +494,16 @@ impl Default for ListAssetsQuery {
 /// Full-text / fuzzy search. Shares the same filter and pagination shape
 /// as [`ListAssetsQuery`].
 ///
-/// Results are ranked by relevance (BM25) and that ranking **is** the
-/// order: [`filter.sort`](ListAssetsQuery::sort) is refused with a
-/// validation error rather than accepted and dropped. Sorted listings are
+/// Results come back in relevance order and that sequence **is** the
+/// answer: [`filter.sort`](ListAssetsQuery::sort) is refused with a
+/// validation error rather than accepted and dropped.
+///
+/// Re-sorting the page client-side is the same mistake in another
+/// place. The sequence is the full-text ranking with whatever the
+/// meaning layer proposed appended after it — appended, never ranked
+/// against it — so it is one arrangement rather than one scale, and
+/// [`score`](crate::dto::AssetCardDto::score) says why its numbers
+/// cannot be read as a single series. Sorted listings are
 /// the list path's job (`asset_list` / `POST /asterism/assets`), which
 /// takes the same filter surface. The unblock point, if search ever gains
 /// an axis, is the guard in `AssetService::search`.

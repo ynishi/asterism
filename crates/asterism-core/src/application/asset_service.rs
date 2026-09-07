@@ -2213,7 +2213,7 @@ impl AssetService {
     /// Same three steps the Query Group evaluator runs before it freezes
     /// `position` (`query_group_service`), minus the Tantivy intersection —
     /// a full-text term goes through
-    /// [`search`](Self::search), which keeps BM25 rank on purpose.
+    /// [`search`](Self::search), which keeps relevance rank on purpose.
     ///
     /// The group closure is deliberately **not** expanded here. `list`
     /// answers the filter it was handed (the desktop client expands
@@ -2463,8 +2463,10 @@ impl AssetService {
             }
         }
         // `filter` is the list query verbatim, so it carries a `sort`
-        // field this path cannot honour: the result sequence *is* the BM25
-        // ranking, and an axis would have to discard it. Refuse rather
+        // field this path cannot honour: the result sequence *is* the
+        // answer — the full-text ranking, then whatever the meaning
+        // layer appended, which is not ranked against it — and an axis
+        // would have to discard it. Refuse rather
         // than accept-and-drop — the wire already rejects a misspelled
         // axis (`deserialize_sort`), so accepting a well-spelled one and
         // answering in relevance order would make the correctness of the
@@ -2611,8 +2613,11 @@ impl AssetService {
     /// already holds an exact page from the Query side and wants
     /// Retrieval to decide only *the sequence* (`✦ Relevance` in the
     /// grid's sorter). Membership stays with the page it holds; this
-    /// answers "which of these is the better match", so hydrating cards
-    /// here would fetch rows the caller has already got.
+    /// answers "what order do these come back in", so hydrating cards
+    /// here would fetch rows the caller has already got. Not "which of
+    /// these is the better match" — the sequence carries an appended
+    /// tail whose scores are on another scale, and comparing across
+    /// that seam is what the card's `score` doc refuses.
     ///
     /// Everything before the hydration step is the same code path as
     /// `search`: the same validation (a `sort` axis, any trash selector

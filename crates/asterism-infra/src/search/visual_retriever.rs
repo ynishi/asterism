@@ -51,7 +51,8 @@ use async_trait::async_trait;
 
 use crate::sqlite::repo::{SqliteAssetRepository, SqliteVisualFeatureRepository};
 
-/// Composite retriever: text unchanged, `Similar` from stored vectors.
+/// Composite retriever: text with the meaning layer appended to it,
+/// `Similar` from stored vectors.
 pub struct VisualAwareRetriever {
     text: Arc<dyn AssetRetriever>,
     visual: SqliteVisualFeatureRepository,
