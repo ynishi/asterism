@@ -146,8 +146,10 @@ fn delta(before: &BTreeMap<String, u64>, after: &BTreeMap<String, u64>) -> BTree
 /// A fold moves text onto the keeper — the headstone's keywords, its
 /// labels, its comment thread — so the keeper's search document
 /// describes a row that has since grown, and somebody owes a
-/// re-composition. Both paths pay it; they differ in *when*, and this
-/// test counts at the instant of the call.
+/// re-composition. Two of them, in fact: the full body the index reads,
+/// and the short composition the words vector is encoded from, which
+/// keywords and labels are half of. Both paths pay both; they differ in
+/// *when*, and this test counts at the instant of the call.
 ///
 /// The automatic path pays it from inside the `asset_fold` job, on the
 /// branch that performed the fold. The manual path folds inside its own
@@ -159,12 +161,16 @@ fn delta(before: &BTreeMap<String, u64>, after: &BTreeMap<String, u64>) -> BTree
 /// folded row.
 ///
 /// So the automatic delta is the fold job alone and the manual delta is
-/// that job plus one `index_rebuild`. Asserting the deltas equal would
-/// require either dropping the manual path's enqueue (the keeper's
-/// document would then stay stale until somebody edited the row) or
-/// moving it into the `AlreadyFolded` branch (an N-discard merge would
-/// queue N re-compositions of one document). Both are worse than the
+/// that job plus the pair of re-compositions. Asserting the deltas equal
+/// would require either dropping the manual path's enqueue (the keeper's
+/// document and vector would then stay stale until somebody edited the
+/// row) or moving it into the `AlreadyFolded` branch (an N-discard merge
+/// would queue N re-compositions of one row). Both are worse than the
 /// asymmetry, so it is written down here instead.
+///
+/// Both paths reach that pair through one function, so a third
+/// derivation added later arrives on both at once and fails here as one
+/// missing count rather than as a divergence.
 #[tokio::test(flavor = "multi_thread")]
 async fn both_fold_entry_points_leave_the_same_work_behind() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -298,9 +304,10 @@ async fn both_fold_entry_points_leave_the_same_work_behind() {
         BTreeMap::from([
             ("asset_fold".to_string(), 1),
             ("index_rebuild".to_string(), 1),
+            ("words_feature".to_string(), 1),
         ]),
-        "the manual path owes the automatic path's fold job, plus the \
-         keeper re-composition the job it enqueues cannot pay on its \
+        "the manual path owes the automatic path's fold job, plus both \
+         keeper re-compositions the job it enqueues cannot pay on its \
          behalf — see this test's doc for why that asymmetry is the \
          cheaper of the three options"
     );
