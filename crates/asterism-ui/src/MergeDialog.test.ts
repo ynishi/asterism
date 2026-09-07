@@ -60,6 +60,7 @@ function card(id: string, locator: string): AssetCardDto {
     title: null,
     member_count: 0,
     score: null,
+    found_by: null,
     snippet: null,
     author_kind: null,
     author_subject: null,

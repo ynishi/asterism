@@ -3179,6 +3179,32 @@ pub enum Evidence {
     None,
 }
 
+/// Which instrument reached a candidate.
+///
+/// Separate from [`Evidence`], which answers *why* this row and is
+/// free to say nothing. This answers *what measured it*, and every
+/// candidate has an answer because something produced it — so a
+/// consumer that needs to know the score's scale asks this rather than
+/// inferring it from which variant of an explanation happened to be
+/// attached.
+///
+/// The two came apart when a second instrument arrived: the neighbour
+/// route scores by cosine and explains itself with [`Evidence::None`],
+/// so evidence and instrument had already stopped agreeing, and a
+/// reader that guessed one from the other would have called that
+/// cosine a BM25 score.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Route {
+    /// The full-text index. Scores are BM25 and unbounded above.
+    FullText,
+    /// The meaning layer — an asset's own words against the query, in
+    /// the encoder's space (#32). Scores are cosines.
+    Meaning,
+    /// The neighbour scan — one asset's pixels against another's
+    /// (#112). Scores are cosines.
+    Neighbour,
+}
+
 /// One candidate from [`AssetRetriever::retrieve`] — an asset, its
 /// rank score, and why it is here.
 ///
@@ -3202,10 +3228,12 @@ pub struct Candidate {
     /// — a BM25 score and a cosine sit in the same list today — and
     /// nobody has measured a conversion between them, which is why the
     /// route that appends does exactly that and never re-ranks what it
-    /// appends to. [`Evidence`] is what says which instrument a score
-    /// came from; two scores whose evidence differs are not on one
-    /// scale.
+    /// appends to. [`route`](Candidate::route) is what says which
+    /// instrument a score came from; two scores whose routes differ are
+    /// not on one scale.
     pub score: f32,
+    /// Which instrument produced [`score`](Candidate::score).
+    pub route: Route,
     /// Why this one is a candidate.
     pub evidence: Evidence,
 }

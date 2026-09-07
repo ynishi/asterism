@@ -287,6 +287,7 @@ mod tests {
             member_count: 0,
             score: None,
             snippet: None,
+            found_by: None,
             author_kind: None,
             author_subject: None,
             operator_ai: None,

@@ -42,7 +42,7 @@ use std::sync::{Arc, OnceLock};
 
 use asterism_core::domain::repository::{
     AssetRepository, AssetRetriever, Candidate, Evidence, RETRIEVAL_K_CEILING, RetrievalIntent,
-    RetrievalQuery, Retrieved, VisualFeatureRepository,
+    RetrievalQuery, Retrieved, Route, VisualFeatureRepository,
 };
 use asterism_core::domain::value::{AssetId, PersonaId};
 use asterism_core::domain::visual::{VisualEncoder, VisualFeatureKind, cosine_normalized};
@@ -128,6 +128,10 @@ impl VisualAwareRetriever {
                     asset_id,
                     persona_id: persona,
                     score,
+                    route: Route::Neighbour,
+                    // Nothing to say beyond the score: the neighbour
+                    // route's whole statement is "these pixels are
+                    // near those", which the score already is.
                     evidence: Evidence::None,
                 })
                 .collect(),
@@ -220,11 +224,12 @@ impl VisualAwareRetriever {
                     // a candidate to.
                     persona_id,
                     score,
-                    // Which route reached it, which is the half a reader
-                    // cannot infer from the score. The text itself is not
-                    // carried here and does not need to be: `derive_words`
-                    // is a function of the asset, so the words this matched
-                    // on are recomposable from the row at any later moment.
+                    route: Route::Meaning,
+                    // What a reader is told beyond the route. The text
+                    // itself is not carried here and does not need to
+                    // be: `derive_words` is a function of the asset, so
+                    // the words this matched on are recomposable from
+                    // the row at any later moment.
                     evidence: Evidence::Rationale("the asset's own words".into()),
                 }),
         );
@@ -382,6 +387,7 @@ mod tests {
             asset_id: ids[0],
             persona_id: persona,
             score: 9.0,
+            route: Route::FullText,
             evidence: Evidence::Snippet("the words that were written down".into()),
         }];
         let cell: Arc<OnceLock<Arc<dyn VisualEncoder>>> = Arc::new(OnceLock::new());

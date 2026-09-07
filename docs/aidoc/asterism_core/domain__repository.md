@@ -42,6 +42,7 @@ projection instead of full `Asset` entities.
 - `RetrievalIntent` — What the caller is looking for, in the Retrieval domain's own terms.
 - `RetrievalQuery` — One Retrieval request.
 - `Retrieved` — The answer to one [`RetrievalQuery`] — a ranked shortlist.
+- `Route` — Which instrument reached a candidate.
 - `SourceLookupScope` — Which rows count as holding a Source value, for
 - `TextLocator` — A locator established to point at text.
 - `UnderivedSeries` — One `(material, rule)` pair nothing has answered yet — the unit the

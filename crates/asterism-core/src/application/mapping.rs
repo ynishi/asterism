@@ -7,11 +7,11 @@
 
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetDetailDto, AssetDto, AssetPageDto, ChapterMarkDto, DirDto,
-    DispatchDto, EdgeDto, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto, MaterialLayerDto,
-    MaterialMarkDto, MessageDto, MessageRefDto, ModalityDefDto, PersonaDto, PersonaProfileDto,
-    PersonaThemeDto, RulingReadinessDto, SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto,
-    SettingLayerDto, SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto, ThreadDto,
-    TrainedHeadRunDto,
+    DispatchDto, EdgeDto, FoundBy, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto,
+    MaterialLayerDto, MaterialMarkDto, MessageDto, MessageRefDto, ModalityDefDto, PersonaDto,
+    PersonaProfileDto, PersonaThemeDto, RulingReadinessDto, SeriesStrategyDto, SessionDto,
+    SessionPageDto, SettingDto, SettingLayerDto, SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto,
+    ThreadDto, TrainedHeadRunDto,
 };
 use asterism_contract::forge::{
     ForgeAnchorDto, ForgeChangePointDto, ForgeChangeRowDto, ForgeCloseDto, ForgeCollisionDto,
@@ -59,7 +59,7 @@ use crate::domain::persona::Persona;
 use crate::domain::persona_profile::PersonaProfile;
 use crate::domain::persona_theme::PersonaTheme;
 use crate::domain::render::render_policy;
-use crate::domain::repository::RegisteredStrategy;
+use crate::domain::repository::{Evidence, RegisteredStrategy, Route};
 use crate::domain::series::Path as SeriesPath;
 use crate::domain::session::Session;
 use crate::domain::snapshot::Snapshot;
@@ -356,8 +356,8 @@ pub fn persona_theme_to_dto(theme: &PersonaTheme) -> PersonaThemeDto {
 }
 
 /// Converts an `AssetCard` projection to an `AssetCardDto`. Search
-/// hit augmentation (`score` / `snippet`) is layered on separately
-/// by [`card_to_dto_with_hit`] on the search read path.
+/// hit augmentation (`score` / `snippet` / `found_by`) is layered on
+/// separately by [`card_to_dto_with_hit`] on the search read path.
 pub fn card_to_dto(card: &AssetCard) -> AssetCardDto {
     AssetCardDto {
         id: card.id.to_string(),
@@ -417,15 +417,52 @@ pub fn card_to_dto(card: &AssetCard) -> AssetCardDto {
             .and_then(|a| a.subject())
             .map(str::to_string),
         operator_ai: card.operator_ai.as_ref().map(|o| o.as_str().to_string()),
+        found_by: None,
     }
 }
 
 /// Same shape as [`card_to_dto`] but populates the search-only
-/// `score` + `snippet` fields from a retrieval `Candidate`.
-pub fn card_to_dto_with_hit(card: &AssetCard, score: f32, snippet: Option<String>) -> AssetCardDto {
+/// `score` / `snippet` / `found_by` fields from a retrieval candidate.
+///
+/// The three arrive together because they are one statement: this row
+/// was ranked, this is its score, and this is the instrument whose
+/// scale that score is on.
+///
+/// # What crosses, and from where
+///
+/// The two fields come from two places on the candidate, and that is
+/// the point rather than an accident of shape. `snippet` comes from
+/// [`Evidence`], which answers *why this row* and is free to say
+/// nothing — a full-text hit whose body had no window to show says
+/// [`Evidence::None`], and is still a full-text hit. `found_by` comes
+/// from [`Route`], which answers *what measured it* and always has an
+/// answer, because something produced the score.
+///
+/// Reading the route off the evidence instead would have been a guess
+/// that was already wrong: the neighbour scan explains itself with
+/// `Evidence::None` and scores by cosine, so a mapping keyed on the
+/// variant would have labelled that cosine a BM25 score.
+///
+/// [`Route::FullText`] leaves `found_by` absent rather than naming
+/// itself, which is what every ranked payload written before the field
+/// existed already meant.
+pub fn card_to_dto_with_hit(
+    card: &AssetCard,
+    score: f32,
+    route: Route,
+    evidence: &Evidence,
+) -> AssetCardDto {
     AssetCardDto {
         score: Some(score),
-        snippet,
+        snippet: match evidence {
+            Evidence::Snippet(s) => Some(s.clone()),
+            _ => None,
+        },
+        found_by: match route {
+            Route::FullText => None,
+            Route::Meaning => Some(FoundBy::Meaning),
+            Route::Neighbour => Some(FoundBy::Neighbour),
+        },
         ..card_to_dto(card)
     }
 }
@@ -1904,8 +1941,102 @@ mod tests {
     use crate::domain::content_hash::of_bytes;
     use crate::domain::material::Material;
     use crate::domain::measurement::MeasurementStatus;
-    use crate::domain::value::{SourceKind, SourceRef};
+    use crate::domain::value::{AssetRole, SourceKind, SourceRef};
     use asterism_contract::query::ListAssetsQuery;
+
+    /// The least card that can carry a hit — nothing here is read by
+    /// the assertions below, which are about the three search-only
+    /// fields the hit form adds.
+    fn bare_card() -> AssetCard {
+        AssetCard {
+            id: AssetId::new(),
+            persona_id: PersonaId::new(),
+            modality: None,
+            occurred_at: Utc::now(),
+            cover: None,
+            labels: Vec::new(),
+            file_size_bytes: None,
+            duration_ms: None,
+            pixel_count: None,
+            mime: None,
+            source_locator: SourceRef::new(SourceKind::new("fs").expect("kind"), "/pics/a.png")
+                .expect("source")
+                .locator,
+            group_ids: Vec::new(),
+            primary_group_position: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            rating: None,
+            palette: None,
+            has_note: false,
+            has_thread: false,
+            role: AssetRole::Item,
+            title: None,
+            member_count: 0,
+            author: None,
+            operator_ai: None,
+        }
+    }
+
+    /// The two wire fields come from two places, and neither is read
+    /// off the other.
+    ///
+    /// The pairing is the point rather than either field alone. A
+    /// rationale must not arrive as a snippet — it is not body text a
+    /// reader can check against the query — and the route must not be
+    /// inferred from the evidence, which the last case is here to
+    /// hold: a candidate that explains itself with nothing still says
+    /// which instrument measured it, and that instrument's scale is
+    /// not the full-text one.
+    #[test]
+    fn the_route_and_the_evidence_reach_the_wire_separately() {
+        let card = bare_card();
+
+        let text = card_to_dto_with_hit(
+            &card,
+            18.4,
+            Route::FullText,
+            &Evidence::Snippet("a <b>hit</b>".into()),
+        );
+        assert_eq!(text.snippet.as_deref(), Some("a <b>hit</b>"));
+        assert_eq!(
+            text.found_by, None,
+            "full text is what an absent route means"
+        );
+
+        let meaning = card_to_dto_with_hit(
+            &card,
+            0.81,
+            Route::Meaning,
+            &Evidence::Rationale("the asset's own words".into()),
+        );
+        assert_eq!(meaning.found_by, Some(FoundBy::Meaning));
+        assert_eq!(
+            meaning.snippet, None,
+            "a rationale is not body text, and must not arrive as one"
+        );
+
+        let bare = card_to_dto_with_hit(&card, 12.0, Route::FullText, &Evidence::None);
+        assert_eq!(
+            bare.found_by, None,
+            "a full-text hit with no window to show is still a full-text hit"
+        );
+        assert_eq!(bare.snippet, None);
+
+        let neighbour = card_to_dto_with_hit(&card, 0.94, Route::Neighbour, &Evidence::None);
+        assert_eq!(
+            neighbour.found_by,
+            Some(FoundBy::Neighbour),
+            "silence about why is not silence about which instrument, and \
+             this cosine must not arrive labelled as a BM25 score"
+        );
+
+        assert_eq!(
+            card_to_dto(&card).score,
+            None,
+            "the score is the hit form's, and the plain form has no rank to report"
+        );
+    }
 
     /// An item asset holding one primary material whose file axis is in
     /// the given state.

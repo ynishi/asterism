@@ -561,8 +561,10 @@
   // the user sees just that session's assets.
   // activeFilter.activeSessionId / activeFilter.activeSessionLabel moved to `activeFilter.*`.
   // Free-text search input. Empty = list mode (fast); non-empty flips
-  // the query to `search_assets` (Tantivy BM25 over the indexed body,
-  // intersected server-side with the active filter chips).
+  // the query to `search_assets` — Tantivy BM25 over the indexed body,
+  // intersected server-side with the active filter chips, and then the
+  // meaning layer's proposals appended for what full text did not name.
+  // Which instrument reached a card is on the card (`found_by`).
   // activeFilter.searchText moved to `activeFilter.activeFilter.searchText`.
   // Messages-view page + viewport hydration cache moved to
   // `assetPageCatalog` (asset-page.svelte.ts, wave ①).
@@ -6111,18 +6113,39 @@
                     {/if}
                     {#if rc.score !== null && rc.score !== undefined}
                       <!--
-                        Search rank badge — the BM25 score assigned
-                        by the Tantivy full-text index. Present only
-                        when the current view came from
-                        `search_assets`; list mode leaves it out so
-                        the badge is a visible signal that ranking
-                        is active. Two decimals keeps the range
-                        readable (typical scores 5-40) without
+                        Search rank badge. Present only when the
+                        current view came from `search_assets`; list
+                        mode leaves it out, so the badge's presence is
+                        also the signal that ranking is active. Two
+                        decimals keeps either range readable without
                         overflowing the head bar.
+
+                        More than one instrument answers a search, and
+                        their numbers are not on one scale: full text
+                        scores with BM25, unbounded above, and the
+                        vector routes with a cosine bounded by a floor
+                        and 1. So the badge says which rather than
+                        printing a bare number a reader would compare
+                        with its neighbours. `found_by` is what the
+                        server sends to tell them apart, and the branch
+                        is on its presence rather than on one value —
+                        every route it can name scores by cosine, and
+                        the one it cannot name is the BM25 one.
                       -->
-                      <span class="score-badge" title="BM25 rank score">
-                        {rc.score.toFixed(2)}
-                      </span>
+                      {#if rc.found_by}
+                        <span
+                          class="score-badge score-badge-vector"
+                          title={rc.found_by === "meaning"
+                            ? "Reached by meaning — cosine to the asset's own words, not a BM25 score"
+                            : "Reached by likeness — cosine between pixels, not a BM25 score"}
+                        >
+                          ✦ {rc.score.toFixed(2)}
+                        </span>
+                      {:else}
+                        <span class="score-badge" title="BM25 rank score">
+                          {rc.score.toFixed(2)}
+                        </span>
+                      {/if}
                     {/if}
                     <span
                       class="rating"
@@ -7551,9 +7574,9 @@
   }
 
   /*
-   * BM25 rank badge — visible only in search mode. Distinct hue
-   * from the `.badge` (modality slug) and `.flag-badge` (content
-   * flag icons) so a quick glance separates ranking from category.
+   * Rank badge — visible only in search mode. Distinct hue from the
+   * `.badge` (modality slug) and `.flag-badge` (content flag icons)
+   * so a quick glance separates ranking from category.
    */
   .score-badge {
     font-size: 0.6rem;
@@ -7563,6 +7586,17 @@
     padding: 0.05rem 0.35rem;
     margin-left: 0.3rem;
     font-variant-numeric: tabular-nums;
+  }
+  /* The same badge for a cosine rather than a BM25 score. Hollow
+     rather than filled, because the two numbers are on different
+     scales and a glance should not read them as one series. The
+     outline is what carries that, not the ✦ — ✦ already means
+     "retrieval mode" everywhere else in this UI, so it reads as
+     "ranked" rather than as "ranked by this one". */
+  .score-badge-vector {
+    background: transparent;
+    color: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-fill);
   }
   .annot-badge {
     font-size: 0.7rem;

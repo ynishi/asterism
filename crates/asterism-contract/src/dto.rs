@@ -78,6 +78,32 @@ fn default_media() -> String {
     "none".to_string()
 }
 
+/// Which instrument reached a card, when it was not the full-text
+/// index.
+///
+/// The wire half of `asterism_core::domain::repository::Route`, and an
+/// enum for the reason [`DuplicateAxis`] is one: it is rendered as a
+/// union in the generated bindings, so the client compares against a
+/// type rather than restating the vocabulary in TypeScript — and a
+/// restatement is how a second spelling gets compared against on one
+/// side only, failing silently by never matching.
+///
+/// The absent case is deliberately not a variant. `None` on the wire is
+/// the full-text route, which is what every ranked payload written
+/// before this field meant, so a client that ignores the field reads
+/// exactly what it read before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, SchemaBridge)]
+#[serde(rename_all = "snake_case")]
+pub enum FoundBy {
+    /// The meaning layer — the asset's own words against the query, in
+    /// the encoder's space. Its scores are cosines.
+    Meaning,
+    /// The neighbour scan — one asset's pixels against another's. Its
+    /// scores are cosines too, and it reaches the grid through the
+    /// "more like this" route rather than the search box.
+    Neighbour,
+}
+
 /// Lightweight card representation used on the grid (wire form of
 /// `AssetCard`).
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
@@ -235,11 +261,36 @@ pub struct AssetCardDto {
     /// container it is the card's headline number.
     #[serde(default)]
     pub member_count: u64,
-    /// Search-only: BM25 score assigned by the full-text index.
-    /// `None` on the grid / detail read paths where rank is
-    /// irrelevant. Populated by `AssetService::search`.
+    /// Search-only: the rank score, on the scale
+    /// [`found_by`](AssetCardDto::found_by) names. `None` on the grid /
+    /// detail read paths where rank is irrelevant. Populated by
+    /// `AssetService::search`.
+    ///
+    /// **More than one scale shares this field**, because more than one
+    /// instrument answers a search: BM25 from the full-text index,
+    /// unbounded above, and a cosine from the meaning layer, bounded by
+    /// its floor and 1. Nobody has measured a conversion between them,
+    /// so a surface that prints the number owes the reader which one it
+    /// is — two numbers on different scales cannot be read as one
+    /// series, and a smaller one is not thereby a worse match.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub score: Option<f32>,
+    /// Search-only: which instrument reached this card, when that is
+    /// not the full-text index.
+    ///
+    /// `None` is the full-text route — the one every ranked read had
+    /// before a second appeared, so absence keeps meaning what it
+    /// meant, and a client written before this field reads exactly what
+    /// it read before. The variants are [`FoundBy`]'s.
+    ///
+    /// The route rather than the retriever's own sentence about why:
+    /// what a client does with this is switch on it — a different
+    /// badge, a different tooltip, a different scale for
+    /// [`score`](AssetCardDto::score) — and a sentence written for a
+    /// reader is not something to branch on. The sentence is still
+    /// written, in `Evidence`, where a reader of the record finds it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub found_by: Option<FoundBy>,
     /// Search-only: highlighted snippet extracted from the asset's
     /// body around the query terms (HTML with `<b>` tags around the
     /// matches). `None` when the body had no material for the query
