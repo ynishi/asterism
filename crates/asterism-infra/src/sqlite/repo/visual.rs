@@ -175,25 +175,32 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
         }
     }
 
-    async fn vectors_of_persona(
+    async fn vectors_in_scope(
         &self,
-        persona_id: &PersonaId,
+        scope: Option<&PersonaId>,
         identity: &ModelIdentity,
         kind: VisualFeatureKind,
-    ) -> Result<Vec<(AssetId, Vec<f32>)>, DomainError> {
-        let persona = *persona_id.as_uuid();
+    ) -> Result<Vec<(AssetId, PersonaId, Vec<f32>)>, DomainError> {
+        let persona = scope.map(|p| *p.as_uuid());
         let ident = identity.clone();
         let kind_slug = kind.as_str();
-        let rows: Vec<(Uuid, Vec<u8>)> = self
+        let rows: Vec<(Uuid, Uuid, Vec<u8>)> = self
             .isle
             .call(move |conn| {
                 // Trashed and folded assets are out: a suggestion must
                 // not point at a card the grid will not show.
+                //
+                // The scope predicate is written as a NULL test rather
+                // than as two prepared statements: one shape means one
+                // place where the visibility rules above are stated,
+                // and a library-wide scan that forgot one of them would
+                // differ from the scoped scan in what it is willing to
+                // propose.
                 let mut stmt = conn.prepare(
-                    "SELECT vf.asset_id, vf.vector
+                    "SELECT vf.asset_id, a.persona_id, vf.vector
                        FROM visual_feature vf
                        JOIN asset a ON a.id = vf.asset_id
-                      WHERE a.persona_id = ?1
+                      WHERE (?1 IS NULL OR a.persona_id = ?1)
                         AND vf.model_id = ?2 AND vf.feature_kind = ?3
                         AND vf.preprocess_ver = ?4 AND vf.status = 'computed'
                         AND a.trashed_at IS NULL AND a.folded_into IS NULL",
@@ -201,7 +208,13 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
                 let rows = stmt
                     .query_map(
                         params![persona, ident.model_id, kind_slug, ident.preprocess_ver],
-                        |r| Ok((r.get::<_, Uuid>(0)?, r.get::<_, Vec<u8>>(1)?)),
+                        |r| {
+                            Ok((
+                                r.get::<_, Uuid>(0)?,
+                                r.get::<_, Uuid>(1)?,
+                                r.get::<_, Vec<u8>>(2)?,
+                            ))
+                        },
                     )?
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(rows)
@@ -209,7 +222,13 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
             .await
             .map_err(infra_err)?;
         rows.into_iter()
-            .map(|(id, blob)| Ok((AssetId::from_uuid(id), blob_to_vector(&blob)?)))
+            .map(|(id, persona, blob)| {
+                Ok((
+                    AssetId::from_uuid(id),
+                    PersonaId::from_uuid(persona),
+                    blob_to_vector(&blob)?,
+                ))
+            })
             .collect()
     }
 
@@ -467,6 +486,41 @@ mod tests {
         )
     }
 
+    /// Seed a second persona with one image asset.
+    ///
+    /// Its own `pack_id`, because the column is unique and the helper
+    /// above spends the one it hard-codes — which is why a test wanting
+    /// two personas cannot simply call that one twice.
+    async fn seed_another_persona(isle: &AsyncIsle) -> (PersonaId, AssetId) {
+        let persona = Uuid::now_v7();
+        let asset = Uuid::now_v7();
+        isle.call(move |conn| {
+            let tx = conn.transaction()?;
+            tx.execute(
+                "INSERT INTO persona (id, pack_id, name, created_at, updated_at)
+                 VALUES (?1, 'q', 'Q', 0, 0)",
+                params![persona],
+            )?;
+            let locator = serde_json::json!({ "kind": "file", "path": "/pics/q.png" }).to_string();
+            tx.execute(
+                "INSERT INTO asset (id, persona_id, source_kind, source_locator,
+                                    modality, occurred_at, created_at, updated_at)
+                 VALUES (?1, ?2, 'fs', ?3, 'image', 0, 0, 0)",
+                params![asset, persona, locator],
+            )?;
+            tx.execute(
+                "INSERT INTO material (asset_id, ord, locator, mime, created_at, updated_at)
+                 VALUES (?1, 0, ?2, 'image/png', 0, 0)",
+                params![asset, locator],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        (PersonaId::from_uuid(persona), AssetId::from_uuid(asset))
+    }
+
     fn feature(asset: AssetId, vector: Vec<f32>) -> VisualFeature {
         VisualFeature::new(
             asset,
@@ -711,12 +765,54 @@ mod tests {
         .unwrap();
 
         let vectors = repo
-            .vectors_of_persona(&p, &identity(), VisualFeatureKind::Semantic)
+            .vectors_in_scope(Some(&p), &identity(), VisualFeatureKind::Semantic)
             .await
             .unwrap();
         assert_eq!(vectors.len(), 1, "failed rows carry no vector to scan");
         assert_eq!(vectors[0].0, a);
-        assert_eq!(vectors[0].1, vec![1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(vectors[0].1, p, "the scan says whose asset it found");
+        assert_eq!(vectors[0].2, vec![1.0, 0.0, 0.0, 0.0]);
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// An unscoped scan reaches every persona, and a scoped one reaches
+    /// exactly the persona named.
+    #[tokio::test]
+    async fn no_scope_scans_every_persona_and_a_scope_scans_one() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteVisualFeatureRepository::new(isle.clone());
+        let (mine, a, _b) = seed_two_images(&isle).await;
+        let (theirs, c) = seed_another_persona(&isle).await;
+        assert_ne!(mine, theirs, "the fixture must seed two personas");
+
+        repo.set_visual_feature(feature(a, vec![1.0, 0.0, 0.0, 0.0]))
+            .await
+            .unwrap();
+        repo.set_visual_feature(feature(c, vec![0.0, 1.0, 0.0, 0.0]))
+            .await
+            .unwrap();
+
+        let everywhere = repo
+            .vectors_in_scope(None, &identity(), VisualFeatureKind::Semantic)
+            .await
+            .unwrap();
+        let mut found: Vec<(AssetId, PersonaId)> =
+            everywhere.iter().map(|(id, p, _)| (*id, *p)).collect();
+        found.sort_by_key(|(id, _)| *id);
+        let mut want = vec![(a, mine), (c, theirs)];
+        want.sort_by_key(|(id, _)| *id);
+        assert_eq!(found, want, "an unscoped scan crosses personas");
+
+        let only_mine = repo
+            .vectors_in_scope(Some(&mine), &identity(), VisualFeatureKind::Semantic)
+            .await
+            .unwrap();
+        assert_eq!(
+            only_mine.iter().map(|(id, _, _)| *id).collect::<Vec<_>>(),
+            vec![a],
+            "a scoped scan stops at the persona it was given"
+        );
 
         driver.shutdown().await.unwrap();
     }

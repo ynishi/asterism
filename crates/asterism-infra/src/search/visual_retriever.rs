@@ -3,16 +3,32 @@
 //! about themselves (#32).
 //!
 //! A composite over the text retriever. `Similar` becomes a
-//! brute-force cosine scan over the persona's stored feature vectors
-//! under the bound model. `Text` runs full text first and appends what
-//! the meaning layer proposes for assets full text did not name — the
-//! two are not competing rankings, they are an instrument and a
-//! suggestion in that order.
+//! brute-force cosine scan over stored feature vectors under the bound
+//! model. `Text` runs full text first and appends what the meaning
+//! layer proposes for assets full text did not name — the two are not
+//! competing rankings, they are an instrument and a suggestion in that
+//! order.
 //!
-//! Brute force on purpose — at personal-library scale the whole scan is
-//! a few megabytes of f32, and an ANN structure earns its complexity
-//! only when the P2-5 measurements say the scan misses a latency
-//! target.
+//! Brute force on purpose — an ANN structure earns its complexity only
+//! when a measurement says the scan misses a latency target. What is
+//! scanned is no longer always one persona's vectors, so the sizing to
+//! keep in view is the whole library's: #32's own note puts 50k assets
+//! at 512 dimensions of `f32` near 100 MB, and this reads them per
+//! query.
+//!
+//! # Both routes scan what the query asked about
+//!
+//! The query's scope is the population, and the two routes reach it
+//! differently only because they start differently. `Similar` starts
+//! from an asset, so an unscoped query falls back to that asset's own
+//! persona — the library being asked about is the one the subject
+//! lives in. `Text` starts from words and has no such anchor, so an
+//! unscoped query scans every persona, which is the population full
+//! text answered for the same query.
+//!
+//! Requiring a scope on the text route instead is what kept the
+//! meaning layer switched off in the app's default state, where no
+//! persona is selected until somebody selects one.
 //!
 //! Degradation is layered the way the rest of the feature degrades. No
 //! bound encoder means `Similar` declines exactly as the text-only
@@ -28,7 +44,7 @@ use asterism_core::domain::repository::{
     AssetRepository, AssetRetriever, Candidate, Evidence, RETRIEVAL_K_CEILING, RetrievalIntent,
     RetrievalQuery, Retrieved, VisualFeatureRepository,
 };
-use asterism_core::domain::value::AssetId;
+use asterism_core::domain::value::{AssetId, PersonaId};
 use asterism_core::domain::visual::{VisualEncoder, VisualFeatureKind, cosine_normalized};
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
@@ -94,13 +110,13 @@ impl VisualAwareRetriever {
         };
         let vectors = self
             .visual
-            .vectors_of_persona(&persona, &identity, VisualFeatureKind::Semantic)
+            .vectors_in_scope(Some(&persona), &identity, VisualFeatureKind::Semantic)
             .await?;
         let k = q.k.clamp(1, RETRIEVAL_K_CEILING) as usize;
         let mut scored: Vec<(AssetId, f32)> = vectors
             .into_iter()
-            .filter(|(id, _)| id != asset_id)
-            .map(|(id, v)| (id, cosine_normalized(&feature.vector, &v)))
+            .filter(|(id, _, _)| id != asset_id)
+            .map(|(id, _, v)| (id, cosine_normalized(&feature.vector, &v)))
             .collect();
         scored.sort_by(|a, b| b.1.total_cmp(&a.1));
         let truncated = scored.len() > k;
@@ -156,48 +172,62 @@ impl VisualAwareRetriever {
         q: &RetrievalQuery,
     ) -> Result<Retrieved, DomainError> {
         let found = self.text.retrieve(q).await?;
-        // Two ways this route is simply absent, and both leave full
-        // text as the whole answer rather than failing: no bound model
-        // (the build has no encoder), and no persona to scan (the scan
-        // is persona-scoped, and a query that names none is asking
-        // across a boundary this layer does not cross).
-        let (Some(encoder), Some(persona)) = (self.encoder.get(), q.scope) else {
+        // One way this route is simply absent, and it leaves full text
+        // as the whole answer rather than failing: no bound model, in a
+        // build that has no encoder.
+        //
+        // The scan follows the query's scope rather than requiring one.
+        // A search that names no persona is asking the whole store, and
+        // full text answers it that way; a meaning layer that went
+        // silent there would be off in the app's own default state,
+        // which is where it was until this was fixed.
+        let Some(encoder) = self.encoder.get() else {
             return Ok(found);
         };
         let identity = encoder.identity().clone();
-        let query_vector = encoder.encode_text(text)?;
+        // Through the crate's one encode gate, not inline: this runs on
+        // every search now, the tower blocks for long enough to stall
+        // the runtime thread it lands on, and a query encoding beside a
+        // backfill job is exactly what the permit exists to prevent.
+        let query_vector = crate::encode::text(encoder.clone(), text.to_string()).await?;
         let vectors = self
             .visual
-            .vectors_of_persona(&persona, &identity, VisualFeatureKind::Words)
+            .vectors_in_scope(q.scope.as_ref(), &identity, VisualFeatureKind::Words)
             .await?;
 
         let already: std::collections::HashSet<AssetId> =
             found.candidates.iter().map(|c| c.asset_id).collect();
-        let mut proposed: Vec<(AssetId, f32)> = vectors
+        let mut proposed: Vec<(AssetId, PersonaId, f32)> = vectors
             .into_iter()
-            .filter(|(id, _)| !already.contains(id))
-            .map(|(id, v)| (id, cosine_normalized(&query_vector, &v)))
-            .filter(|(_, score)| *score >= MEANING_FLOOR)
+            .filter(|(id, _, _)| !already.contains(id))
+            .map(|(id, persona, v)| (id, persona, cosine_normalized(&query_vector, &v)))
+            .filter(|(_, _, score)| *score >= MEANING_FLOOR)
             .collect();
-        proposed.sort_by(|a, b| b.1.total_cmp(&a.1));
+        proposed.sort_by(|a, b| b.2.total_cmp(&a.2));
 
         let k = q.k.clamp(1, RETRIEVAL_K_CEILING) as usize;
         let room = k.saturating_sub(found.candidates.len());
         let truncated = found.truncated || proposed.len() > room;
         let mut candidates = found.candidates;
-        candidates.extend(proposed.into_iter().take(room).map(|(asset_id, score)| {
-            Candidate {
-                asset_id,
-                persona_id: persona,
-                score,
-                // Which route reached it, which is the half a reader
-                // cannot infer from the score. The text itself is not
-                // carried here and does not need to be: `derive_words`
-                // is a function of the asset, so the words this matched
-                // on are recomposable from the row at any later moment.
-                evidence: Evidence::Rationale("the asset's own words".into()),
-            }
-        }));
+        candidates.extend(
+            proposed
+                .into_iter()
+                .take(room)
+                .map(|(asset_id, persona_id, score)| Candidate {
+                    asset_id,
+                    // The row's own persona, not the query's: under an
+                    // unscoped search there is no one persona to attribute
+                    // a candidate to.
+                    persona_id,
+                    score,
+                    // Which route reached it, which is the half a reader
+                    // cannot infer from the score. The text itself is not
+                    // carried here and does not need to be: `derive_words`
+                    // is a function of the asset, so the words this matched
+                    // on are recomposable from the row at any later moment.
+                    evidence: Evidence::Rationale("the asset's own words".into()),
+                }),
+        );
         Ok(Retrieved {
             candidates,
             truncated,
@@ -459,14 +489,22 @@ mod tests {
         driver.shutdown().await.unwrap();
     }
 
-    /// A query naming no persona is asking across a boundary this scan
-    /// does not cross, so it gets full text and no proposal.
+    /// A query naming no persona is asking the whole store, and the
+    /// meaning route answers it there too.
+    ///
+    /// This is the app's own default state — nothing is selected in the
+    /// persona strip until somebody selects it — so a route that went
+    /// silent without a scope would be a route the app never reached.
+    /// It did, until this test was inverted.
+    ///
+    /// The candidate's persona comes off the row rather than off the
+    /// query, which under no scope is the only place it can come from.
     #[tokio::test]
-    async fn a_query_with_no_persona_gets_full_text_alone() {
+    async fn a_query_with_no_persona_still_reaches_the_meaning_route() {
         let (isle, driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
         let visual = SqliteVisualFeatureRepository::new(isle.clone());
         let assets = SqliteAssetRepository::new(isle.clone());
-        let (_persona, ids) = seed(&isle).await;
+        let (persona, ids) = seed(&isle).await;
 
         visual
             .set_visual_feature(
@@ -506,9 +544,20 @@ mod tests {
             })
             .await
             .unwrap();
+        assert_eq!(
+            out.candidates.len(),
+            1,
+            "the vector sits exactly where the query does: {:?}",
+            out.candidates
+        );
+        assert_eq!(out.candidates[0].asset_id, ids[0]);
+        assert_eq!(
+            out.candidates[0].persona_id, persona,
+            "the candidate names the persona whose asset it is"
+        );
         assert!(
-            out.candidates.is_empty(),
-            "the vector sits exactly where the query does, and is still not proposed"
+            matches!(out.candidates[0].evidence, Evidence::Rationale(_)),
+            "the meaning route says it was the one that reached this row"
         );
 
         driver.shutdown().await.unwrap();

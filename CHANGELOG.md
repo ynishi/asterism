@@ -18,8 +18,17 @@ and this project adheres to
   the picture nobody described in those words. Full text still answers first and
   this only ever appends: BM25 and a cosine are not comparable numbers, and the
   order is the arrangement rather than a ranking anybody invented. A profile
-  with no model bound, or a query naming no persona, gets full text alone — what
-  search answered before this layer existed.
+  with no model bound gets full text alone — what search answered before this
+  layer existed. The scan follows whatever the query asked about: a search
+  naming a persona scans that persona, and a search naming none scans every
+  persona, which is the population full text answers for the same query. That
+  matters more than it sounds, because nothing selects a persona by default —
+  the strip opens on "all" — and a first cut required one, which put the layer
+  off in the state the app starts in. Each candidate carries the persona of the
+  row it came from rather than the one the query named, since under no scope
+  there is no one persona to assume. The query is encoded through the same
+  one-at-a-time permit the backfill walk takes, so a search cannot run the model
+  beside a job.
 - **The measurement that chose the shape** (#32). #112 had already answered what
   the issue called its blocking decision, since the packaged SigLIP2 binds both
   towers and tag suggestion has been calling `encode_text` in production since

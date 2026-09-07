@@ -2445,9 +2445,11 @@ impl AssetService {
     /// body for why, and use [`list`](Self::list) for a sorted listing.
     pub async fn search(&self, query: SearchAssetsQuery) -> Result<RetrievedPageDto, DomainError> {
         let text = query.text.trim();
-        // Search reads the Tantivy index, which by construction holds
-        // only live assets (trash drops the document, restore re-adds
-        // it). So the trash selector cannot be honoured here — and
+        // Every store search reads answers with live assets only: the
+        // Tantivy index holds nothing else by construction (trash drops
+        // the document, restore re-adds it), and the vector scan
+        // excludes trashed and folded rows in its own predicate. So the
+        // trash selector cannot be honoured here — and
         // silently ignoring it would be worse than refusing: a caller
         // asking for the trash side would get the live side back and
         // believe the trash was empty. Validate explicitly, including

@@ -438,10 +438,10 @@ const VISUAL_SCORE_FLOOR: f32 = 0.92;
 const VISUAL_TOP_K: usize = 8;
 /// Page size of the extraction backfill walk.
 const VISUAL_FEATURE_PAGE: u32 = 16;
-/// One encode at a time: decode + inference is CPU-bound the way
-/// thumbnail decodes are, and the same host-responsiveness argument
-/// applies (see [`THUMB_DECODE_SLOTS`]).
-static VISUAL_ENCODE_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+/// One encode at a time. The permit lives in [`crate::encode`] because
+/// search encodes a query through the same model, and two permits of
+/// one would let the two run together.
+use crate::encode::ENCODE_SLOTS as VISUAL_ENCODE_SLOTS;
 
 /// What one offered material came to.
 enum EncodeOutcome {
@@ -726,14 +726,7 @@ async fn encode_words(
         return Ok(EncodeOutcome::Retired);
     };
 
-    let _permit = VISUAL_ENCODE_SLOTS
-        .acquire()
-        .await
-        .expect("semaphore never closed");
-    let enc = encoder.clone();
-    let vector = tokio::task::spawn_blocking(move || enc.encode_text(&words))
-        .await
-        .map_err(|e| DomainError::Validation(format!("encode task failed: {e}")))?;
+    let vector = crate::encode::text(encoder.clone(), words).await;
 
     match vector {
         Ok(vector) => {
@@ -1393,12 +1386,16 @@ pub async fn visual_edge_rebuild(
     let vectors = env
         .deps
         .visual_features
-        .vectors_of_persona(&asset.persona_id, &identity, VisualFeatureKind::Semantic)
+        .vectors_in_scope(
+            Some(&asset.persona_id),
+            &identity,
+            VisualFeatureKind::Semantic,
+        )
         .await?;
     let mut scored: Vec<(AssetId, f32)> = vectors
         .into_iter()
-        .filter(|(id, _)| *id != asset.id)
-        .map(|(id, v)| (id, cosine_normalized(&feature.vector, &v)))
+        .filter(|(id, _, _)| *id != asset.id)
+        .map(|(id, _, v)| (id, cosine_normalized(&feature.vector, &v)))
         .filter(|(_, score)| *score >= VISUAL_SCORE_FLOOR)
         .collect();
     scored.sort_by(|a, b| b.1.total_cmp(&a.1));
