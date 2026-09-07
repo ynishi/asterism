@@ -10,6 +10,17 @@ and this project adheres to
 
 ### Added
 
+- **A result says which instrument found it** (#255). Two answer one search now,
+  and their numbers are not on one scale: full text scores with BM25, typically
+  5 to 40, and the meaning layer with a cosine between its floor and 1. The rank
+  badge said `BM25 rank score` over both, so a card the meaning layer proposed
+  read as a far worse match than any full-text hit beside it — a statement on
+  screen that was untrue of exactly the rows it was describing. The badge now
+  says which, marked and outlined for the second instrument, and the card
+  carries a `found_by` token that says the same thing to any client. Absent
+  means full text, the route that was the only one until the layer landed.
+  `Evidence` keeps the sentence a reader would want; what crosses is a token,
+  because what a client does with this is switch on it.
 - **A query can reach what nobody wrote down** (#32). The store answered "the
   one with the …" only when the remembered words happened to be words somebody
   had written down — full text and channel tags are exact instruments, and they
