@@ -698,9 +698,9 @@
       "docs": "One telemetry event row (wire form of the local `event_log`\ntable). Newest-first listings feed the UI and agent-side usage\naggregation over the HTTP API."
     },
     {
-      "path": "asterism_contract::dto::FOUND_BY_MEANING",
-      "kind": "constant",
-      "docs": "[`AssetCardDto::found_by`] for a card the meaning layer proposed.\n\nA constant so the writer and every reader spell it the same way:\nthe value is compared, not displayed, and a token two sides disagree\non fails silently by simply never matching."
+      "path": "asterism_contract::dto::FoundBy",
+      "kind": "enum",
+      "docs": "Which instrument reached a card, when it was not the full-text\nindex.\n\nThe wire half of `asterism_core::domain::repository::Route`, and an\nenum for the reason [`DuplicateAxis`] is one: it is rendered as a\nunion in the generated bindings, so the client compares against a\ntype rather than restating the vocabulary in TypeScript — and a\nrestatement is how a second spelling gets compared against on one\nside only, failing silently by never matching.\n\nThe absent case is deliberately not a variant. `None` on the wire is\nthe full-text route, which is what every ranked payload written\nbefore this field meant, so a client that ignores the field reads\nexactly what it read before."
     },
     {
       "path": "asterism_contract::dto::GroupDto",

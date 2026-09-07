@@ -30,7 +30,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use asterism_core::domain::repository::{
     AssetIndexer, AssetRetriever, Candidate, Evidence, IndexDoc, RetrievalIntent, RetrievalQuery,
-    Retrieved,
+    Retrieved, Route,
 };
 use asterism_core::domain::value::{AssetId, PersonaId};
 use asterism_core::error::DomainError;
@@ -412,6 +412,12 @@ impl AssetRetriever for TantivyIndex {
                     asset_id: AssetId::from_uuid(asset_uuid),
                     persona_id: PersonaId::from_uuid(persona_uuid),
                     score,
+                    route: Route::FullText,
+                    // A hit whose body had nothing to window says so
+                    // with `None` rather than an empty snippet. That
+                    // is about the explanation, not about the route —
+                    // which is why the route is stated beside it
+                    // rather than read off it.
                     evidence: match snippet {
                         Some(s) => Evidence::Snippet(s),
                         None => Evidence::None,

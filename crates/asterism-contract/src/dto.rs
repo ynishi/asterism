@@ -78,12 +78,31 @@ fn default_media() -> String {
     "none".to_string()
 }
 
-/// [`AssetCardDto::found_by`] for a card the meaning layer proposed.
+/// Which instrument reached a card, when it was not the full-text
+/// index.
 ///
-/// A constant so the writer and every reader spell it the same way:
-/// the value is compared, not displayed, and a token two sides disagree
-/// on fails silently by simply never matching.
-pub const FOUND_BY_MEANING: &str = "meaning";
+/// The wire half of `asterism_core::domain::repository::Route`, and an
+/// enum for the reason [`DuplicateAxis`] is one: it is rendered as a
+/// union in the generated bindings, so the client compares against a
+/// type rather than restating the vocabulary in TypeScript — and a
+/// restatement is how a second spelling gets compared against on one
+/// side only, failing silently by never matching.
+///
+/// The absent case is deliberately not a variant. `None` on the wire is
+/// the full-text route, which is what every ranked payload written
+/// before this field meant, so a client that ignores the field reads
+/// exactly what it read before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, SchemaBridge)]
+#[serde(rename_all = "snake_case")]
+pub enum FoundBy {
+    /// The meaning layer — the asset's own words against the query, in
+    /// the encoder's space. Its scores are cosines.
+    Meaning,
+    /// The neighbour scan — one asset's pixels against another's. Its
+    /// scores are cosines too, and it reaches the grid through the
+    /// "more like this" route rather than the search box.
+    Neighbour,
+}
 
 /// Lightweight card representation used on the grid (wire form of
 /// `AssetCard`).
@@ -247,13 +266,13 @@ pub struct AssetCardDto {
     /// detail read paths where rank is irrelevant. Populated by
     /// `AssetService::search`.
     ///
-    /// **Two scales share this field**, because two instruments answer
-    /// one search: a BM25 score from the full-text index, typically 5
-    /// to 40, and a cosine from the meaning layer, between its floor
-    /// and 1. Nobody has measured a conversion between them, so a
-    /// surface that prints the number owes the reader which one it is
-    /// — a bare `0.81` beside a bare `18.40` reads as a far worse
-    /// match, and is not.
+    /// **More than one scale shares this field**, because more than one
+    /// instrument answers a search: BM25 from the full-text index,
+    /// unbounded above, and a cosine from the meaning layer, bounded by
+    /// its floor and 1. Nobody has measured a conversion between them,
+    /// so a surface that prints the number owes the reader which one it
+    /// is — two numbers on different scales cannot be read as one
+    /// series, and a smaller one is not thereby a worse match.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub score: Option<f32>,
     /// Search-only: which instrument reached this card, when that is
@@ -261,20 +280,17 @@ pub struct AssetCardDto {
     ///
     /// `None` is the full-text route — the one every ranked read had
     /// before a second appeared, so absence keeps meaning what it
-    /// meant. `Some("meaning")` is the layer that proposes assets
-    /// whose own words sit close to the query (#32), which full text
-    /// did not name.
+    /// meant, and a client written before this field reads exactly what
+    /// it read before. The variants are [`FoundBy`]'s.
     ///
-    /// A token rather than the retriever's own sentence about why:
+    /// The route rather than the retriever's own sentence about why:
     /// what a client does with this is switch on it — a different
     /// badge, a different tooltip, a different scale for
     /// [`score`](AssetCardDto::score) — and a sentence written for a
     /// reader is not something to branch on. The sentence is still
     /// written, in `Evidence`, where a reader of the record finds it.
-    ///
-    /// The values are [`FOUND_BY_MEANING`] and nothing else today.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub found_by: Option<String>,
+    pub found_by: Option<FoundBy>,
     /// Search-only: highlighted snippet extracted from the asset's
     /// body around the query terms (HTML with `<b>` tags around the
     /// matches). `None` when the body had no material for the query

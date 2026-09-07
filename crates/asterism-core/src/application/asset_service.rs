@@ -2589,6 +2589,7 @@ impl AssetService {
                 items.push(crate::application::mapping::card_to_dto_with_hit(
                     &card,
                     cand.score,
+                    cand.route,
                     &cand.evidence,
                 ));
             }

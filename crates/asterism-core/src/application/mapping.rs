@@ -7,7 +7,7 @@
 
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetDetailDto, AssetDto, AssetPageDto, ChapterMarkDto, DirDto,
-    DispatchDto, EdgeDto, FOUND_BY_MEANING, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto,
+    DispatchDto, EdgeDto, FoundBy, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto,
     MaterialLayerDto, MaterialMarkDto, MessageDto, MessageRefDto, ModalityDefDto, PersonaDto,
     PersonaProfileDto, PersonaThemeDto, RulingReadinessDto, SeriesStrategyDto, SessionDto,
     SessionPageDto, SettingDto, SettingLayerDto, SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto,
@@ -59,7 +59,7 @@ use crate::domain::persona::Persona;
 use crate::domain::persona_profile::PersonaProfile;
 use crate::domain::persona_theme::PersonaTheme;
 use crate::domain::render::render_policy;
-use crate::domain::repository::{Evidence, RegisteredStrategy};
+use crate::domain::repository::{Evidence, RegisteredStrategy, Route};
 use crate::domain::series::Path as SeriesPath;
 use crate::domain::session::Session;
 use crate::domain::snapshot::Snapshot;
@@ -428,39 +428,40 @@ pub fn card_to_dto(card: &AssetCard) -> AssetCardDto {
 /// was ranked, this is its score, and this is the instrument whose
 /// scale that score is on.
 ///
-/// # How evidence splits on the wire
+/// # What crosses, and from where
 ///
-/// [`Evidence`] is one enum and the wire gives it two fields, because
-/// its variants answer two different questions. A snippet is
-/// *content* — the window of body text the match sat in — and it has
-/// had a field since search had one instrument. A rationale is not
-/// content but the name of the instrument that reached the row, and
-/// what a reader needs from it is which scale the score beside it is
-/// on, so it crosses as a token rather than as the sentence the
-/// retriever wrote.
+/// The two fields come from two places on the candidate, and that is
+/// the point rather than an accident of shape. `snippet` comes from
+/// [`Evidence`], which answers *why this row* and is free to say
+/// nothing — a full-text hit whose body had no window to show says
+/// [`Evidence::None`], and is still a full-text hit. `found_by` comes
+/// from [`Route`], which answers *what measured it* and always has an
+/// answer, because something produced the score.
 ///
-/// `Rationale` becomes [`FOUND_BY_MEANING`] because the meaning layer
-/// is the only producer of one on the search path. The other producer
-/// the variant's doc names — an agent stating its own reason — reaches
-/// its rows by a route that does not come through here. A second
-/// producer on this path would make this a guess, and would be the
-/// moment to carry the route in the evidence rather than infer it from
-/// the variant.
+/// Reading the route off the evidence instead would have been a guess
+/// that was already wrong: the neighbour scan explains itself with
+/// `Evidence::None` and scores by cosine, so a mapping keyed on the
+/// variant would have labelled that cosine a BM25 score.
 ///
-/// [`Evidence::Tags`] and [`Evidence::None`] reach neither field:
-/// nothing writes the first on this path, and the second is the
-/// retriever saying it has no explanation, which is what an absent
-/// `found_by` already says.
-pub fn card_to_dto_with_hit(card: &AssetCard, score: f32, evidence: &Evidence) -> AssetCardDto {
+/// [`Route::FullText`] leaves `found_by` absent rather than naming
+/// itself, which is what every ranked payload written before the field
+/// existed already meant.
+pub fn card_to_dto_with_hit(
+    card: &AssetCard,
+    score: f32,
+    route: Route,
+    evidence: &Evidence,
+) -> AssetCardDto {
     AssetCardDto {
         score: Some(score),
         snippet: match evidence {
             Evidence::Snippet(s) => Some(s.clone()),
             _ => None,
         },
-        found_by: match evidence {
-            Evidence::Rationale(_) => Some(FOUND_BY_MEANING.to_string()),
-            _ => None,
+        found_by: match route {
+            Route::FullText => None,
+            Route::Meaning => Some(FoundBy::Meaning),
+            Route::Neighbour => Some(FoundBy::Neighbour),
         },
         ..card_to_dto(card)
     }
@@ -1977,41 +1978,58 @@ mod tests {
         }
     }
 
-    /// One enum, two wire fields, and which variant lands in which.
+    /// The two wire fields come from two places, and neither is read
+    /// off the other.
     ///
-    /// The pairing is the point rather than either field alone: a
-    /// rationale must not arrive as a snippet (it is not body text a
-    /// reader can check against the query), and a snippet must not
-    /// arrive as a route (the full-text instrument is what an absent
-    /// `found_by` already means). The rows that say nothing say it in
-    /// both fields.
+    /// The pairing is the point rather than either field alone. A
+    /// rationale must not arrive as a snippet — it is not body text a
+    /// reader can check against the query — and the route must not be
+    /// inferred from the evidence, which the last case is here to
+    /// hold: a candidate that explains itself with nothing still says
+    /// which instrument measured it, and that instrument's scale is
+    /// not the full-text one.
     #[test]
-    fn evidence_splits_into_the_two_fields_the_wire_has() {
+    fn the_route_and_the_evidence_reach_the_wire_separately() {
         let card = bare_card();
 
-        let snippet = card_to_dto_with_hit(&card, 18.4, &Evidence::Snippet("a <b>hit</b>".into()));
-        assert_eq!(snippet.snippet.as_deref(), Some("a <b>hit</b>"));
+        let text = card_to_dto_with_hit(
+            &card,
+            18.4,
+            Route::FullText,
+            &Evidence::Snippet("a <b>hit</b>".into()),
+        );
+        assert_eq!(text.snippet.as_deref(), Some("a <b>hit</b>"));
         assert_eq!(
-            snippet.found_by, None,
+            text.found_by, None,
             "full text is what an absent route means"
         );
 
         let meaning = card_to_dto_with_hit(
             &card,
             0.81,
+            Route::Meaning,
             &Evidence::Rationale("the asset's own words".into()),
         );
-        assert_eq!(meaning.found_by.as_deref(), Some(FOUND_BY_MEANING));
+        assert_eq!(meaning.found_by, Some(FoundBy::Meaning));
         assert_eq!(
             meaning.snippet, None,
             "a rationale is not body text, and must not arrive as one"
         );
 
-        for silent in [Evidence::None, Evidence::Tags(Vec::new())] {
-            let dto = card_to_dto_with_hit(&card, 1.0, &silent);
-            assert_eq!(dto.snippet, None);
-            assert_eq!(dto.found_by, None);
-        }
+        let bare = card_to_dto_with_hit(&card, 12.0, Route::FullText, &Evidence::None);
+        assert_eq!(
+            bare.found_by, None,
+            "a full-text hit with no window to show is still a full-text hit"
+        );
+        assert_eq!(bare.snippet, None);
+
+        let neighbour = card_to_dto_with_hit(&card, 0.94, Route::Neighbour, &Evidence::None);
+        assert_eq!(
+            neighbour.found_by,
+            Some(FoundBy::Neighbour),
+            "silence about why is not silence about which instrument, and \
+             this cosine must not arrive labelled as a BM25 score"
+        );
 
         assert_eq!(
             card_to_dto(&card).score,

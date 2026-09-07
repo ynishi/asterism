@@ -33,6 +33,7 @@ the domain types.
 - `DuplicateResolutionDto` — What one answered question ended up saying.
 - `EdgeDto` — A single constellation edge (payload for the hover-burst).
 - `EventDto` — One telemetry event row (wire form of the local `event_log`
+- `FoundBy` — Which instrument reached a card, when it was not the full-text
 - `GroupDto` — A user-curated Group (bucket) — the hand-picked twin of a Tag.
 - `GroupLinkDto` — One Group-in-Group connection (Are.na channel-in-channel). The
 - `GroupSummaryDto` — A group paired with the number of distinct assets attached, used
@@ -84,5 +85,4 @@ the domain types.
 
 - `DERIVED_COVER_MAX_CHARS` — Maximum cover hint length in Unicode scalar values (matches
 - `DERIVED_REGISTER_MAX_CHARS` — Maximum register-note preview length (matches
-- `FOUND_BY_MEANING` — [`AssetCardDto::found_by`] for a card the meaning layer proposed.
 

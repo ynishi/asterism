@@ -561,8 +561,10 @@
   // the user sees just that session's assets.
   // activeFilter.activeSessionId / activeFilter.activeSessionLabel moved to `activeFilter.*`.
   // Free-text search input. Empty = list mode (fast); non-empty flips
-  // the query to `search_assets` (Tantivy BM25 over the indexed body,
-  // intersected server-side with the active filter chips).
+  // the query to `search_assets` — Tantivy BM25 over the indexed body,
+  // intersected server-side with the active filter chips, and then the
+  // meaning layer's proposals appended for what full text did not name.
+  // Which instrument reached a card is on the card (`found_by`).
   // activeFilter.searchText moved to `activeFilter.activeFilter.searchText`.
   // Messages-view page + viewport hydration cache moved to
   // `assetPageCatalog` (asset-page.svelte.ts, wave ①).
@@ -6118,20 +6120,24 @@
                         decimals keeps either range readable without
                         overflowing the head bar.
 
-                        Two instruments answer one search, and their
-                        numbers are not on one scale: full text scores
-                        with BM25, typically 5 to 40, and the meaning
-                        layer with a cosine between its floor and 1. So
-                        the badge says which — a bare 0.81 next to a
-                        bare 18.40 reads as a far worse match, and is
-                        not. `found_by` is what the server sends to
-                        tell them apart; absent means full text, the
-                        route that was the only one until #32.
+                        More than one instrument answers a search, and
+                        their numbers are not on one scale: full text
+                        scores with BM25, unbounded above, and the
+                        vector routes with a cosine bounded by a floor
+                        and 1. So the badge says which rather than
+                        printing a bare number a reader would compare
+                        with its neighbours. `found_by` is what the
+                        server sends to tell them apart, and the branch
+                        is on its presence rather than on one value —
+                        every route it can name scores by cosine, and
+                        the one it cannot name is the BM25 one.
                       -->
-                      {#if rc.found_by === "meaning"}
+                      {#if rc.found_by}
                         <span
-                          class="score-badge score-badge-meaning"
-                          title="Reached by meaning — cosine to the asset's own words, not a BM25 score"
+                          class="score-badge score-badge-vector"
+                          title={rc.found_by === "meaning"
+                            ? "Reached by meaning — cosine to the asset's own words, not a BM25 score"
+                            : "Reached by likeness — cosine between pixels, not a BM25 score"}
                         >
                           ✦ {rc.score.toFixed(2)}
                         </span>
@@ -7581,12 +7587,13 @@
     margin-left: 0.3rem;
     font-variant-numeric: tabular-nums;
   }
-  /* The same badge for the other instrument. Hollow rather than
-     filled, because the two numbers are on different scales and a
-     glance should not read them as one series — the ✦ says which
-     one, and the outline says "a different measurement" before
-     anybody reads the mark. */
-  .score-badge-meaning {
+  /* The same badge for a cosine rather than a BM25 score. Hollow
+     rather than filled, because the two numbers are on different
+     scales and a glance should not read them as one series. The
+     outline is what carries that, not the ✦ — ✦ already means
+     "retrieval mode" everywhere else in this UI, so it reads as
+     "ranked" rather than as "ranked by this one". */
+  .score-badge-vector {
     background: transparent;
     color: var(--accent-fill);
     box-shadow: inset 0 0 0 1px var(--accent-fill);

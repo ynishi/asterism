@@ -165,7 +165,7 @@
     {
       "path": "asterism_core::application::mapping::card_to_dto_with_hit",
       "kind": "function",
-      "docs": "Same shape as [`card_to_dto`] but populates the search-only\n`score` / `snippet` / `found_by` fields from a retrieval candidate.\n\nThe three arrive together because they are one statement: this row\nwas ranked, this is its score, and this is the instrument whose\nscale that score is on.\n\n# How evidence splits on the wire\n\n[`Evidence`] is one enum and the wire gives it two fields, because\nits variants answer two different questions. A snippet is\n*content* — the window of body text the match sat in — and it has\nhad a field since search had one instrument. A rationale is not\ncontent but the name of the instrument that reached the row, and\nwhat a reader needs from it is which scale the score beside it is\non, so it crosses as a token rather than as the sentence the\nretriever wrote.\n\n`Rationale` becomes [`FOUND_BY_MEANING`] because the meaning layer\nis the only producer of one on the search path. The other producer\nthe variant's doc names — an agent stating its own reason — reaches\nits rows by a route that does not come through here. A second\nproducer on this path would make this a guess, and would be the\nmoment to carry the route in the evidence rather than infer it from\nthe variant.\n\n[`Evidence::Tags`] and [`Evidence::None`] reach neither field:\nnothing writes the first on this path, and the second is the\nretriever saying it has no explanation, which is what an absent\n`found_by` already says."
+      "docs": "Same shape as [`card_to_dto`] but populates the search-only\n`score` / `snippet` / `found_by` fields from a retrieval candidate.\n\nThe three arrive together because they are one statement: this row\nwas ranked, this is its score, and this is the instrument whose\nscale that score is on.\n\n# What crosses, and from where\n\nThe two fields come from two places on the candidate, and that is\nthe point rather than an accident of shape. `snippet` comes from\n[`Evidence`], which answers *why this row* and is free to say\nnothing — a full-text hit whose body had no window to show says\n[`Evidence::None`], and is still a full-text hit. `found_by` comes\nfrom [`Route`], which answers *what measured it* and always has an\nanswer, because something produced the score.\n\nReading the route off the evidence instead would have been a guess\nthat was already wrong: the neighbour scan explains itself with\n`Evidence::None` and scores by cosine, so a mapping keyed on the\nvariant would have labelled that cosine a BM25 score.\n\n[`Route::FullText`] leaves `found_by` absent rather than naming\nitself, which is what every ranked payload written before the field\nexisted already meant."
     },
     {
       "path": "asterism_core::application::mapping::chapter_mark_to_dto",
@@ -2596,6 +2596,11 @@
       "path": "asterism_core::domain::repository::Retrieved",
       "kind": "struct",
       "docs": "The answer to one [`RetrievalQuery`] — a ranked shortlist."
+    },
+    {
+      "path": "asterism_core::domain::repository::Route",
+      "kind": "enum",
+      "docs": "Which instrument reached a candidate.\n\nSeparate from [`Evidence`], which answers *why* this row and is\nfree to say nothing. This answers *what measured it*, and every\ncandidate has an answer because something produced it — so a\nconsumer that needs to know the score's scale asks this rather than\ninferring it from which variant of an explanation happened to be\nattached.\n\nThe two came apart when a second instrument arrived: the neighbour\nroute scores by cosine and explains itself with [`Evidence::None`],\nso evidence and instrument had already stopped agreeing, and a\nreader that guessed one from the other would have called that\ncosine a BM25 score."
     },
     {
       "path": "asterism_core::domain::repository::SeriesRepository",
