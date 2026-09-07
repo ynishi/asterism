@@ -10,17 +10,21 @@ and this project adheres to
 
 ### Added
 
-- **A result says which instrument found it** (#255). Two answer one search now,
-  and their numbers are not on one scale: full text scores with BM25, typically
-  5 to 40, and the meaning layer with a cosine between its floor and 1. The rank
-  badge said `BM25 rank score` over both, so a card the meaning layer proposed
-  read as a far worse match than any full-text hit beside it — a statement on
-  screen that was untrue of exactly the rows it was describing. The badge now
-  says which, marked and outlined for the second instrument, and the card
-  carries a `found_by` token that says the same thing to any client. Absent
-  means full text, the route that was the only one until the layer landed.
-  `Evidence` keeps the sentence a reader would want; what crosses is a token,
-  because what a client does with this is switch on it.
+- **A result says which instrument found it** (#255). More than one answers a
+  search now, and their numbers are not on one scale: full text scores with
+  BM25, unbounded above, and the vector routes with a cosine bounded by a floor
+  and 1. The rank badge said `BM25 rank score` over both, so a card the meaning
+  layer proposed read as a far worse match than the full-text hits beside it — a
+  statement on screen that was untrue of exactly the rows it was describing. The
+  badge now says which, outlined rather than filled for a cosine, and the card
+  carries `found_by`, which crosses as a union type rather than a free string so
+  a client compares against the vocabulary instead of restating it. Absent means
+  full text, the route that was the only one until the layer landed, so a client
+  written before the field reads what it read before. The route is carried on
+  the candidate rather than guessed from its evidence, which was already the
+  wrong guess: the neighbour scan explains itself with nothing and scores by
+  cosine, so reading the instrument off the explanation would have labelled that
+  cosine a BM25 score.
 - **A query can reach what nobody wrote down** (#32). The store answered "the
   one with the …" only when the remembered words happened to be words somebody
   had written down — full text and channel tags are exact instruments, and they
