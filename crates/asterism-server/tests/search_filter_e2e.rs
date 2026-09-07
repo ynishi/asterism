@@ -442,7 +442,8 @@ async fn search_honours_the_active_filter_chips() {
     );
 
     // `filter` is the list query verbatim, so it carries a `sort` axis
-    // this path cannot honour: the answer order is the BM25 ranking. A
+    // this path cannot honour: the answer order is the relevance
+    // ranking (`AssetService::search` is where that is decided). A
     // named axis is refused rather than accepted and dropped — the
     // asymmetry that used to sit here (a misspelled axis was a parse
     // error, a well-spelled one was silently discarded) meant the
