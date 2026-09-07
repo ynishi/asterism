@@ -41,20 +41,18 @@ and this project adheres to
   labels, keywords, note. The body, the material metadata and the comment thread
   are left out, which is a real gap rather than a tidy scope: a prompt lives in
   the metadata of a generated image, and only full text reaches it.
-- **Vectors say which reading composed them** (#32). `visual_feature` carries a
-  composition version (V106), and the words walk asks whether a vector exists
-  _at the current composition_ rather than whether one exists — absence and
-  staleness are one predicate because they are one question. This is the failure
-  `asset_body.derived_version` was added to close on the full-text side, and it
-  closed it after the first derivation walk had already left every text asset
-  holding a body composed from its file alone. Failure records carry the stamp
-  too, so a row that had nothing to say under one reading is asked again under a
-  wider one. And the seven sites that already re-index a row whose words changed
-  now re-derive both readings through one call, since the walk cannot see a
-  vector composed from yesterday's title — it is present, and current.
-
-### Added
-
+- **Vectors say which reading composed them** (#32). V106 gives `visual_feature`
+  a column for the composition a vector was derived by, and the words walk asks
+  whether a vector exists _at the current composition_ rather than whether one
+  exists — absence and staleness are one predicate because they are one
+  question. This is the failure `asset_body.derived_version` was added to close
+  on the full-text side, and it closed it after the first derivation walk had
+  already left every text asset holding a body composed from its file alone.
+  Failure records carry the stamp too, so a row that had nothing to say under
+  one reading is asked again under a wider one. And the seven sites that already
+  re-index a row whose words changed now re-derive both readings through one
+  call, since the walk cannot see a vector composed from yesterday's title — it
+  is present, and current.
 - **A profile says which absences are the platform's** (#40). A record with no
   seed in it does not say why, and there are three reasons behind that one
   absence: we did not capture it, the platform does not report it, the parameter
