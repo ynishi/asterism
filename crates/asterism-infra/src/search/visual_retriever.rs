@@ -123,18 +123,23 @@ impl VisualAwareRetriever {
 /// How close a query has to sit before this layer proposes an asset.
 ///
 /// **Not a ranking threshold.** The measurement says no threshold holds
-/// both precision and recall here — at 0.79 they cross at 0.585 and
-/// 0.633 — which is why this layer proposes in rank order and lets
-/// metadata dispose, the arrangement #32 asks for. What this floor is
-/// for is the honest miss: the point below which a query the library
-/// cannot answer returns nothing instead of padding. On the fixture
-/// set, a query about nothing in the library sat at most 0.722 from
-/// anything in it [measured: `text_recall_eval`, 24 scenes, seed 42].
+/// both precision and recall here — the closest they came was 0.585
+/// and 0.633 at a threshold of 0.79, and either side of that one of
+/// them collapses — which is why this layer proposes in rank order and
+/// lets metadata dispose, the arrangement #32 asks for.
+///
+/// What this floor is for is the honest miss: the point below which a
+/// query the library cannot answer returns nothing instead of padding.
+/// On the fixture set a query about nothing in the library sat at most
+/// 0.722 from anything in it [measured: `text_recall_eval`, 24 scenes,
+/// seed 42], so the floor sits **above** that number rather than at
+/// it. At 0.72 the comparison is `>=`, and the very row the
+/// measurement was cited to exclude would be proposed.
 ///
 /// A number from generated scenes, so it is the shape of the answer
 /// rather than the answer. The twenty real queries #32 asks for are
 /// what would move it.
-const MEANING_FLOOR: f32 = 0.72;
+const MEANING_FLOOR: f32 = 0.73;
 
 impl VisualAwareRetriever {
     /// Full text first, then what the meaning layer proposes for

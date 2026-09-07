@@ -3116,12 +3116,16 @@ pub const RETRIEVAL_K_CEILING: u32 = 500;
 ///
 /// Each variant is a different way of pointing at assets, not a
 /// different backend: the same [`AssetRetriever`] answers all of them
-/// with whatever machinery it has (BM25 today, embeddings / VLM /
-/// agent-driven expansion later).
+/// with whatever machinery it has — BM25 and embeddings today, VLM or
+/// agent-driven expansion later.
 #[derive(Debug, Clone)]
 pub enum RetrievalIntent {
     /// Free text — a phrase, a sentence, a half-remembered word.
-    /// The current Tantivy path serves this one.
+    ///
+    /// Answered by two instruments in one shortlist: the Tantivy path
+    /// first, then whatever the meaning layer (#32) proposes for
+    /// assets it did not name. A caller asks for text and does not
+    /// choose between them.
     Text(String),
     /// "More like this one." Entry point for embedding / VLM routes.
     Similar(AssetId),
@@ -3148,9 +3152,10 @@ pub struct RetrievalQuery {
 ///
 /// Kept implementation-neutral so a future retriever can explain
 /// itself without the shape changing: a full-text hit has a snippet,
-/// a tag-expansion route has the tags it went through, an
-/// agent-driven route has its reasoning. A caller that only knows how
-/// to render `Snippet` still compiles against every other route.
+/// a tag-expansion route has the tags it went through, and a route
+/// that reached an asset some other way says so in words. A caller
+/// that only knows how to render `Snippet` still compiles against
+/// every other route.
 #[derive(Debug, Clone)]
 pub enum Evidence {
     /// Window of the body around the matched terms (highlighted with
@@ -3158,7 +3163,8 @@ pub enum Evidence {
     Snippet(String),
     /// Reached through these tags (RichTag / agent expansion routes).
     Tags(Vec<TagId>),
-    /// Picked for this stated reason (agent-driven routes).
+    /// Picked for this stated reason — the meaning layer naming the
+    /// instrument that reached the row, an agent naming its own.
     Rationale(String),
     /// The retriever offered no explanation.
     None,

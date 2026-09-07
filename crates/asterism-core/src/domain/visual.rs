@@ -104,10 +104,10 @@ pub enum VisualFeatureKind {
     /// encoder reads a fixed window, and two documents that agree for
     /// their first ~300 characters and differ after it encode
     /// identically [measured against the shipped package: 168
-    /// characters still separated them, 301 did not]. A composed
-    /// document passes that inside its first section, so everything
-    /// after would be invisible to the vector while looking indexed.
-    /// What is encoded is the short half —
+    /// characters still separated them, 301 did not]. A document with a
+    /// body of any length closes that window inside its first section,
+    /// so everything after would be invisible to the vector while
+    /// looking indexed. What is encoded is the short half —
     /// [`derive_words`](crate::domain::derived_text::derive_words).
     Words,
 }

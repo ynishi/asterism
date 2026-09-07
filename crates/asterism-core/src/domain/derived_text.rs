@@ -140,10 +140,15 @@ pub const WORDS_COMPOSITION_VERSION: i64 = 1;
 /// by the term. An embedding is not an index over terms — it is one
 /// vector for the whole input, read through a fixed window — and past
 /// that window the input is not weighed less, it is not read at all.
-/// Measured against the shipped package, two documents agreeing for
-/// their first 301 characters and differing after it encode
-/// identically. `derive_text` passes 301 characters inside its first
-/// section for any asset that has a body.
+/// Measured against the shipped package, two documents that agreed for
+/// roughly 300 characters and differed after it encoded identically,
+/// where at 168 they still separated.
+///
+/// [`derive_text`] puts the file body first and bounds it nowhere, so
+/// for an asset with a body of any length that is where the window
+/// closes — and everything the composition adds after it, which is
+/// every section a picture has, would be outside a vector that looked
+/// as though it had read the row.
 ///
 /// So this composes the short half: what the asset is called, what it
 /// was labelled, and the words the tagger pulled out of it. A caption
@@ -152,11 +157,13 @@ pub const WORDS_COMPOSITION_VERSION: i64 = 1;
 ///
 /// # What it leaves out, and what that costs
 ///
-/// The file body, the material metadata and the comment thread. Each is
-/// where a remembered phrase might genuinely live — a prompt is in the
-/// metadata for a generated image — and none of them fits. That is a
-/// real gap, not a tidy scope: full text still reaches all three, and
-/// this layer is the one that proposes when full text finds nothing.
+/// The file body, the material metadata, the declared meta and the
+/// comment thread. Each is where a remembered phrase might genuinely
+/// live — a prompt is in the metadata for a generated image, and a
+/// declared statement is somebody's own words about the row — and none
+/// of them fits. That is a real gap, not a tidy scope: full text still
+/// reaches all four, and this layer is the one that proposes when full
+/// text finds nothing.
 ///
 /// Tags, for the reason the module doc gives, plus one this function
 /// adds: `auto_tag` writes the same words to `keywords` and to the tag
@@ -167,12 +174,13 @@ pub const WORDS_COMPOSITION_VERSION: i64 = 1;
 ///
 /// # Changing this
 ///
-/// The composition is what a stored vector was derived by, and nothing
-/// records which composition produced a row. Changing what this reads
-/// means the vectors already stored answer a different question from
-/// the ones written afterwards, and they are indistinguishable. Clear
-/// the `words` features for the bound model before shipping a change to
-/// it, the way replacing a model clears its own.
+/// Raise [`WORDS_COMPOSITION_VERSION`] by one. That is the whole
+/// protocol, and it is stated where the constant is: a stored vector
+/// carries the version that composed it, the walk offers back every
+/// row below the current one, and the startup seed is what hands the
+/// existing library to that walk. Without the bump the old vectors
+/// stay, answering a question this function no longer asks, and
+/// nothing can tell them from the new ones.
 pub fn derive_words(asset: &Asset) -> Option<String> {
     let mut sections: Vec<String> = Vec::new();
     push(&mut sections, asset.title.as_deref());

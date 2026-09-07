@@ -20,8 +20,13 @@
 //! annotated anything — and the relation stream already draws the two
 //! cases that matter here. A semantic sibling carries the same tag set
 //! over different geometry, so its words should sit close. A hard
-//! negative is drawn so its tags do not overlap at all, so its words
-//! should sit far. Whether they do is what this file reports.
+//! negative is drawn with none of the base's shape colours, so its tags
+//! are disjoint and its words should sit further. Not far, though: it
+//! keeps the base's background, and the caption ends in a clause naming
+//! that background, so the two texts overlap by construction. What
+//! separation there is has to survive a shared tail, which is the
+//! harder version of the question and the reason this reports the
+//! furthest negative rather than the mean.
 #![cfg(all(feature = "fixtures", feature = "onnx"))]
 
 use asterism_vision::encoder::Encoder;
@@ -138,9 +143,10 @@ fn text_against_text_separates_by_subject() {
 
     assert!(
         closest_sibling > furthest_negative,
-        "the words of two pictures sharing a subject sat {closest_sibling:.3} apart \
-         while two sharing none sat {furthest_negative:.3} — no floor separates them, \
-         so this encoder does not answer the question this layer asks of it"
+        "the least alike pair sharing a subject scored {closest_sibling:.3} while \
+         the most alike pair sharing none scored {furthest_negative:.3} — these \
+         are cosines, so the second is the closer, and no floor separates them; \
+         this encoder does not answer the question this layer asks of it"
     );
 }
 

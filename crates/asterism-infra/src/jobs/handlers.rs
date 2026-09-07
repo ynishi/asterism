@@ -254,8 +254,8 @@ pub async fn cover_gen(env: &JobEnv, payload: &serde_json::Value) -> Result<Stri
     Ok("cover generated".into())
 }
 
-/// Re-composes one asset's search document after a handler wrote a
-/// field the document is derived from.
+/// Re-derives both readings of one asset's text after a handler wrote
+/// a field they are derived from.
 ///
 /// Every fan-out at ingest enqueues `IndexRebuild` alongside the jobs
 /// below it, and those jobs then write the fields the document is made
@@ -263,17 +263,16 @@ pub async fn cover_gen(env: &JobEnv, payload: &serde_json::Value) -> Result<Stri
 /// order the queue drains them in, the document composed first was
 /// composed from less than the row now says, so the write is what has
 /// to re-enqueue.
-/// Both derived readings of an asset's text, re-run.
 ///
-/// One call rather than two enqueues at every site, because the places
-/// that reach here are all saying one thing — this row's words
-/// changed — and a site that remembered the index and forgot the
-/// vector would leave the two readings describing different rows. The
-/// walk cannot cover that gap: its predicate asks whether a vector
-/// exists at the current composition, and a vector composed from
-/// yesterday's title is both present and current.
+/// The vector (#32) is re-enqueued in the same call rather than beside
+/// each of these, because every site that reaches here is saying one
+/// thing — this row's words changed — and a site that remembered the
+/// index and forgot the vector would leave the two readings describing
+/// different rows. Nothing later catches that: the words walk asks
+/// whether a vector exists at the current composition, and one
+/// composed from yesterday's title is both present and current.
 ///
-/// The semantic half settles cheaply when no model is bound, the way
+/// The vector half settles cheaply when no model is bound, the way
 /// every job on that path does.
 async fn enqueue_rederive(env: &JobEnv, asset_id: &AssetId) -> Result<(), DomainError> {
     env.queue

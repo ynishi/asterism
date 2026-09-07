@@ -6954,6 +6954,13 @@ UPDATE material
 /// vector, `failed` carries a reason and no vector (undecodable bytes,
 /// unreadable original) — absence *is* the pending state, which is what
 /// lets the walk's `NOT EXISTS` predicate offer a row exactly once.
+///
+/// Both of those last two sentences are the shape at this step, and
+/// V106 amends them: a kind arrived whose row is per *asset* rather
+/// than per material, and whose walk offers a row again when the
+/// reading that composed it moves. The predicate there is absence *or*
+/// staleness. What did not change is the rest — the key, the two
+/// statuses, and what a `failed` row is for.
 const V99_VISUAL_FEATURE: &str = r#"
 CREATE TABLE visual_feature (
     asset_id       BLOB NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
