@@ -2584,15 +2584,12 @@ impl AssetService {
         let mut items = Vec::with_capacity(page.len());
         for cand in &page {
             if let Some(card) = by_id.remove(&cand.asset_id) {
-                // The wire carries a snippet field, so only that shape
-                // of evidence survives the mapping today. Other routes
-                // (tags / rationale) reach the wire in a later wave.
-                let snippet = match &cand.evidence {
-                    crate::domain::repository::Evidence::Snippet(s) => Some(s.clone()),
-                    _ => None,
-                };
+                // How evidence splits across the wire's two hit fields
+                // is `card_to_dto_with_hit`'s own account.
                 items.push(crate::application::mapping::card_to_dto_with_hit(
-                    &card, cand.score, snippet,
+                    &card,
+                    cand.score,
+                    &cand.evidence,
                 ));
             }
         }

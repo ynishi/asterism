@@ -78,6 +78,13 @@ fn default_media() -> String {
     "none".to_string()
 }
 
+/// [`AssetCardDto::found_by`] for a card the meaning layer proposed.
+///
+/// A constant so the writer and every reader spell it the same way:
+/// the value is compared, not displayed, and a token two sides disagree
+/// on fails silently by simply never matching.
+pub const FOUND_BY_MEANING: &str = "meaning";
+
 /// Lightweight card representation used on the grid (wire form of
 /// `AssetCard`).
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
@@ -235,11 +242,39 @@ pub struct AssetCardDto {
     /// container it is the card's headline number.
     #[serde(default)]
     pub member_count: u64,
-    /// Search-only: BM25 score assigned by the full-text index.
-    /// `None` on the grid / detail read paths where rank is
-    /// irrelevant. Populated by `AssetService::search`.
+    /// Search-only: the rank score, on the scale
+    /// [`found_by`](AssetCardDto::found_by) names. `None` on the grid /
+    /// detail read paths where rank is irrelevant. Populated by
+    /// `AssetService::search`.
+    ///
+    /// **Two scales share this field**, because two instruments answer
+    /// one search: a BM25 score from the full-text index, typically 5
+    /// to 40, and a cosine from the meaning layer, between its floor
+    /// and 1. Nobody has measured a conversion between them, so a
+    /// surface that prints the number owes the reader which one it is
+    /// — a bare `0.81` beside a bare `18.40` reads as a far worse
+    /// match, and is not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub score: Option<f32>,
+    /// Search-only: which instrument reached this card, when that is
+    /// not the full-text index.
+    ///
+    /// `None` is the full-text route — the one every ranked read had
+    /// before a second appeared, so absence keeps meaning what it
+    /// meant. `Some("meaning")` is the layer that proposes assets
+    /// whose own words sit close to the query (#32), which full text
+    /// did not name.
+    ///
+    /// A token rather than the retriever's own sentence about why:
+    /// what a client does with this is switch on it — a different
+    /// badge, a different tooltip, a different scale for
+    /// [`score`](AssetCardDto::score) — and a sentence written for a
+    /// reader is not something to branch on. The sentence is still
+    /// written, in `Evidence`, where a reader of the record finds it.
+    ///
+    /// The values are [`FOUND_BY_MEANING`] and nothing else today.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub found_by: Option<String>,
     /// Search-only: highlighted snippet extracted from the asset's
     /// body around the query terms (HTML with `<b>` tags around the
     /// matches). `None` when the body had no material for the query

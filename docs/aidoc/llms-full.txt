@@ -368,6 +368,7 @@ the domain types.
 
 - `DERIVED_COVER_MAX_CHARS` — Maximum cover hint length in Unicode scalar values (matches
 - `DERIVED_REGISTER_MAX_CHARS` — Maximum register-note preview length (matches
+- `FOUND_BY_MEANING` — [`AssetCardDto::found_by`] for a card the meaning layer proposed.
 
 
 <!-- asterism_contract/forge.md -->

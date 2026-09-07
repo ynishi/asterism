@@ -7,11 +7,11 @@
 
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetDetailDto, AssetDto, AssetPageDto, ChapterMarkDto, DirDto,
-    DispatchDto, EdgeDto, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto, MaterialLayerDto,
-    MaterialMarkDto, MessageDto, MessageRefDto, ModalityDefDto, PersonaDto, PersonaProfileDto,
-    PersonaThemeDto, RulingReadinessDto, SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto,
-    SettingLayerDto, SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto, ThreadDto,
-    TrainedHeadRunDto,
+    DispatchDto, EdgeDto, FOUND_BY_MEANING, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto,
+    MaterialLayerDto, MaterialMarkDto, MessageDto, MessageRefDto, ModalityDefDto, PersonaDto,
+    PersonaProfileDto, PersonaThemeDto, RulingReadinessDto, SeriesStrategyDto, SessionDto,
+    SessionPageDto, SettingDto, SettingLayerDto, SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto,
+    ThreadDto, TrainedHeadRunDto,
 };
 use asterism_contract::forge::{
     ForgeAnchorDto, ForgeChangePointDto, ForgeChangeRowDto, ForgeCloseDto, ForgeCollisionDto,
@@ -59,7 +59,7 @@ use crate::domain::persona::Persona;
 use crate::domain::persona_profile::PersonaProfile;
 use crate::domain::persona_theme::PersonaTheme;
 use crate::domain::render::render_policy;
-use crate::domain::repository::RegisteredStrategy;
+use crate::domain::repository::{Evidence, RegisteredStrategy};
 use crate::domain::series::Path as SeriesPath;
 use crate::domain::session::Session;
 use crate::domain::snapshot::Snapshot;
@@ -356,8 +356,8 @@ pub fn persona_theme_to_dto(theme: &PersonaTheme) -> PersonaThemeDto {
 }
 
 /// Converts an `AssetCard` projection to an `AssetCardDto`. Search
-/// hit augmentation (`score` / `snippet`) is layered on separately
-/// by [`card_to_dto_with_hit`] on the search read path.
+/// hit augmentation (`score` / `snippet` / `found_by`) is layered on
+/// separately by [`card_to_dto_with_hit`] on the search read path.
 pub fn card_to_dto(card: &AssetCard) -> AssetCardDto {
     AssetCardDto {
         id: card.id.to_string(),
@@ -417,15 +417,51 @@ pub fn card_to_dto(card: &AssetCard) -> AssetCardDto {
             .and_then(|a| a.subject())
             .map(str::to_string),
         operator_ai: card.operator_ai.as_ref().map(|o| o.as_str().to_string()),
+        found_by: None,
     }
 }
 
 /// Same shape as [`card_to_dto`] but populates the search-only
-/// `score` + `snippet` fields from a retrieval `Candidate`.
-pub fn card_to_dto_with_hit(card: &AssetCard, score: f32, snippet: Option<String>) -> AssetCardDto {
+/// `score` / `snippet` / `found_by` fields from a retrieval candidate.
+///
+/// The three arrive together because they are one statement: this row
+/// was ranked, this is its score, and this is the instrument whose
+/// scale that score is on.
+///
+/// # How evidence splits on the wire
+///
+/// [`Evidence`] is one enum and the wire gives it two fields, because
+/// its variants answer two different questions. A snippet is
+/// *content* — the window of body text the match sat in — and it has
+/// had a field since search had one instrument. A rationale is not
+/// content but the name of the instrument that reached the row, and
+/// what a reader needs from it is which scale the score beside it is
+/// on, so it crosses as a token rather than as the sentence the
+/// retriever wrote.
+///
+/// `Rationale` becomes [`FOUND_BY_MEANING`] because the meaning layer
+/// is the only producer of one on the search path. The other producer
+/// the variant's doc names — an agent stating its own reason — reaches
+/// its rows by a route that does not come through here. A second
+/// producer on this path would make this a guess, and would be the
+/// moment to carry the route in the evidence rather than infer it from
+/// the variant.
+///
+/// [`Evidence::Tags`] and [`Evidence::None`] reach neither field:
+/// nothing writes the first on this path, and the second is the
+/// retriever saying it has no explanation, which is what an absent
+/// `found_by` already says.
+pub fn card_to_dto_with_hit(card: &AssetCard, score: f32, evidence: &Evidence) -> AssetCardDto {
     AssetCardDto {
         score: Some(score),
-        snippet,
+        snippet: match evidence {
+            Evidence::Snippet(s) => Some(s.clone()),
+            _ => None,
+        },
+        found_by: match evidence {
+            Evidence::Rationale(_) => Some(FOUND_BY_MEANING.to_string()),
+            _ => None,
+        },
         ..card_to_dto(card)
     }
 }
@@ -1904,8 +1940,85 @@ mod tests {
     use crate::domain::content_hash::of_bytes;
     use crate::domain::material::Material;
     use crate::domain::measurement::MeasurementStatus;
-    use crate::domain::value::{SourceKind, SourceRef};
+    use crate::domain::value::{AssetRole, SourceKind, SourceRef};
     use asterism_contract::query::ListAssetsQuery;
+
+    /// The least card that can carry a hit — nothing here is read by
+    /// the assertions below, which are about the three search-only
+    /// fields the hit form adds.
+    fn bare_card() -> AssetCard {
+        AssetCard {
+            id: AssetId::new(),
+            persona_id: PersonaId::new(),
+            modality: None,
+            occurred_at: Utc::now(),
+            cover: None,
+            labels: Vec::new(),
+            file_size_bytes: None,
+            duration_ms: None,
+            pixel_count: None,
+            mime: None,
+            source_locator: SourceRef::new(SourceKind::new("fs").expect("kind"), "/pics/a.png")
+                .expect("source")
+                .locator,
+            group_ids: Vec::new(),
+            primary_group_position: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            rating: None,
+            palette: None,
+            has_note: false,
+            has_thread: false,
+            role: AssetRole::Item,
+            title: None,
+            member_count: 0,
+            author: None,
+            operator_ai: None,
+        }
+    }
+
+    /// One enum, two wire fields, and which variant lands in which.
+    ///
+    /// The pairing is the point rather than either field alone: a
+    /// rationale must not arrive as a snippet (it is not body text a
+    /// reader can check against the query), and a snippet must not
+    /// arrive as a route (the full-text instrument is what an absent
+    /// `found_by` already means). The rows that say nothing say it in
+    /// both fields.
+    #[test]
+    fn evidence_splits_into_the_two_fields_the_wire_has() {
+        let card = bare_card();
+
+        let snippet = card_to_dto_with_hit(&card, 18.4, &Evidence::Snippet("a <b>hit</b>".into()));
+        assert_eq!(snippet.snippet.as_deref(), Some("a <b>hit</b>"));
+        assert_eq!(
+            snippet.found_by, None,
+            "full text is what an absent route means"
+        );
+
+        let meaning = card_to_dto_with_hit(
+            &card,
+            0.81,
+            &Evidence::Rationale("the asset's own words".into()),
+        );
+        assert_eq!(meaning.found_by.as_deref(), Some(FOUND_BY_MEANING));
+        assert_eq!(
+            meaning.snippet, None,
+            "a rationale is not body text, and must not arrive as one"
+        );
+
+        for silent in [Evidence::None, Evidence::Tags(Vec::new())] {
+            let dto = card_to_dto_with_hit(&card, 1.0, &silent);
+            assert_eq!(dto.snippet, None);
+            assert_eq!(dto.found_by, None);
+        }
+
+        assert_eq!(
+            card_to_dto(&card).score,
+            None,
+            "the score is the hit form's, and the plain form has no rank to report"
+        );
+    }
 
     /// An item asset holding one primary material whose file axis is in
     /// the given state.

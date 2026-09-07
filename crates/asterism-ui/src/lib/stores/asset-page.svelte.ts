@@ -169,6 +169,10 @@ function indexToLightCard(idx: AssetIndexEntryDto): AssetCardDto {
     title: null,
     member_count: 0,
     score: null,
+    // Both null together: a light card comes from the index path,
+    // which is the path with no ranking, so there is neither a score
+    // nor an instrument that produced one.
+    found_by: null,
     snippet: null,
     // Placeholders: attribution is not on the index row (it drives no
     // sort or filter axis), so a light card reads as unrecorded until

@@ -6111,18 +6111,35 @@
                     {/if}
                     {#if rc.score !== null && rc.score !== undefined}
                       <!--
-                        Search rank badge — the BM25 score assigned
-                        by the Tantivy full-text index. Present only
-                        when the current view came from
-                        `search_assets`; list mode leaves it out so
-                        the badge is a visible signal that ranking
-                        is active. Two decimals keeps the range
-                        readable (typical scores 5-40) without
+                        Search rank badge. Present only when the
+                        current view came from `search_assets`; list
+                        mode leaves it out, so the badge's presence is
+                        also the signal that ranking is active. Two
+                        decimals keeps either range readable without
                         overflowing the head bar.
+
+                        Two instruments answer one search, and their
+                        numbers are not on one scale: full text scores
+                        with BM25, typically 5 to 40, and the meaning
+                        layer with a cosine between its floor and 1. So
+                        the badge says which — a bare 0.81 next to a
+                        bare 18.40 reads as a far worse match, and is
+                        not. `found_by` is what the server sends to
+                        tell them apart; absent means full text, the
+                        route that was the only one until #32.
                       -->
-                      <span class="score-badge" title="BM25 rank score">
-                        {rc.score.toFixed(2)}
-                      </span>
+                      {#if rc.found_by === "meaning"}
+                        <span
+                          class="score-badge score-badge-meaning"
+                          title="Reached by meaning — cosine to the asset's own words, not a BM25 score"
+                        >
+                          ✦ {rc.score.toFixed(2)}
+                        </span>
+                      {:else}
+                        <span class="score-badge" title="BM25 rank score">
+                          {rc.score.toFixed(2)}
+                        </span>
+                      {/if}
                     {/if}
                     <span
                       class="rating"
@@ -7551,9 +7568,9 @@
   }
 
   /*
-   * BM25 rank badge — visible only in search mode. Distinct hue
-   * from the `.badge` (modality slug) and `.flag-badge` (content
-   * flag icons) so a quick glance separates ranking from category.
+   * Rank badge — visible only in search mode. Distinct hue from the
+   * `.badge` (modality slug) and `.flag-badge` (content flag icons)
+   * so a quick glance separates ranking from category.
    */
   .score-badge {
     font-size: 0.6rem;
@@ -7563,6 +7580,16 @@
     padding: 0.05rem 0.35rem;
     margin-left: 0.3rem;
     font-variant-numeric: tabular-nums;
+  }
+  /* The same badge for the other instrument. Hollow rather than
+     filled, because the two numbers are on different scales and a
+     glance should not read them as one series — the ✦ says which
+     one, and the outline says "a different measurement" before
+     anybody reads the mark. */
+  .score-badge-meaning {
+    background: transparent;
+    color: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-fill);
   }
   .annot-badge {
     font-size: 0.7rem;

@@ -160,12 +160,12 @@
     {
       "path": "asterism_core::application::mapping::card_to_dto",
       "kind": "function",
-      "docs": "Converts an `AssetCard` projection to an `AssetCardDto`. Search\nhit augmentation (`score` / `snippet`) is layered on separately\nby [`card_to_dto_with_hit`] on the search read path."
+      "docs": "Converts an `AssetCard` projection to an `AssetCardDto`. Search\nhit augmentation (`score` / `snippet` / `found_by`) is layered on\nseparately by [`card_to_dto_with_hit`] on the search read path."
     },
     {
       "path": "asterism_core::application::mapping::card_to_dto_with_hit",
       "kind": "function",
-      "docs": "Same shape as [`card_to_dto`] but populates the search-only\n`score` + `snippet` fields from a retrieval `Candidate`."
+      "docs": "Same shape as [`card_to_dto`] but populates the search-only\n`score` / `snippet` / `found_by` fields from a retrieval candidate.\n\nThe three arrive together because they are one statement: this row\nwas ranked, this is its score, and this is the instrument whose\nscale that score is on.\n\n# How evidence splits on the wire\n\n[`Evidence`] is one enum and the wire gives it two fields, because\nits variants answer two different questions. A snippet is\n*content* — the window of body text the match sat in — and it has\nhad a field since search had one instrument. A rationale is not\ncontent but the name of the instrument that reached the row, and\nwhat a reader needs from it is which scale the score beside it is\non, so it crosses as a token rather than as the sentence the\nretriever wrote.\n\n`Rationale` becomes [`FOUND_BY_MEANING`] because the meaning layer\nis the only producer of one on the search path. The other producer\nthe variant's doc names — an agent stating its own reason — reaches\nits rows by a route that does not come through here. A second\nproducer on this path would make this a guess, and would be the\nmoment to carry the route in the evidence rather than infer it from\nthe variant.\n\n[`Evidence::Tags`] and [`Evidence::None`] reach neither field:\nnothing writes the first on this path, and the second is the\nretriever saying it has no explanation, which is what an absent\n`found_by` already says."
     },
     {
       "path": "asterism_core::application::mapping::chapter_mark_to_dto",
