@@ -85,14 +85,31 @@ impl TagHeadRef {
 
 /// What kind of feature a stored vector is.
 ///
-/// One kind exists today. The enum exists so that a later image-only
-/// feature (a DINOv2-class vector, a learned perceptual code) can share
-/// the storage without a migration — the kind is part of the row key.
+/// The kind is part of the row key, so a new one shares the storage
+/// without a migration — which is how the second one arrived, and how a
+/// later image-only feature (a DINOv2-class vector, a learned
+/// perceptual code) would.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VisualFeatureKind {
-    /// A joint image/text embedding: comparable with encoded text
-    /// (tag names, captions) and with other images.
+    /// The pixels, encoded into a joint image/text space: comparable
+    /// with encoded text (tag names, captions) and with other images.
     Semantic,
+    /// The asset's own words, encoded into that same space (#32) — so a
+    /// query in words nobody wrote down can still reach the asset whose
+    /// words are about the same thing.
+    ///
+    /// Not the whole of what
+    /// [`derive_text`](crate::domain::derived_text::derive_text)
+    /// composes, and the difference is measured rather than chosen: the
+    /// encoder reads a fixed window, and two documents that agree for
+    /// their first ~300 characters and differ after it encode
+    /// identically [measured against the shipped package: 168
+    /// characters still separated them, 301 did not]. A composed
+    /// document passes that inside its first section, so everything
+    /// after would be invisible to the vector while looking indexed.
+    /// What is encoded is the short half —
+    /// [`derive_words`](crate::domain::derived_text::derive_words).
+    Words,
 }
 
 impl VisualFeatureKind {
@@ -100,6 +117,7 @@ impl VisualFeatureKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Semantic => "semantic",
+            Self::Words => "words",
         }
     }
 
@@ -107,6 +125,7 @@ impl VisualFeatureKind {
     pub fn parse(slug: &str) -> Result<Self, DomainError> {
         match slug {
             "semantic" => Ok(Self::Semantic),
+            "words" => Ok(Self::Words),
             other => Err(DomainError::Validation(format!(
                 "unknown visual feature kind: {other:?}"
             ))),

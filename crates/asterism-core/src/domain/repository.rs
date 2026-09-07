@@ -2715,6 +2715,28 @@ pub trait VisualFeatureRepository: Send + Sync {
         limit: u32,
     ) -> Result<Vec<VisualScanCandidate>, DomainError>;
 
+    /// Assets with no `words` vector under this identity, oldest first,
+    /// at most `limit` of them — that walk's page (#32).
+    ///
+    /// Assets rather than materials, and no mime filter: what is
+    /// encoded is what the row says about itself, which every asset has
+    /// or does not have regardless of what its bytes are. A recording
+    /// with a title and a note has words; a picture nobody has touched
+    /// since import has none, and
+    /// [`derive_words`](crate::domain::derived_text::derive_words)
+    /// answers `None` for it rather than this walk filtering it out —
+    /// the walk cannot know without composing, and composing is the
+    /// caller's.
+    ///
+    /// Trashed and folded assets are excluded, matching
+    /// [`vectors_of_persona`](Self::vectors_of_persona): a row the
+    /// scan will never read is not work.
+    async fn unworded(
+        &self,
+        identity: &ModelIdentity,
+        limit: u32,
+    ) -> Result<Vec<AssetId>, DomainError>;
+
     /// Deletes every stored feature (vectors and failure records) one
     /// model produced, returning the row count. The storage half of
     /// model replacement; the caller owns deleting the model's edges

@@ -261,6 +261,50 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
             .collect()
     }
 
+    async fn unworded(
+        &self,
+        identity: &ModelIdentity,
+        limit: u32,
+    ) -> Result<Vec<AssetId>, DomainError> {
+        let ident = identity.clone();
+        let kind = VisualFeatureKind::Words.as_str();
+        let rows: Vec<Uuid> = self
+            .isle
+            .call(move |conn| {
+                // Over `asset` rather than `material`, and with no mime
+                // filter: what this walk offers is a row whose words
+                // nobody has encoded, and a row's words come from what
+                // it says about itself rather than from its bytes. The
+                // `ord = 0` in the stored key is the convention the
+                // table keeps, not a claim about a material.
+                //
+                // Absence is the pending state here as it is above, so
+                // a computed or failed row leaves the walk. An asset
+                // with nothing to say earns a failure row on its first
+                // pass and is offered no second one.
+                let mut stmt = conn.prepare(
+                    "SELECT a.id
+                       FROM asset a
+                      WHERE a.trashed_at IS NULL AND a.folded_into IS NULL
+                        AND NOT EXISTS (
+                            SELECT 1 FROM visual_feature vf
+                             WHERE vf.asset_id = a.id AND vf.ord = 0
+                               AND vf.model_id = ?1 AND vf.feature_kind = ?2)
+                      ORDER BY a.id
+                      LIMIT ?3",
+                )?;
+                let rows = stmt
+                    .query_map(params![ident.model_id, kind, limit as i64], |r| {
+                        r.get::<_, Uuid>(0)
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(infra_err)?;
+        Ok(rows.into_iter().map(AssetId::from_uuid).collect())
+    }
+
     async fn clear_derived(&self, model_id: &str) -> Result<u64, DomainError> {
         let model_id = model_id.to_string();
         self.isle

@@ -374,6 +374,16 @@ pub async fn auto_tag(env: &JobEnv, payload: &serde_json::Value) -> Result<Strin
     // the sections the derived text is composed from, and the document
     // written at ingest was composed before this handler wrote them.
     enqueue_reindex(env, &asset.id).await?;
+    // And on the semantic axis (#32), which composes from the same
+    // keywords. This is the moment an asset's words settle: before it
+    // there is a title and whatever the importer wrote, after it there
+    // is the vocabulary a query is most likely to be about.
+    env.queue
+        .enqueue(
+            asterism_core::domain::job::JobKind::WordsFeature,
+            serde_json::json!({ "asset_id": asset.id.to_string() }),
+        )
+        .await?;
     Ok(format!("{} keyword(s) tagged", names.len()))
 }
 
@@ -595,6 +605,140 @@ async fn encode_material(
                     ord,
                     &identity,
                     VisualFeatureKind::Semantic,
+                    &err.to_string(),
+                )
+                .await?;
+            Ok(EncodeOutcome::Retired)
+        }
+    }
+}
+
+/// Page of the words walk. Wider than the encoder's: the work per row
+/// is a string and one text encode, where an image row is a read, a
+/// decode and a vision encode.
+const WORDS_FEATURE_PAGE: u32 = 64;
+
+/// Encodes what an asset says about itself (#32).
+///
+/// `{ "asset_id": ... }` encodes one asset; `{ "batch": true }` walks
+/// the rows with no vector yet, chain-enqueueing while a full page also
+/// answered something.
+pub async fn words_feature(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    let Some(encoder) = env.deps.visual_encoder.get().cloned() else {
+        return Ok("no model configured, skipped".into());
+    };
+    if payload.get("batch").and_then(|v| v.as_bool()) == Some(true) {
+        return words_feature_batch(env, &encoder).await;
+    }
+    let Some(asset) = load_target(env, payload).await? else {
+        return Ok("asset gone, skipped".into());
+    };
+    match encode_words(env, &encoder, &asset).await? {
+        EncodeOutcome::Encoded => Ok("words encoded".into()),
+        EncodeOutcome::Retired => Ok("nothing said about this row, retired".into()),
+        EncodeOutcome::Deferred => Ok("deferred".into()),
+    }
+}
+
+/// One page of the words walk. No cursor, for the reason the encode
+/// walk has none: every answered row leaves the predicate.
+async fn words_feature_batch(
+    env: &JobEnv,
+    encoder: &std::sync::Arc<dyn VisualEncoder>,
+) -> Result<String, DomainError> {
+    let identity = encoder.identity().clone();
+    let page = env
+        .deps
+        .visual_features
+        .unworded(&identity, WORDS_FEATURE_PAGE)
+        .await?;
+    if page.is_empty() {
+        return Ok("words backfill: nothing left to encode".into());
+    }
+    let full = page.len() as u32 == WORDS_FEATURE_PAGE;
+    let (mut encoded, mut retired) = (0usize, 0usize);
+    for asset_id in page {
+        // A row that vanished between the page and here is not an
+        // error; the next pass will not offer it.
+        let Some(asset) = env.deps.assets.find(&asset_id).await? else {
+            continue;
+        };
+        match encode_words(env, encoder, &asset).await? {
+            EncodeOutcome::Encoded => encoded += 1,
+            EncodeOutcome::Retired | EncodeOutcome::Deferred => retired += 1,
+        }
+    }
+    if full && (encoded + retired) > 0 {
+        env.queue
+            .enqueue(
+                asterism_core::domain::job::JobKind::WordsFeature,
+                serde_json::json!({ "batch": true }),
+            )
+            .await?;
+    }
+    Ok(format!(
+        "words backfill: encoded={encoded} retired={retired}"
+    ))
+}
+
+/// Composes one asset's words and encodes them, recording what came
+/// back — including the row that has nothing to say.
+async fn encode_words(
+    env: &JobEnv,
+    encoder: &std::sync::Arc<dyn VisualEncoder>,
+    asset: &Asset,
+) -> Result<EncodeOutcome, DomainError> {
+    let identity = encoder.identity().clone();
+    // A row nobody has titled, labelled or tagged has no words, and a
+    // failure record is what stops the walk offering it every pass. It
+    // is not a failure of the encoder — the reason says which.
+    let Some(words) = asterism_core::domain::derived_text::derive_words(asset) else {
+        env.deps
+            .visual_features
+            .mark_unextractable(
+                &asset.id,
+                0,
+                &identity,
+                VisualFeatureKind::Words,
+                "the row says nothing about itself",
+            )
+            .await?;
+        return Ok(EncodeOutcome::Retired);
+    };
+
+    let _permit = VISUAL_ENCODE_SLOTS
+        .acquire()
+        .await
+        .expect("semaphore never closed");
+    let enc = encoder.clone();
+    let vector = tokio::task::spawn_blocking(move || enc.encode_text(&words))
+        .await
+        .map_err(|e| DomainError::Validation(format!("encode task failed: {e}")))?;
+
+    match vector {
+        Ok(vector) => {
+            let feature = VisualFeature::new(
+                asset.id,
+                0,
+                identity,
+                VisualFeatureKind::Words,
+                vector,
+                chrono::Utc::now().timestamp_millis(),
+            )?;
+            env.deps.visual_features.set_visual_feature(feature).await?;
+            Ok(EncodeOutcome::Encoded)
+        }
+        Err(err) => {
+            env.deps
+                .visual_features
+                .mark_unextractable(
+                    &asset.id,
+                    0,
+                    &identity,
+                    VisualFeatureKind::Words,
                     &err.to_string(),
                 )
                 .await?;
