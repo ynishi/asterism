@@ -39,6 +39,7 @@
 
 pub mod disclosure;
 pub mod dispatch;
+pub(crate) mod encode;
 pub mod fault;
 pub(crate) mod fingerprint;
 pub mod forge;

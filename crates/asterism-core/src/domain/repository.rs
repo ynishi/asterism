@@ -2701,16 +2701,25 @@ pub trait VisualFeatureRepository: Send + Sync {
         kind: VisualFeatureKind,
     ) -> Result<Option<VisualFeature>, DomainError>;
 
-    /// Every stored vector of one persona under this identity — the
-    /// input of the brute-force neighbour scan. Trashed and folded
-    /// assets are excluded; the payload is `(asset, vector)` because
-    /// the scan needs nothing else.
-    async fn vectors_of_persona(
+    /// Every stored vector under this identity that a scan is allowed
+    /// to see — the input of both brute-force scans, the neighbour one
+    /// over `Semantic` and the meaning one over `Words`. Trashed and
+    /// folded assets are excluded.
+    ///
+    /// `scope` names one persona's library, and `None` is every
+    /// persona. A caller that has a persona in hand should pass it —
+    /// the predicate is what keeps the scan proportional to the
+    /// library being asked about.
+    ///
+    /// The persona travels back per row rather than being assumed from
+    /// the argument, because under `None` there is no single answer to
+    /// assume, and a candidate carries its persona.
+    async fn vectors_in_scope(
         &self,
-        persona_id: &PersonaId,
+        scope: Option<&PersonaId>,
         identity: &ModelIdentity,
         kind: VisualFeatureKind,
-    ) -> Result<Vec<(AssetId, Vec<f32>)>, DomainError>;
+    ) -> Result<Vec<(AssetId, PersonaId, Vec<f32>)>, DomainError>;
 
     /// Image-bearing primary materials with neither a vector nor a
     /// failure record under this identity — the backfill walk's page.
@@ -2744,8 +2753,8 @@ pub trait VisualFeatureRepository: Send + Sync {
     /// caller's.
     ///
     /// Trashed and folded assets are excluded, matching
-    /// [`vectors_of_persona`](Self::vectors_of_persona): a row the
-    /// scan will never read is not work.
+    /// [`vectors_in_scope`](Self::vectors_in_scope): a row the scan
+    /// will never read is not work.
     async fn unworded(
         &self,
         identity: &ModelIdentity,
@@ -3180,12 +3189,22 @@ pub enum Evidence {
 pub struct Candidate {
     /// The asset.
     pub asset_id: AssetId,
-    /// Persona the asset belongs to (denormalised at index time so a
-    /// persona-scope filter can be pushed into the query without a
-    /// SQL round-trip per candidate).
+    /// Persona the asset belongs to, so a persona-scope filter needs
+    /// no SQL round-trip per candidate. Denormalised at index time on
+    /// the full-text route, read off the row at query time on the
+    /// vector scans — either way it is the asset's, never the query's.
     pub persona_id: PersonaId,
-    /// Rank score. Comparable within one response, meaningless across
-    /// responses or across retriever implementations.
+    /// Rank score, meaningless across responses or across retriever
+    /// implementations.
+    ///
+    /// **Comparable within one response only where one instrument
+    /// produced it.** A composite retriever answers with more than one
+    /// — a BM25 score and a cosine sit in the same list today — and
+    /// nobody has measured a conversion between them, which is why the
+    /// route that appends does exactly that and never re-ranks what it
+    /// appends to. [`Evidence`] is what says which instrument a score
+    /// came from; two scores whose evidence differs are not on one
+    /// scale.
     pub score: f32,
     /// Why this one is a candidate.
     pub evidence: Evidence,

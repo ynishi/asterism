@@ -3,9 +3,10 @@
 //!
 //! The port is `&self` (the job engine shares one encoder across
 //! handlers), the underlying `ort` session runs on `&mut self`, so the
-//! adapter owns the lock. A `Mutex` and not a pool: the job layer
-//! already serialises encodes through its own semaphore, so contention
-//! here is the exception, not the shape.
+//! adapter owns the lock. A `Mutex` and not a pool: encodes are
+//! serialised before they arrive here, by the permit in
+//! [`crate::encode`], so contention on the lock is the exception,
+//! not the shape.
 
 use std::sync::Mutex;
 
