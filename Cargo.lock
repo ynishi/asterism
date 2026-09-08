@@ -483,6 +483,7 @@ dependencies = [
  "asterism-importer-persona-journal",
  "asterism-importer-sdk",
  "asterism-importer-tape",
+ "asterism-importer-text",
  "asterism-importer-video",
  "chrono",
  "clap",
@@ -557,6 +558,15 @@ dependencies = [
 
 [[package]]
 name = "asterism-importer-tape"
+version = "0.1.1"
+dependencies = [
+ "asterism-importer-sdk",
+ "chrono",
+ "serde_json",
+]
+
+[[package]]
+name = "asterism-importer-text"
 version = "0.1.1"
 dependencies = [
  "asterism-importer-sdk",

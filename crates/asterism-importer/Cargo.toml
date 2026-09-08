@@ -19,6 +19,7 @@ asterism-importer-cc = { path = "../asterism-importer-cc" }
 asterism-importer-image = { path = "../asterism-importer-image" }
 asterism-importer-video = { path = "../asterism-importer-video" }
 asterism-importer-audio = { path = "../asterism-importer-audio" }
+asterism-importer-text = { path = "../asterism-importer-text" }
 asterism-importer-persona-journal = { path = "../asterism-importer-persona-journal" }
 asterism-importer-tape = { path = "../asterism-importer-tape" }
 

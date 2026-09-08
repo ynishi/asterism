@@ -230,6 +230,11 @@
 - [asterism-importer-tape overview](asterism_importer_tape/index.md): Tape import adapter — turns an exported conversation tape file into
 - [asterism-importer-tape::parser](asterism_importer_tape/parser.md): Persona Tape parser — one terminal transcript file becomes one document.
 
+## asterism-importer-text 0.1.1
+
+- [asterism-importer-text overview](asterism_importer_text/index.md): Document import adapter — parses one Markdown or plain-text file
+- [asterism-importer-text::parser](asterism_importer_text/parser.md): Text `RawItem` → `Footprint::Doc` parser.
+
 ## asterism-importer-video 0.1.1
 
 - [asterism-importer-video overview](asterism_importer_video/index.md): Video import adapter — turns a scanned video file into
