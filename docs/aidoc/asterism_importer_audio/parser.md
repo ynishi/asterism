@@ -2,9 +2,11 @@
 
 Audio `RawItem` → `Footprint::Audio` parser.
 
-Metadata via `lofty` (pure-Rust, MIT). Covers MP3 / M4A (AAC in
-MP4) / WAV / FLAC / OGG (Vorbis + Opus) plus WavPack / APE /
-MPC / AIFF. Header-only reads — no decoding.
+Metadata via `lofty` (pure-Rust, MIT). Header-only reads — no
+decoding. `codec_slug` is the list of what this names, and it is the
+list rather than a copy of it here: what a container is called comes
+back from that function, and a second enumeration in this header is
+the one nobody edits when an arm is added.
 
 ## Types
 

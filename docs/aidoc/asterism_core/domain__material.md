@@ -25,6 +25,7 @@ content is its members.
 
 ## Constants
 
+- `KNOWN_AUDIO_MIMES` — Every `audio/*` value [`guess_mime`] can produce.
 - `KNOWN_IMAGE_MIMES` — Every `image/*` value [`guess_mime`] can produce.
 - `KNOWN_VIDEO_MIMES` — Every `video/*` value [`guess_mime`] can produce.
 
