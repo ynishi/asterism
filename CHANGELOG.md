@@ -10,6 +10,36 @@ and this project adheres to
 
 ### Added
 
+- **A document can be handed over as itself** (#259). Everything a written file
+  needed was already here — hand `asset_add` a path to a `.md` and the map calls
+  it `text/plain`, which is a format the body cache accepts, so the words reach
+  the full-text index and a phrase inside the file finds it later. What was
+  missing was a door. The media routes take a file whole and call it an image, a
+  clip, a recording; the tape route takes one whole and calls it a terminal
+  transcript; nothing took one and called it something somebody wrote, and
+  nothing in the ingest tool's description said the ledger takes one.
+  `asterism-import text --dir <dir>` is that arrival, one document per file, and
+  the tool description now says so. The card carries the document's first
+  heading as its register note — the 📝 badge — falling back to the filename,
+  and an excerpt of the first paragraph after it as the cover; a word count
+  rides along in the extension bag, which is the only place there is to put one.
+  Two extensions, `.md` and `.txt`, out of the four the mime map names: the map
+  is the ceiling, because a scanner that accepted an extension it cannot name
+  would import a file with no format at all, which is the defect the audio entry
+  below is about, and `.jsonl` and `.db` are files records are read out of
+  rather than documents. `.txt` is the tape route's extension too, and that
+  overlap is left standing — a transcript and a note are different things
+  wearing one suffix, and which one a directory holds is what picking the
+  subcommand says. A vault's front matter is stepped over rather than shown, so
+  an Obsidian or Hugo file reads like the plain one beside it instead of
+  covering itself in its own YAML. What the importer sends is only what a card
+  needs before the body is read: the body itself is never copied into the row,
+  since the server reads it off the file, and a document edited on disk should
+  not have two answers. **What this does not do is keep a document current.**
+  Ingest returns the row already held for a path rather than rewriting it, so
+  importing an edited file a second time changes nothing — not the cover, not
+  the indexed words. Bringing a document in and following one are different
+  verbs, and only the first has a door.
 - **The webview's answer for every audio format, measured rather than assumed**
   (#261). Naming a format hands the row a player, and the audio entry below said
   in as many words that whether the packaged webview could decode what those
