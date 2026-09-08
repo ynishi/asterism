@@ -8886,7 +8886,8 @@ Unified CLI for all built-in Asterism import adapters.
 
 One subcommand per source — Claude Code sessions, character cards,
 agent-harvest envelopes, arbitrary SQLite queries, persona-journal
-entries, tapes, and image / video / audio files. Every subcommand
+entries, tapes, image / video / audio files, and written documents.
+Every subcommand
 runs the same importer-SDK pipeline: walk the source, parse it into
 typed footprints, and push them in batches to a running
 `asterism-server` over HTTP (`--server`, default local). All imports
@@ -10605,6 +10606,54 @@ Persona Tape parser — one terminal transcript file becomes one document.
 ## Types
 
 - `TapeParser` — (no documentation)
+
+
+<!-- asterism_importer_text/index.md -->
+# asterism-importer-text 0.1.1
+
+Document import adapter — parses one Markdown or plain-text file
+into one `Footprint::Doc`.
+
+One of the per-modality adapters behind the unified
+`asterism-importer` CLI: [`parser::TextParser`] implements the
+importer SDK's `SourceParser`, the SDK pipeline walks the source and
+pushes the resulting footprints to a running `asterism-server` over
+HTTP. The format specifics live in [`parser`]; this crate root only
+re-exports the parser type.
+
+## Modules
+
+- [`parser`](parser.md): Text `RawItem` → `Footprint::Doc` parser.
+
+
+<!-- asterism_importer_text/parser.md -->
+# asterism-importer-text::parser
+
+Text `RawItem` → `Footprint::Doc` parser.
+
+The capability this crate is the door for already existed: hand
+`asset_add` a path to a `.md` and `guess_mime` answers `text/plain`,
+`MimeType::body_text` accepts that, and the words reach the body
+cache and the full-text index. What was missing was a route that
+files a written file as a *document* — the media routes take a file
+whole and call it an image, a clip, a recording; the tape route
+takes one whole and calls it a terminal transcript; nothing took one
+and called it something somebody wrote.
+
+It shares `.txt` with that tape route, and the overlap is not an
+accident to resolve: a transcript and a note are different things
+wearing one extension, and which one a directory holds is the
+caller's to say by picking the subcommand.
+
+What this reads out of the bytes is only what a card needs before
+the body is read: a heading, an excerpt, and a word count. The body
+itself is never sent — the server reads it off the locator, which is
+also what keeps a document that changes on disk from having two
+answers.
+
+## Types
+
+- `TextParser` — Turns one scanned document into `Footprint::Doc`.
 
 
 <!-- asterism_importer_video/index.md -->

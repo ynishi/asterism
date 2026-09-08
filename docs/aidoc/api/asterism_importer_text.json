@@ -1,0 +1,16 @@
+{
+  "crate": "asterism-importer-text",
+  "version": "0.1.1",
+  "items": [
+    {
+      "path": "asterism_importer_text::parser",
+      "kind": "module",
+      "docs": "Text `RawItem` → `Footprint::Doc` parser.\n\nThe capability this crate is the door for already existed: hand\n`asset_add` a path to a `.md` and `guess_mime` answers `text/plain`,\n`MimeType::body_text` accepts that, and the words reach the body\ncache and the full-text index. What was missing was a route that\nfiles a written file as a *document* — the media routes take a file\nwhole and call it an image, a clip, a recording; the tape route\ntakes one whole and calls it a terminal transcript; nothing took one\nand called it something somebody wrote.\n\nIt shares `.txt` with that tape route, and the overlap is not an\naccident to resolve: a transcript and a note are different things\nwearing one extension, and which one a directory holds is the\ncaller's to say by picking the subcommand.\n\nWhat this reads out of the bytes is only what a card needs before\nthe body is read: a heading, an excerpt, and a word count. The body\nitself is never sent — the server reads it off the locator, which is\nalso what keeps a document that changes on disk from having two\nanswers."
+    },
+    {
+      "path": "asterism_importer_text::parser::TextParser",
+      "kind": "struct",
+      "docs": "Turns one scanned document into `Footprint::Doc`."
+    }
+  ]
+}

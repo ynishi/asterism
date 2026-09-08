@@ -1,0 +1,16 @@
+# asterism-importer-text 0.1.1
+
+Document import adapter — parses one Markdown or plain-text file
+into one `Footprint::Doc`.
+
+One of the per-modality adapters behind the unified
+`asterism-importer` CLI: [`parser::TextParser`] implements the
+importer SDK's `SourceParser`, the SDK pipeline walks the source and
+pushes the resulting footprints to a running `asterism-server` over
+HTTP. The format specifics live in [`parser`]; this crate root only
+re-exports the parser type.
+
+## Modules
+
+- [`parser`](parser.md): Text `RawItem` → `Footprint::Doc` parser.
+
