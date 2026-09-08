@@ -1,8 +1,10 @@
 //! Audio `RawItem` → `Footprint::Audio` parser.
 //!
-//! Metadata via `lofty` (pure-Rust, MIT). Covers MP3 / M4A (AAC in
-//! MP4) / WAV / FLAC / OGG (Vorbis + Opus) plus WavPack / APE /
-//! MPC / AIFF. Header-only reads — no decoding.
+//! Metadata via `lofty` (pure-Rust, MIT). Header-only reads — no
+//! decoding. `codec_slug` is the list of what this names, and it is the
+//! list rather than a copy of it here: what a container is called comes
+//! back from that function, and a second enumeration in this header is
+//! the one nobody edits when an arm is added.
 
 use std::io::Cursor;
 use std::path::PathBuf;
@@ -183,6 +185,12 @@ fn codec_slug(kind: lofty::file::FileType) -> Option<String> {
         Opus => "opus".into(),
         Wav => "pcm".into(),
         Aiff => "aiff".into(),
+        // A bare AAC stream, as against the same codec inside MP4
+        // (`Mp4` above, which is what `.m4a` is). The scanner accepts
+        // `.aac` and the mime map names it, so without this arm the file
+        // imports with a format and no codec — the one fact this parser
+        // exists to read.
+        Aac => "aac".into(),
         WavPack => "wavpack".into(),
         Ape => "ape".into(),
         Speex => "speex".into(),
@@ -338,6 +346,39 @@ mod tests {
         // Ogg can carry Vorbis / Opus / Speex — accept any known slug
         // rather than pinning to one.
         assert!(a.codec.is_some(), "OGG codec detected");
+        assert!(a.duration_ms.is_some_and(|d| d > 0));
+    }
+
+    /// The three below cover the scanner's remaining containers.
+    ///
+    /// An arm with no fixture is a claim about a container nothing in
+    /// the tree has ever opened: `.aac`, `.opus` and `.aiff` reached the
+    /// scanner while no test here read one back, so `codec_slug` could
+    /// have answered anything for them and stayed green. One fixture per
+    /// container is what turns each arm into a read.
+    #[test]
+    fn fixture_aac_lands_with_its_own_codec() {
+        let a = parse_fixture("tone.aac");
+        assert!(a.labels.iter().any(|l| l == "aac"));
+        // The slug `.m4a` also answers — see the `Aac` arm in
+        // `codec_slug` for why one codec gives two containers one name.
+        assert_eq!(a.codec.as_deref(), Some("aac"));
+        assert!(a.duration_ms.is_some_and(|d| d > 0));
+    }
+
+    #[test]
+    fn fixture_opus_lands() {
+        let a = parse_fixture("tone.opus");
+        assert!(a.labels.iter().any(|l| l == "opus"));
+        assert_eq!(a.codec.as_deref(), Some("opus"));
+        assert!(a.duration_ms.is_some_and(|d| d > 0));
+    }
+
+    #[test]
+    fn fixture_aiff_lands() {
+        let a = parse_fixture("tone.aiff");
+        assert!(a.labels.iter().any(|l| l == "aiff"));
+        assert_eq!(a.codec.as_deref(), Some("aiff"));
         assert!(a.duration_ms.is_some_and(|d| d > 0));
     }
 
