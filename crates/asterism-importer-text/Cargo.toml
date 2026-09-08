@@ -1,0 +1,29 @@
+[package]
+name        = "asterism-importer-text"
+autobins    = false
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Document importer for Asterism — one Markdown or plain-text file as one artefact"
+publish     = false
+
+[dependencies]
+asterism-importer-sdk = { path = "../asterism-importer-sdk" }
+
+serde_json = { workspace = true }
+chrono     = { workspace = true }
+
+# No parser dependency of any kind. What this reads is the text itself:
+# a heading is a line that starts with `#`, an excerpt is the prose after
+# it, and a word is what `split_whitespace` says it is. A Markdown crate
+# would buy a syntax tree for a title and a first paragraph, which is
+# more machinery than either answer is worth and a second opinion about
+# what Markdown is — the app renders it in the webview, and that renderer
+# is the one whose reading matters.
+
+# No dev-dependencies. The tests build their inputs as string literals
+# — a document is text, so a fixture on disk would only be the same
+# bytes with a path in front of them.

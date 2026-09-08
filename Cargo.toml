@@ -20,6 +20,7 @@ members = [
     "crates/asterism-importer-image",
     "crates/asterism-importer-video",
     "crates/asterism-importer-audio",
+    "crates/asterism-importer-text",
     "crates/asterism-ui/src-tauri",
     "crates/asterism-benchgen",
     "crates/asterism-vision",
