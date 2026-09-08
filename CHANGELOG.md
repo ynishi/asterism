@@ -10,6 +10,23 @@ and this project adheres to
 
 ### Added
 
+- **The webview's answer for every audio format, measured rather than assumed**
+  (#261). Naming a format hands the row a player, and the audio entry below said
+  in as many words that whether the packaged webview could decode what those
+  formats hold was not settled — the sharp version of the question, because the
+  player and the waveform share one decoder, so a container the webview refuses
+  is a silent player above a blank canvas. It is settled now, in the place the
+  answer lives: a spec in the desktop e2e suite drives a real window, opens one
+  card per format seeded from the generated fixtures, and reads back what the
+  `<audio>` element and `decodeAudioData` each did with the bytes. All eight
+  cases pass — MP3, WAV, AAC in MP4, FLAC, Ogg carrying Vorbis, Ogg carrying
+  Opus, a bare AAC stream, and AIFF all load and all draw [measured 2026-09-08,
+  WKWebView 605.1.15]. Nothing this app can name is refused. So there is no
+  audio counterpart to `VideoFormat::webview_cannot_play`: the set it would name
+  is empty, and a predicate answering `false` for everything would read as a
+  rule when what exists is a measurement, which is written down on `AudioFormat`
+  instead. The spec asserts rather than reports, so a system decoder that drops
+  a codec fails a test instead of a card.
 - **A result says which instrument found it** (#255). More than one answers a
   search now, and their numbers are not on one scale: full text scores with
   BM25, unbounded above, and the vector routes with a cosine bounded by a floor

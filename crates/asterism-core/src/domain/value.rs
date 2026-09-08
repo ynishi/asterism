@@ -707,6 +707,34 @@ pub enum VideoFormat {
 }
 
 /// The `audio/*` formats, plus anything else that arrived as `audio/*`.
+///
+/// # The packaged webview decodes all of them
+///
+/// [measured 2026-09-08, WKWebView 605.1.15] Every named variant loads
+/// in the detail pane's `<audio>` element *and* decodes through
+/// `decodeAudioData` for the waveform — MP3, WAV, AAC in MP4, FLAC, Ogg
+/// carrying Vorbis, Ogg carrying Opus, a bare AAC stream, and AIFF.
+///
+/// Measured per codec, and [`Ogg`](Self::Ogg) is the variant where that
+/// is not the same as per variant: one mime covers whatever the
+/// container was given, and only its two common fillings were put in
+/// front of the decoder. Speex or FLAC inside Ogg would arrive under a
+/// mime this says is decodable, on the strength of a reading taken on
+/// two other codecs.
+///
+/// This is the answer [`VideoFormat::webview_cannot_play`] exists to
+/// give on the other side, and the reason there is no counterpart here:
+/// the set it would name is empty. A predicate answering `false` for
+/// every variant would read as a rule when it is a measurement, so the
+/// measurement is written down instead.
+///
+/// It matters more than the video one because the two paths share a
+/// decoder: a container the webview refuses is a player that does not
+/// play *and* a canvas that stays blank. The measurement is retaken by
+/// `webview-audio-decode.spec.ts` in the desktop e2e suite, which
+/// drives a real
+/// window and asserts both halves per format — so a system decoder that
+/// drops a codec fails a test rather than a card.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AudioFormat {
     /// MP3 (`audio/mpeg`).
