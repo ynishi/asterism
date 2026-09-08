@@ -173,6 +173,22 @@ and this project adheres to
 
 ### Fixed
 
+- **Audio already in a library gets the format it should have had** (#262).
+  #259's entry closes by saying that files already imported keep the format they
+  have; this is the change that changed that. The formats it named reached what
+  arrived after them and nothing that came before, so a FLAC or an OGG imported
+  while the map knew three extensions still recorded nothing — a text reader
+  where a player belongs, and a row the chapter walk never offers, since that
+  walk finds its candidates with `mime LIKE 'audio/%'`. A migration now writes
+  what a re-import would write, which puts those rows back in both. It writes
+  only where nothing was recorded, so a format an importer stated is never
+  overridden; a locator it cannot parse, or whose extension it does not name,
+  keeps its silence; and a record still means what a record means rather than
+  borrowing its container's format. The step reads each locator through the same
+  type the rest of the app reads it through, and decides the format from a table
+  frozen inside itself — a migration runs on databases upgrading long after it
+  ships, so what it decides has to be what it decided the day it landed, while
+  how it reads the column has to stay the one reading everything else uses.
 - **Six of the nine audio extensions the importer accepts arrived with no format
   at all** (#259). The scanner walks `.mp3`, `.m4a`, `.wav`, `.flac`, `.ogg`,
   `.oga`, `.opus`, `.aac` and `.aiff`; the mime map named the first three. A

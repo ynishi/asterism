@@ -7737,6 +7737,151 @@ const V106_VISUAL_FEATURE_COMPOSITION: &str = r#"
 ALTER TABLE visual_feature ADD COLUMN composition_ver INTEGER NOT NULL DEFAULT 0;
 "#;
 
+/// V107 — the audio extensions `guess_mime` learned get written onto the
+/// rows that imported before it knew them (issue #262).
+///
+/// The reason V45 gave for fragments and V93 for `.json`: the
+/// classification is fixed at the source
+/// (`asterism_core::domain::material::guess_mime`), and the rows already
+/// written need this. Here the importer's scanner accepted audio
+/// extensions the map could not name, so a FLAC or an OGG landed with
+/// `mime IS NULL` — and a missing format is not a quieter version of the
+/// fact.
+/// [`render_policy`](asterism_core::domain::render::render_policy) reads
+/// it to decide what a surface may do with the bytes, so those rows
+/// carry a text reader where a player belongs, and they sit outside the
+/// chapter walk, which finds candidates with `mime LIKE 'audio/%'`.
+/// Writing the mime puts them back in both.
+///
+/// # The column is read through the live type; the judgement is frozen
+///
+/// Those are two different questions and this file answers them
+/// differently, which is why this step is split the way it is.
+///
+/// **Reading the column** goes through [`SourceLocator`], live, on
+/// V65's terms: the locators here were rewritten into the tagged form by
+/// V63, which is behind this step, so the shape is settled and "what it
+/// must not do is invent a second reading of the same column". An
+/// earlier draft of this step mirrored the judgement in SQL instead, and
+/// that is exactly the second reading V65 names. A second reason arrived
+/// with it: [`LocalPath`] deliberately accepts a Windows-spelled path,
+/// and `Path::extension` answers differently on the two platforms for
+/// one — `C:\audio\.flac` has an extension where `\` is an ordinary
+/// character and none where it is a separator. A `LIKE` clause has one
+/// answer, so a mirror is faithful on at most one platform, and which
+/// one is settled by where it was written rather than by where the
+/// database is read.
+///
+/// **The judgement** — which extension means which mime — is frozen
+/// below rather than borrowed from `guess_mime`, for the reason V56 and
+/// V63 froze their helpers and V92 states outright: the domain constants
+/// may move; what this step did may not. A step that called the live map
+/// would write today's answer onto a database upgrading next year,
+/// leaving two libraries at `LATEST_VERSION` holding different mimes for
+/// the same file.
+///
+/// # What it leaves alone
+///
+/// Guarded on `mime IS NULL`, which is stronger than V93's guard: the
+/// old arm wrote nothing at all rather than a wrong value, so no mime an
+/// importer stated is overridden by a guess. A locator this build cannot
+/// parse, or whose extension the frozen table cannot name, keeps its
+/// null — the honest answer for it.
+///
+/// `.mp3`, `.wav` and `.m4a` are absent from the table on purpose: the
+/// map named them before any of these rows were written, so a null row
+/// carrying one means something other than what this step repairs. A
+/// record never reaches the table at all — the variant returns first,
+/// because the record is the artefact and the container's extension
+/// answers for the wrong thing, and repairing records to the
+/// `text/plain` the map gives them is a different change from this one.
+///
+/// No `PRAGMA foreign_key_check` at the end: this rebuilds no table and
+/// touches no key, so there is nothing for it to answer — the same
+/// reason V65's walk, which is this shape, runs none.
+///
+/// Idempotent by shape: the second run finds no null rows it can name.
+fn v107_audio_material_mime(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
+    use asterism_core::domain::source_locator::SourceLocator;
+
+    /// The audio half of `guess_mime` as it stood when V107 landed.
+    ///
+    /// Frozen: do not point this at the live map, and do not edit it
+    /// when that map changes. A later migration repairs whatever a later
+    /// map learns; this one keeps saying what it said.
+    fn mime_at_v107(locator: &SourceLocator) -> Option<&'static str> {
+        /// The textual sniff, for the two shapes that are not paths — a
+        /// snapshot of `extension_of_text`, frozen on the same terms as
+        /// the match below.
+        fn extension_of_text(raw: &str) -> Option<&str> {
+            let path = raw.split('?').next().unwrap_or(raw);
+            let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+            name.rsplit_once('.').map(|(_, ext)| ext)
+        }
+
+        let ext = match locator {
+            SourceLocator::Record(_) => return None,
+            SourceLocator::File(path) => path.as_path().extension()?.to_str()?,
+            SourceLocator::Remote(remote) => extension_of_text(remote.target().as_str())?,
+            SourceLocator::Logical(name) => extension_of_text(name.as_str())?,
+        };
+        Some(match ext.to_ascii_lowercase().as_str() {
+            "flac" => "audio/flac",
+            "ogg" | "oga" | "opus" => "audio/ogg",
+            "aac" => "audio/aac",
+            "aiff" | "aif" => "audio/aiff",
+            _ => return None,
+        })
+    }
+
+    let rows: Vec<(Vec<u8>, i64, String)> = {
+        let mut stmt =
+            tx.prepare("SELECT asset_id, ord, locator FROM material WHERE mime IS NULL")?;
+        let mapped = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, Vec<u8>>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        mapped.collect::<Result<_, _>>()?
+    };
+
+    let mut update =
+        tx.prepare("UPDATE material SET mime = ?1 WHERE asset_id = ?2 AND ord = ?3")?;
+    for (asset_id, ord, locator) in rows {
+        // `TryFrom` reads the storage rendering, and it is the only
+        // reader that can. `from_wire` reads a caller's spelling and
+        // would not refuse these rows — it would *accept* every one of
+        // them, since a tagged object is not rooted, carries no `://`
+        // and is not blank, so it lands as a `Logical` holding the whole
+        // JSON. The sniff would then read a suffix out of that text and
+        // name some rows by accident. A column this build cannot parse
+        // is left alone rather than guessed at.
+        let parsed = match SourceLocator::try_from(locator.as_str()) {
+            Ok(parsed) => parsed,
+            // Counted out loud rather than skipped in silence, the way
+            // V65's walk reports the same shape: a column this build
+            // cannot parse is a fact about the database worth one line,
+            // and the row keeps its null either way.
+            Err(err) => {
+                tracing::warn!(
+                    event = "diag.v107_audio_mime.unreadable_locator",
+                    ord = %ord,
+                    error = %err,
+                    "left carrying no mime"
+                );
+                continue;
+            }
+        };
+        let Some(mime) = mime_at_v107(&parsed) else {
+            continue;
+        };
+        update.execute(rusqlite::params![mime, asset_id, ord])?;
+    }
+    Ok(())
+}
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7846,6 +7991,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V104_TEAM_ASSET_LINK),
     Step::Sql(V105_MATERIAL_PERCEPTUAL_HASH),
     Step::Sql(V106_VISUAL_FEATURE_COMPOSITION),
+    Step::App(v107_audio_material_mime),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -15011,6 +15157,155 @@ mod tests {
             assert!(!status_era_owes(&conn, asset), "{mime} stays answered");
         }
     }
+
+    /// V107 writes the audio mimes onto the rows that imported before
+    /// the map could name them, and nothing else.
+    ///
+    /// Seeded in the tagged shape the column holds, written out here
+    /// rather than encoded through the live type: this is a landed
+    /// step's test, and a fixture that followed the domain's current
+    /// spelling would stop testing what the step actually reads.
+    ///
+    /// It pins the pairs the frozen table holds, which is what the step
+    /// is for: the map's own tests walk extensions into
+    /// `KNOWN_AUDIO_MIMES` without pinning which entry each reaches, and
+    /// this step has to keep saying what it says after the map has
+    /// moved. Around that: which rows it names, which it leaves, and
+    /// that each locator variant is read by the reader the app reads it
+    /// with.
+    #[test]
+    fn v107_names_the_audio_rows_that_imported_before_the_map_knew_them() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 106).unwrap();
+        let persona = seed_persona(&conn);
+
+        let seed = |locator: &str, mime: Option<&str>| -> Uuid {
+            let asset = seed_asset(&conn, persona);
+            conn.execute(
+                "INSERT INTO material (asset_id, ord, locator, mime, created_at, updated_at) \
+                 VALUES (?1, 0, ?2, ?3, 0, 0)",
+                params![asset, locator, mime],
+            )
+            .unwrap();
+            asset
+        };
+
+        // The rows this step exists for: one per spelling the frozen
+        // table names, in the variant each is likeliest to arrive as.
+        let flac = seed(r#"{"kind":"file","path":"/audio/take.flac"}"#, None);
+        let ogg = seed(r#"{"kind":"file","path":"/audio/take.ogg"}"#, None);
+        let oga = seed(r#"{"kind":"file","path":"/audio/take.oga"}"#, None);
+        let opus = seed(r#"{"kind":"file","path":"/audio/take.opus"}"#, None);
+        let aac = seed(r#"{"kind":"file","path":"/audio/take.aac"}"#, None);
+        let aiff = seed(r#"{"kind":"file","path":"/audio/take.aiff"}"#, None);
+        let aif = seed(r#"{"kind":"file","path":"/audio/take.aif"}"#, None);
+        // The frozen table lowercases before it matches, as the map does.
+        let upper = seed(r#"{"kind":"file","path":"/audio/TAKE.FLAC"}"#, None);
+        // A Windows-spelled path, which `LocalPath` accepts on purpose.
+        // This spelling answers the same on both platforms; the one that
+        // does not is `C:\audio\.flac`, where `\` is a separator on
+        // Windows and an ordinary character elsewhere. That case is why
+        // this step reads the column through the same `Path` the map
+        // reads it through: a `LIKE` clause has one answer and
+        // `Path::extension` has two.
+        let windows = seed(r#"{"kind":"file","path":"C:\\audio\\take.flac"}"#, None);
+        // The other two readers: a target with a query string stripped,
+        // and a caller-minted name read the same way. `RemoteRef::target`
+        // holds everything *after* `://`, so that is what the column
+        // carries — the scheme is its own key beside it.
+        let queried = seed(
+            r#"{"kind":"remote","scheme":"https","target":"x/y.flac?sig=1"}"#,
+            None,
+        );
+        let logical = seed(r#"{"kind":"logical","name":"harvest/f.opus"}"#, None);
+
+        // Left alone, each for its own reason.
+        let stated = seed(
+            r#"{"kind":"file","path":"/audio/other.flac"}"#,
+            Some("application/octet-stream"),
+        );
+        let unknown = seed(r#"{"kind":"file","path":"/audio/take.wv"}"#, None);
+        let image = seed(r#"{"kind":"file","path":"/pics/shot.png"}"#, None);
+        // The record is the artefact; the container's extension answers
+        // for the wrong thing. `guess_mime` calls a record `text/plain`,
+        // and repairing records to that is a different change from this
+        // one, so the frozen table answers nothing for it.
+        let record = seed(
+            r#"{"kind":"record","container":"/audio/take.flac","record":"one"}"#,
+            None,
+        );
+        // The seam V93 had to spell out in SQL, which this step gets for
+        // free by going through the same reader: `Path::extension`
+        // answers nothing for a file *named* `.flac`, so the map never
+        // named it and neither does this.
+        let dotfile = seed(r#"{"kind":"file","path":"/audio/.flac"}"#, None);
+        // The same spelling through a reader that *does* answer for it:
+        // `extension_of_text` reads the suffix of the name, so this one
+        // is named, and the asymmetry is the point.
+        let dot_logical = seed(r#"{"kind":"logical","name":"harvest/.flac"}"#, None);
+
+        migrate(&mut conn).unwrap();
+
+        let mime_of = |asset: Uuid| -> Option<String> {
+            conn.query_row(
+                "SELECT mime FROM material WHERE asset_id = ?1",
+                params![asset],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+
+        for (asset, expected, why) in [
+            (flac, "audio/flac", ".flac"),
+            (ogg, "audio/ogg", ".ogg"),
+            (oga, "audio/ogg", ".oga is the same container"),
+            (opus, "audio/ogg", ".opus is the same container"),
+            (aac, "audio/aac", "a bare AAC stream"),
+            (aiff, "audio/aiff", ".aiff"),
+            (aif, "audio/aiff", ".aif is the second spelling"),
+            (upper, "audio/flac", "an upper-case extension"),
+            (queried, "audio/flac", "a target with a query string"),
+            (logical, "audio/ogg", "a caller-minted name"),
+            (dot_logical, "audio/flac", "a name whose suffix answers"),
+            (windows, "audio/flac", "a Windows-spelled path"),
+        ] {
+            assert_eq!(
+                mime_of(asset).as_deref(),
+                Some(expected),
+                "{why} should read as {expected}"
+            );
+        }
+
+        // Each row carries the value it should still hold, so the
+        // assertion states one expectation rather than branching on
+        // which fixture it was handed.
+        for (asset, expected, why) in [
+            (
+                stated,
+                Some("application/octet-stream"),
+                "a mime an importer stated is not a guess to override",
+            ),
+            (
+                unknown,
+                None,
+                "a format the table cannot name keeps the honest answer",
+            ),
+            (
+                image,
+                None,
+                "this step answers for audio; a null image row is another question",
+            ),
+            (
+                record,
+                None,
+                "a record's artefact is not the container's format",
+            ),
+            (dotfile, None, "a file named .flac has no extension to read"),
+        ] {
+            assert_eq!(mime_of(asset).as_deref(), expected, "{why}");
+        }
+    }
+
     /// V95 drops the eight tables the forge's first model lived in, and
     /// frees everything they pinned.
     ///
