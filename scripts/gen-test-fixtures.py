@@ -65,6 +65,9 @@ EXPECTED = [
     AUDIO_DIR / "tone.wav",
     AUDIO_DIR / "tone.flac",
     AUDIO_DIR / "tone.ogg",
+    AUDIO_DIR / "tone.aac",
+    AUDIO_DIR / "tone.opus",
+    AUDIO_DIR / "tone.aiff",
     IMAGE_DIR / "testcard.gif",
     IMAGE_DIR / "testcard.tiff",
     IMAGE_DIR / "testcard.bmp",
@@ -119,6 +122,16 @@ def gen_audio() -> None:
     # otherwise-mono sine has to be upmixed before it reaches it.
     ffmpeg("-f", "lavfi", "-i", SINE, "-ac", "2", "-c:a", "vorbis", "-strict", "-2",
            str(AUDIO_DIR / "tone.ogg"))
+    # The scanner's remaining three containers: a bare AAC stream, Opus
+    # in the Ogg container `.ogg` also uses (lofty reports it as its own
+    # file type rather than as Vorbis, so it is a second arm and needs a
+    # second fixture), and AIFF.
+    ffmpeg("-f", "lavfi", "-i", SINE, "-c:a", "aac", "-b:a", "64k",
+           str(AUDIO_DIR / "tone.aac"))
+    ffmpeg("-f", "lavfi", "-i", SINE, "-c:a", "libopus", "-b:a", "64k",
+           str(AUDIO_DIR / "tone.opus"))
+    ffmpeg("-f", "lavfi", "-i", SINE, "-c:a", "pcm_s16be",
+           str(AUDIO_DIR / "tone.aiff"))
 
 
 # --------------------------------------------------------------------

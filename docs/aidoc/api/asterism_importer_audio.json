@@ -5,7 +5,7 @@
     {
       "path": "asterism_importer_audio::parser",
       "kind": "module",
-      "docs": "Audio `RawItem` → `Footprint::Audio` parser.\n\nMetadata via `lofty` (pure-Rust, MIT). Covers MP3 / M4A (AAC in\nMP4) / WAV / FLAC / OGG (Vorbis + Opus) plus WavPack / APE /\nMPC / AIFF. Header-only reads — no decoding."
+      "docs": "Audio `RawItem` → `Footprint::Audio` parser.\n\nMetadata via `lofty` (pure-Rust, MIT). Header-only reads — no\ndecoding. `codec_slug` is the list of what this names, and it is the\nlist rather than a copy of it here: what a container is called comes\nback from that function, and a second enumeration in this header is\nthe one nobody edits when an arm is added."
     },
     {
       "path": "asterism_importer_audio::parser::AudioParser",

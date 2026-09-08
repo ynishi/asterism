@@ -303,6 +303,66 @@ pub const KNOWN_VIDEO_MIMES: &[&str] = &[
     "video/x-msvideo",
 ];
 
+/// Every `audio/*` value [`guess_mime`] can produce.
+///
+/// The same drift its two siblings were written for, running the other
+/// way round: the importer's scanner accepted extensions [`guess_mime`]
+/// could not name, so a FLAC or an OGG landed with `mime: None`. That is
+/// the "imported but invisible" shape [`KNOWN_IMAGE_MIMES`] describes,
+/// and for audio it is no player —
+/// [`render_policy`](crate::domain::render::render_policy) reads a
+/// missing format as text-like and offers a reader instead.
+///
+/// Their contract has a second half this one cannot borrow. Theirs is an
+/// infra-side test walking the list against the thumbnail route, and
+/// [`thumbnailable`](crate::domain::value::MimeType::thumbnailable) is
+/// image and video: audio has no raster to route, so there is nothing on
+/// the server for the list to be held against. What differs per audio
+/// format is decoding, and that is measured where the decoder is.
+///
+/// # An entry here is a claim about the family, not about the codec
+///
+/// Behaviour is decided by the family:
+/// [`MimeType::media`](crate::domain::value::MimeType::media) answers
+/// `Audio` for [`Other`](crate::domain::value::AudioFormat::Other) too,
+/// so naming a variant changes no call site by itself. What a name buys
+/// is one stored spelling per format — the property that lets this list
+/// be closed at all — and somewhere for a per-format answer to live.
+///
+/// So an entry admits a row to two things, both of them the family's: a
+/// player, and the chapter walk, which selects on `audio/%`.
+///
+/// **It does not claim the packaged webview can decode the bytes.** That
+/// is a separate measurement, and it costs more on this family than on
+/// video: the detail view draws the waveform by handing the bytes to the
+/// webview's own `decodeAudioData`, so a container the webview refuses
+/// loses the waveform as well as whatever the player makes of it. The
+/// claim about decoding is the one
+/// [`VideoFormat::webview_cannot_play`](crate::domain::value::VideoFormat::webview_cannot_play)
+/// makes for its family; membership here is the weaker statement that
+/// the format has a name.
+///
+/// # What the local tripwire reaches
+///
+/// A test in this module walks extensions through [`guess_mime`] into
+/// this list, so an arm added without an entry fails there.
+///
+/// It does not reach the scanner, whose extension list is not importable
+/// from here, so the test holds a transcription of that list rather than
+/// the list itself — which makes an extension added to the scanner alone
+/// invisible to every test here. The weakness is shared with the image
+/// and video tripwires, and closing it means giving the three lists a
+/// home both sides can import.
+pub const KNOWN_AUDIO_MIMES: &[&str] = &[
+    "audio/mpeg",
+    "audio/wav",
+    "audio/mp4",
+    "audio/flac",
+    "audio/ogg",
+    "audio/aac",
+    "audio/aiff",
+];
+
 /// Best-effort mime guess from a locator's file extension.
 ///
 /// A [`Record`](SourceLocator::Record) addresses one record *inside* a
@@ -374,6 +434,17 @@ pub fn guess_mime(locator: &SourceLocator) -> Option<MimeType> {
         "mp3" => MimeType::Audio(AudioFormat::Mpeg),
         "wav" => MimeType::Audio(AudioFormat::Wav),
         "m4a" => MimeType::Audio(AudioFormat::Mp4),
+        "flac" => MimeType::Audio(AudioFormat::Flac),
+        // Three spellings of one container: `.opus` is Opus inside Ogg,
+        // `.oga` the registered extension for the same container
+        // carrying anything else. A mime names the container, which is
+        // why they answer alike — see `AudioFormat::Ogg`.
+        "ogg" | "oga" | "opus" => MimeType::Audio(AudioFormat::Ogg),
+        // A bare AAC stream. `.m4a` is the same codec inside MP4 and
+        // answers `audio/mp4` above — two containers, two mimes, one
+        // codec.
+        "aac" => MimeType::Audio(AudioFormat::Aac),
+        "aiff" | "aif" => MimeType::Audio(AudioFormat::Aiff),
         "json" => MimeType::Json,
         "jsonl" | "md" | "txt" | "db" => MimeType::text_plain(),
         _ => return None,
@@ -603,6 +674,36 @@ mod tests {
             KNOWN_VIDEO_MIMES.len(),
             5,
             "a new entry here needs a matching guess_mime arm and an infra route"
+        );
+    }
+
+    #[test]
+    fn every_audio_extension_lands_inside_the_known_list() {
+        // The same local half as the two above, and the one that was
+        // missing while the scanner accepted nine audio extensions and
+        // `guess_mime` named three. An extension the importer walks past
+        // and this map cannot name imports with no format, which is no
+        // player.
+        //
+        // Transcribed from the scanner's `AUDIO_EXTENSIONS` rather than
+        // imported from it, plus `.aif`, the second spelling of the same
+        // format, which reaches `guess_mime` through `asset_add` rather
+        // than through the scanner. The copy is the known weakness of
+        // all three of these tests, and `KNOWN_AUDIO_MIMES` says what it
+        // would take to close it.
+        for ext in [
+            "mp3", "m4a", "wav", "flac", "ogg", "oga", "opus", "aac", "aiff", "aif",
+        ] {
+            let mime = guess_mime(&loc(&format!("take.{ext}"))).expect("an audio extension maps");
+            assert!(
+                KNOWN_AUDIO_MIMES.contains(&mime.as_str()),
+                "{mime} (from .{ext}) is missing from KNOWN_AUDIO_MIMES"
+            );
+        }
+        assert_eq!(
+            KNOWN_AUDIO_MIMES.len(),
+            7,
+            "a new entry here needs a matching guess_mime arm and an extension that reaches it"
         );
     }
 

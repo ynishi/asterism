@@ -596,9 +596,10 @@ pub enum PreviewMode {
 ///
 /// ## Why this is a type and not a `String`
 ///
-/// The set of formats this app *acts on* is closed — the two lists that
-/// used to state it ([`KNOWN_IMAGE_MIMES`] / [`KNOWN_VIDEO_MIMES`] in
-/// `material`) even carried tripwire tests to keep them closed. What
+/// The set of formats this app *acts on* is closed — the lists that
+/// used to state it ([`KNOWN_IMAGE_MIMES`] / [`KNOWN_VIDEO_MIMES`] /
+/// [`KNOWN_AUDIO_MIMES`] in `material`) even carried tripwire tests to
+/// keep them closed. What
 /// they could not do is make the call sites ask. With the mime held as
 /// a string, "is this an image" was answered by a `starts_with` at each
 /// site that cared, which meant a site that *should* have cared and did
@@ -714,6 +715,19 @@ pub enum AudioFormat {
     Wav,
     /// AAC in an MP4 container (`.m4a`).
     Mp4,
+    /// FLAC.
+    Flac,
+    /// An Ogg container (`.ogg`, `.oga`, `.opus`). The mime names the
+    /// container, which carries whichever codec it was given — Vorbis,
+    /// Opus, Speex, FLAC — so one variant answers for all of them. The
+    /// stream inside is named by the audio importer's `codec_slug`,
+    /// which reads the file rather than its extension.
+    Ogg,
+    /// AAC in its own stream (`.aac`), as against the same codec in an
+    /// MP4 container, which is [`Mp4`](Self::Mp4).
+    Aac,
+    /// AIFF.
+    Aiff,
     /// An `audio/*` subtype this codebase does not name.
     Other(Box<str>),
 }
@@ -757,6 +771,16 @@ impl MimeType {
             "audio/mpeg" => Self::Audio(AudioFormat::Mpeg),
             "audio/wav" => Self::Audio(AudioFormat::Wav),
             "audio/mp4" => Self::Audio(AudioFormat::Mp4),
+            "audio/flac" => Self::Audio(AudioFormat::Flac),
+            "audio/ogg" => Self::Audio(AudioFormat::Ogg),
+            "audio/aac" => Self::Audio(AudioFormat::Aac),
+            // Two spellings in, one out: `as_str` answers `audio/aiff`
+            // either way, which is the value `KNOWN_AUDIO_MIMES` holds.
+            // Reading the `x-` form as `Other` would behave identically
+            // at every call site — the family arm decides those — but it
+            // would round-trip a spelling that then sits outside a list
+            // whose whole point is to be closed.
+            "audio/aiff" | "audio/x-aiff" => Self::Audio(AudioFormat::Aiff),
             "application/json" => Self::Json,
             other => {
                 // The family still decides behaviour even when the
@@ -915,6 +939,10 @@ impl AudioFormat {
             Self::Mpeg => "audio/mpeg",
             Self::Wav => "audio/wav",
             Self::Mp4 => "audio/mp4",
+            Self::Flac => "audio/flac",
+            Self::Ogg => "audio/ogg",
+            Self::Aac => "audio/aac",
+            Self::Aiff => "audio/aiff",
             Self::Other(raw) => raw,
         }
     }
@@ -1603,11 +1631,12 @@ mod tests {
 
     #[test]
     fn every_known_mime_parses_to_a_named_variant() {
-        // The tripwire the two `KNOWN_*_MIMES` lists carried, moved to
-        // the type: a format named in the list but missing a parse arm
-        // would land in `Other` and lose whatever the named variant
-        // decides (PNG's content walk, WebM's rendition route).
-        use crate::domain::material::{KNOWN_IMAGE_MIMES, KNOWN_VIDEO_MIMES};
+        // The tripwire the `KNOWN_*_MIMES` lists carried, moved to the
+        // type: a format named in a list but missing a parse arm would
+        // land in `Other` and lose whatever the named variant decides
+        // (PNG's content walk, WebM's rendition route) — or, for audio,
+        // round-trip a spelling that then sits outside the list.
+        use crate::domain::material::{KNOWN_AUDIO_MIMES, KNOWN_IMAGE_MIMES, KNOWN_VIDEO_MIMES};
 
         for raw in KNOWN_IMAGE_MIMES {
             match MimeType::parse(raw) {
@@ -1626,6 +1655,36 @@ mod tests {
                 MimeType::Video(_) => {}
                 other => panic!("{raw} parsed as {other:?}, not a video"),
             }
+        }
+        for raw in KNOWN_AUDIO_MIMES {
+            match MimeType::parse(raw) {
+                MimeType::Audio(AudioFormat::Other(_)) => {
+                    panic!("{raw} is in KNOWN_AUDIO_MIMES but has no parse arm")
+                }
+                // Audio asks one thing more than its siblings, because
+                // AIFF has two spellings in and one out: a variant that
+                // stores itself as something other than the value the
+                // list holds puts the stored mime outside the list.
+                MimeType::Audio(f) => assert_eq!(
+                    f.as_str(),
+                    *raw,
+                    "{raw} parses to a variant that stores itself as {}",
+                    f.as_str(),
+                ),
+                other => panic!("{raw} parsed as {other:?}, not audio"),
+            }
+        }
+    }
+
+    #[test]
+    fn both_aiff_spellings_read_as_one_stored_format() {
+        // Both spellings name the same format, and a column that
+        // recorded either has to come back as the value the closed list
+        // holds.
+        for raw in ["audio/aiff", "audio/x-aiff"] {
+            let mime = MimeType::parse(raw);
+            assert_eq!(mime, MimeType::Audio(AudioFormat::Aiff));
+            assert_eq!(mime.as_str(), "audio/aiff");
         }
     }
 
