@@ -2,7 +2,8 @@
 //!
 //! One subcommand per source — Claude Code sessions, character cards,
 //! agent-harvest envelopes, arbitrary SQLite queries, persona-journal
-//! entries, tapes, and image / video / audio files. Every subcommand
+//! entries, tapes, image / video / audio files, and written documents.
+//! Every subcommand
 //! runs the same importer-SDK pipeline: walk the source, parse it into
 //! typed footprints, and push them in batches to a running
 //! `asterism-server` over HTTP (`--server`, default local). All imports
@@ -24,6 +25,7 @@ use asterism_importer_sdk::{
     Note, ParseError, RawItem, ScanMode, SourceParser, SqliteScanner, run_import,
 };
 use asterism_importer_tape::TapeParser;
+use asterism_importer_text::TextParser;
 use asterism_importer_video::VideoParser;
 use chrono::Utc;
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -52,6 +54,21 @@ const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "webm", "m4v", "mkv", "avi"];
 const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "m4a", "wav", "flac", "ogg", "opus", "oga", "aac", "aiff",
 ];
+/// The spellings a person writes a document in, out of the four
+/// `guess_mime` names `text/plain`.
+///
+/// Deliberately not `.markdown`, and the reason is #259's first rung:
+/// the map has to name every extension a scanner accepts, or a file
+/// imports with no format at all. That makes the map's four the ceiling
+/// and not the list. `.jsonl` and `.db` are the two left out — a file
+/// records are read out of, with importers of their own, rather than a
+/// file that is one document.
+///
+/// `.txt` is also the tape route's extension, and that overlap is
+/// deliberate rather than settled here: a terminal transcript and a
+/// note are different things wearing one suffix, and which one a
+/// directory holds is what picking the subcommand says.
+const TEXT_EXTENSIONS: &[&str] = &["md", "txt"];
 
 #[derive(Debug, Parser)]
 #[command(
@@ -85,6 +102,8 @@ enum Command {
     Video(MediaArgs),
     /// Import audio files and their metadata.
     Audio(MediaArgs),
+    /// Import Markdown or plain-text files, one document per file.
+    Text(TextArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -227,6 +246,28 @@ struct MediaArgs {
     /// their return trips deserve the same waiting-room.
     #[arg(long)]
     watch: bool,
+}
+
+/// No `watch`, and the reason is not that re-running would do instead.
+/// It would not: `AssetService::add` returns the row already held for a
+/// `(persona, source_kind, locator)` and stops there, above the index
+/// rebuild and the hash, so a second arrival of an edited document
+/// changes nothing. What this route does is bring a document in; that
+/// it does not keep one current is a limitation rather than a schedule.
+///
+/// Watching would not close that either — it would call `add` more
+/// often against the same guard. What would is a route that means "this
+/// file changed", which is a different verb from this one.
+#[derive(Debug, Clone, Args)]
+struct TextArgs {
+    #[command(flatten)]
+    common: CommonArgs,
+    #[arg(long)]
+    dir: PathBuf,
+    #[arg(long)]
+    platform: Option<String>,
+    #[arg(long)]
+    source_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -454,6 +495,13 @@ async fn main() -> anyhow::Result<()> {
                 args.common.options(),
             )
             .await
+        }
+        Command::Text(args) => {
+            let scanner = FsScanner::new(args.dir)
+                .with_extensions(TEXT_EXTENSIONS.iter().copied())
+                .with_source_kind(args.source_kind.unwrap_or_else(|| "text".into()));
+            let parser = TextParser::new(args.platform);
+            run("text", &scanner, &parser, false, args.common.options()).await
         }
     }
 }

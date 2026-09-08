@@ -346,9 +346,9 @@ pub const KNOWN_VIDEO_MIMES: &[&str] = &[
 /// It does not reach the scanner, whose extension list is not importable
 /// from here, so the test holds a transcription of that list rather than
 /// the list itself — which makes an extension added to the scanner alone
-/// invisible to every test here. The weakness is shared with the image
-/// and video tripwires, and closing it means giving the three lists a
-/// home both sides can import.
+/// invisible to every test here. The weakness is shared with every other
+/// scanner list, and closing it means giving them a home both sides can
+/// import.
 pub const KNOWN_AUDIO_MIMES: &[&str] = &[
     "audio/mpeg",
     "audio/wav",
@@ -703,6 +703,28 @@ mod tests {
              it, and a case in the desktop e2e suite's decode spec — the webview's \
              answer for a format is measured, never assumed"
         );
+    }
+
+    #[test]
+    fn every_document_extension_the_scanner_walks_answers_text_plain() {
+        // The fourth scanner list, and the one with no `KNOWN_*` list of
+        // its own: the document route emits `Footprint::Doc`, and what
+        // decides the row's format is this map alone. The tripwire it
+        // still needs is the same one the other three have — an
+        // extension the scanner accepts and this map cannot name imports
+        // with no format at all, which for a document is no body in the
+        // search index rather than no player.
+        //
+        // Transcribed from `TEXT_EXTENSIONS` in `asterism-importer` for
+        // the reason the three above are: that crate is a binary and
+        // exports nothing.
+        for ext in ["md", "txt"] {
+            assert_eq!(
+                guess_mime(&loc(&format!("note.{ext}"))),
+                Some(MimeType::text_plain()),
+                ".{ext} is a document route extension and has to answer text/plain"
+            );
+        }
     }
 
     #[test]
