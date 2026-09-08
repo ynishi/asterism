@@ -156,6 +156,29 @@ and this project adheres to
 
 ### Fixed
 
+- **Six of the nine audio extensions the importer accepts arrived with no format
+  at all** (#259). The scanner walks `.mp3`, `.m4a`, `.wav`, `.flac`, `.ogg`,
+  `.oga`, `.opus`, `.aac` and `.aiff`; the mime map named the first three. A
+  FLAC or an OGG therefore landed with nothing recorded about what it was, and a
+  missing format is not a quieter version of the fact — the render policy reads
+  it to decide what a surface may do with the bytes, so the row arrived and then
+  sat there with a text reader over it instead of a player. All nine are named
+  now: `.oga` and `.opus` read as the Ogg container they are, `.aac` as a bare
+  AAC stream against `.m4a`'s same codec inside MP4, and AIFF stores as
+  `audio/aiff` while still reading the `audio/x-aiff` spelling. The audio parser
+  gained the bare-AAC arm it was missing, so a `.aac` records which codec it
+  carries instead of arriving with a format and nothing else. Every container
+  the scanner accepts has a fixture now: `.aac`, `.opus` and `.aiff` reached the
+  scanner while no test in the tree had ever opened one, so the arms answering
+  for them could have said anything and stayed green. Naming a format also puts
+  the row in the chapter walk, which selects on `audio/%`. **What this does not
+  settle is whether the packaged webview can decode what these formats hold.**
+  The detail view draws its waveform by handing the bytes to the webview's own
+  decoder, so a container the webview refuses loses the waveform as well as
+  whatever the player makes of it; the video side answers that question with a
+  measurement, and this side is named without one. Files already in a library
+  keep the format they have — repairing the rows that recorded none is its own
+  change.
 - **The six sentences a team-plane write leaves behind name who and which team
   too.** Inviting, removing, granting or revoking owner, leaving and deleting a
   team all set the toast under the drawer to a sentence naming a raw `userId` or
