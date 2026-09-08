@@ -313,12 +313,13 @@ pub const KNOWN_VIDEO_MIMES: &[&str] = &[
 /// [`render_policy`](crate::domain::render::render_policy) reads a
 /// missing format as text-like and offers a reader instead.
 ///
-/// Their contract has a second half this one cannot borrow. Theirs is an
-/// infra-side test walking the list against the thumbnail route, and
+/// Their contract's second half is an infra-side test walking the list
+/// against the thumbnail route, and this one cannot borrow it:
 /// [`thumbnailable`](crate::domain::value::MimeType::thumbnailable) is
-/// image and video: audio has no raster to route, so there is nothing on
-/// the server for the list to be held against. What differs per audio
-/// format is decoding, and that is measured where the decoder is.
+/// image and video, so audio has no raster to route and nothing on the
+/// server to be held against. What differs per audio format is decoding,
+/// so audio's second half is measured where the decoder is — the desktop
+/// e2e suite, in a real window (`crates/asterism-ui/e2e/`).
 ///
 /// # An entry here is a claim about the family, not about the codec
 ///
@@ -332,15 +333,10 @@ pub const KNOWN_VIDEO_MIMES: &[&str] = &[
 /// So an entry admits a row to two things, both of them the family's: a
 /// player, and the chapter walk, which selects on `audio/%`.
 ///
-/// **It does not claim the packaged webview can decode the bytes.** That
-/// is a separate measurement, and it costs more on this family than on
-/// video: the detail view draws the waveform by handing the bytes to the
-/// webview's own `decodeAudioData`, so a container the webview refuses
-/// loses the waveform as well as whatever the player makes of it. The
-/// claim about decoding is the one
-/// [`VideoFormat::webview_cannot_play`](crate::domain::value::VideoFormat::webview_cannot_play)
-/// makes for its family; membership here is the weaker statement that
-/// the format has a name.
+/// Whether the packaged webview can decode the bytes underneath that
+/// player is a separate question, and it is answered on
+/// [`AudioFormat`](crate::domain::value::AudioFormat), which carries the
+/// measurement and the terms it was taken on.
 ///
 /// # What the local tripwire reaches
 ///
@@ -703,8 +699,77 @@ mod tests {
         assert_eq!(
             KNOWN_AUDIO_MIMES.len(),
             7,
-            "a new entry here needs a matching guess_mime arm and an extension that reaches it"
+            "a new entry here needs a matching guess_mime arm, an extension that reaches \
+             it, and a case in the desktop e2e suite's decode spec — the webview's \
+             answer for a format is measured, never assumed"
         );
+    }
+
+    #[test]
+    fn every_known_audio_mime_has_a_case_in_the_decode_measurement() {
+        // The second half of this list's tripwire, and the one its
+        // siblings answer differently. Theirs is a thumbnail route, so
+        // theirs is asserted in infra; audio has no raster and what
+        // differs per format is decoding, so this list is held against
+        // the spec that measures the decoder in a real window.
+        //
+        // Read as text, because that spec is TypeScript. It is also not
+        // a cross-member read the registry can carry: the workspace
+        // member is `crates/asterism-ui/src-tauri`, so `e2e/` sits
+        // outside every member and `scripts/cross-member-readers.txt`
+        // has no prefix that reaches it.
+        //
+        // The binding is therefore one-directional, and that is the
+        // direction that matters. Naming an eighth format means editing
+        // this file, so `changed-packages` selects this crate and this
+        // test runs: an entry cannot land with no measurement behind
+        // it. A case deleted from the spec alone selects no Rust crate,
+        // and is caught by `main`'s full run one merge later — the same
+        // backstop the workspace relies on for a dependent broken
+        // without being touched.
+        //
+        // The length assertion above catches a missing entry; this
+        // catches a missing *answer*, which is the failure that would
+        // otherwise reach a person as a player that does not play.
+        use std::collections::BTreeSet;
+
+        const SPEC: &str = "crates/asterism-ui/e2e/webview-audio-decode.spec.ts";
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("the workspace root sits two above this crate");
+        let text = std::fs::read_to_string(root.join(SPEC))
+            .unwrap_or_else(|err| panic!("{SPEC} could not be read ({err})"));
+
+        // The spec's case table is the only place that spells `mime: "`
+        // — its own report helper takes `mime: string`, which this does
+        // not match.
+        let measured: BTreeSet<&str> = text
+            .lines()
+            .filter_map(|line| line.split_once("mime: \""))
+            .filter_map(|(_, rest)| rest.split('"').next())
+            .collect();
+        assert!(
+            !measured.is_empty(),
+            "no cases found in {SPEC} — the shape this test reads has moved, and a test \
+             that parses a file it no longer understands passes for the wrong reason"
+        );
+
+        for mime in KNOWN_AUDIO_MIMES {
+            assert!(
+                measured.contains(mime),
+                "{mime} is named here but no case in {SPEC} measures it — a format this \
+                 app records is a player it promises, and nothing has asked the webview \
+                 whether it can decode one"
+            );
+        }
+        for mime in &measured {
+            assert!(
+                KNOWN_AUDIO_MIMES.contains(mime),
+                "{SPEC} measures {mime}, which this list does not name — either the list \
+                 lost an entry or the spec is measuring something this app never records"
+            );
+        }
     }
 
     #[test]
