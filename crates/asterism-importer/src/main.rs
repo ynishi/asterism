@@ -85,7 +85,7 @@ struct Cli {
 enum Command {
     /// Import Claude Code JSONL sessions.
     Cc(CcArgs),
-    /// Import character-card PNG or JSON files.
+    /// Import character-card PNG, JSON or `.charx` files.
     Chara(CharaArgs),
     /// Import canonical agent-harvest JSON envelopes.
     Harvest(HarvestArgs),

@@ -16,40 +16,45 @@
 //!   this time.
 //! - `Some(Ok(bytes))` — the bytes.
 //!
-//! ## Which containers open
+//! ## Which containers open, and which of their records
 //!
 //! A [`Record`](SourceLocator::Record) is a container plus an address
-//! inside it, and `SourceLocator::local_path` refuses to hand over the
-//! container on the record's behalf — a thousand-line log would answer
-//! every line with the whole file, which is one fingerprint repeated a
-//! thousand times. That reasoning holds for a record whose bytes *are*
-//! the container's: a JSONL line is text the importer already carried,
-//! and there is nothing else in the file that belongs to it alone.
+//! inside it, and most such records have no bytes of their own.
+//! `ContainerRecord::holds_its_own_bytes` is the question, and its
+//! docstring says which shapes answer yes and why the container is not
+//! opened on the others' behalf.
 //!
-//! A ZIP entry is the other case. It has bytes of its own, at a known
-//! offset, and reading it yields those and nothing else. So the opening
-//! is per container shape rather than blanket, and [`opens_for_records`]
-//! is the whole list: `.charx`, the character-card archive. A plain
-//! `.zip` is not on it and is never handed here — an archive is not
-//! opened because it is an archive.
+//! A shape answering `true` there is not the whole test. A card
+//! archive addresses two kinds of thing with one spelling: the entries
+//! it packs (`#assets/icon/images/main.png`) and the slots the card
+//! states (`#field=name`), and only the first names bytes. Which is
+//! which is a question only the archive can answer, so this module
+//! asks it — an address the archive does not hold reads as `None`,
+//! the permanent answer, rather than as a read that failed. Retrying a
+//! slot suffix on every backfill pass, forever, is the walk that never
+//! shrinks.
+//!
+//! ## The ceiling
+//!
+//! An entry states its own uncompressed length and the file it sits in
+//! was written by somebody else, so the length is a claim rather than a
+//! fact. [`MAX_ENTRY_BYTES`] is the ceiling the read is held to, and an
+//! entry over it is refused rather than allocated for — the same
+//! judgement `fingerprint::hash_artefact` makes about a file it is
+//! asked to hold whole.
 
 use std::io;
 use std::path::Path;
 
 use asterism_core::domain::source_locator::SourceLocator;
 
-/// Whether a container's shape is one whose records can be read out of
-/// it.
+/// The most an entry is read into memory, at 64 MiB.
 ///
-/// Extension-keyed, like `source_text`'s reader dispatch. The list is
-/// short on purpose: a shape joins it when something files records
-/// inside that shape, not because the format could be opened.
-pub fn opens_for_records(container: &Path) -> bool {
-    container
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("charx"))
-}
+/// The same ceiling the content walk holds a file to
+/// (`MAX_CONTENT_WALK_BYTES`), and for the same reason: the buffer is
+/// this process's memory, and what is on the other side of the number
+/// is a picture nobody put in a character card.
+pub const MAX_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
 
 /// The bytes this locator addresses.
 ///
@@ -59,46 +64,68 @@ pub fn opens_for_records(container: &Path) -> bool {
 pub async fn read(locator: &SourceLocator) -> Option<io::Result<Vec<u8>>> {
     match locator {
         SourceLocator::File(path) => Some(tokio::fs::read(path.as_path()).await),
-        SourceLocator::Record(record) => {
-            let container = record.container().as_path();
-            if !opens_for_records(container) {
-                return None;
-            }
-            let container = container.to_path_buf();
+        SourceLocator::Record(record) if record.holds_its_own_bytes() => {
+            let container = record.container().as_path().to_path_buf();
             let entry = record.record().as_str().to_string();
-            // `zip` is a blocking reader over a seeking file, and the
-            // entry is inflated in full before it is handed back.
-            let read = tokio::task::spawn_blocking(move || entry_bytes(&container, &entry)).await;
-            Some(match read {
-                Ok(result) => result,
-                Err(join) => Err(io::Error::other(join)),
-            })
+            // Blocking: `zip` seeks the file it is handed, and the
+            // entry is inflated before it is returned.
+            match tokio::task::spawn_blocking(move || entry_bytes(&container, &entry)).await {
+                Ok(read) => read,
+                Err(join) => Some(Err(io::Error::other(join))),
+            }
         }
-        SourceLocator::Remote(_) | SourceLocator::Logical(_) => None,
+        SourceLocator::Record(_) | SourceLocator::Remote(_) | SourceLocator::Logical(_) => None,
     }
 }
 
 /// Opens the archive and inflates one entry.
 ///
-/// A missing entry is [`NotFound`](io::ErrorKind::NotFound) rather than
-/// a distinct answer: a locator naming an entry the archive does not
-/// hold is the same shape of problem as a path naming a file that is
-/// not there, and both deserve the later pass that a re-import would
-/// settle.
-fn entry_bytes(container: &Path, entry: &str) -> io::Result<Vec<u8>> {
+/// `None` when the archive holds no such entry: the address is a slot
+/// the card states rather than a file it packs, or a picture that was
+/// never packed, and neither becomes bytes on a later pass. An archive
+/// that cannot be opened at all is `Some(Err(_))` — that one is a
+/// disk saying no, which is a different sentence.
+fn entry_bytes(container: &Path, entry: &str) -> Option<io::Result<Vec<u8>>> {
+    entry_bytes_within(container, entry, MAX_ENTRY_BYTES)
+}
+
+/// [`entry_bytes`] with the ceiling as an argument, so a test can put a
+/// real entry on the far side of it without writing 64 MiB — the shape
+/// `fingerprint::hash_artefact` takes `max_walk` in, and for the same
+/// reason.
+fn entry_bytes_within(container: &Path, entry: &str, ceiling: u64) -> Option<io::Result<Vec<u8>>> {
     use std::io::Read as _;
 
-    let file = std::fs::File::open(container)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(io::Error::other)?;
-    let mut member = archive.by_name(entry).map_err(|err| match err {
-        zip::result::ZipError::FileNotFound => {
-            io::Error::new(io::ErrorKind::NotFound, format!("no entry {entry:?}"))
-        }
-        other => io::Error::other(other),
-    })?;
-    let mut bytes = Vec::with_capacity(member.size() as usize);
-    member.read_to_end(&mut bytes)?;
-    Ok(bytes)
+    let file = match std::fs::File::open(container) {
+        Ok(file) => file,
+        Err(err) => return Some(Err(err)),
+    };
+    let mut archive = match zip::ZipArchive::new(file) {
+        Ok(archive) => archive,
+        Err(err) => return Some(Err(io::Error::other(err))),
+    };
+    let mut member = match archive.by_name(entry) {
+        Ok(member) => member,
+        Err(zip::result::ZipError::FileNotFound) => return None,
+        Err(err) => return Some(Err(io::Error::other(err))),
+    };
+    if member.size() > ceiling {
+        return Some(Err(io::Error::other(format!(
+            "entry {entry:?} states {} bytes, over the {ceiling}-byte ceiling",
+            member.size()
+        ))));
+    }
+    // Read under the ceiling rather than to the length the entry
+    // claims: the claim is the archive's, and a wrong one would be this
+    // process's memory.
+    let mut bytes = Vec::new();
+    match member.by_ref().take(ceiling + 1).read_to_end(&mut bytes) {
+        Ok(_) if bytes.len() as u64 > ceiling => Some(Err(io::Error::other(format!(
+            "entry {entry:?} runs past the {ceiling}-byte ceiling"
+        )))),
+        Ok(_) => Some(Ok(bytes)),
+        Err(err) => Some(Err(err)),
+    }
 }
 
 #[cfg(test)]
@@ -149,19 +176,53 @@ mod tests {
         );
     }
 
+    /// The answer that keeps a walk shrinking. A card addresses its own
+    /// slots with the same spelling as its entries, and both reach
+    /// here; if a slot read as "not just now" every backfill pass would
+    /// pick it up again and every one would fail.
     #[tokio::test]
-    async fn an_entry_the_archive_does_not_hold_is_a_later_pass() {
+    async fn an_address_the_archive_does_not_hold_is_never_rather_than_later() {
         let dir = tempfile::tempdir().unwrap();
         let card = dir.path().join("lyra.charx");
         charx_at(&card, &[("card.json", b"{}")]);
 
-        let outcome = read(&record_at(&card, "assets/icon/images/main.png"))
-            .await
-            .expect("the container opens, so this is not 'never'");
+        assert!(
+            read(&record_at(&card, "field=name")).await.is_none(),
+            "a slot the card states is not a file it packs"
+        );
+        assert!(
+            read(&record_at(&card, "assets/icon/images/main.png"))
+                .await
+                .is_none(),
+            "a picture the card names and the packer left out is not coming later"
+        );
+    }
+
+    /// An archive states its own entry lengths and was written by
+    /// somebody else, so the ceiling is what the read is held to rather
+    /// than the number in the file.
+    #[test]
+    fn an_entry_over_the_ceiling_is_refused_rather_than_allocated_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let card = dir.path().join("big.charx");
+        charx_at(&card, &[("assets/icon/images/main.png", &[0u8; 4096])]);
+        let entry = "assets/icon/images/main.png";
+
+        let refused = entry_bytes_within(&card, entry, 1024)
+            .expect("the entry is in there")
+            .expect_err("4096 bytes do not fit under 1024");
+        assert!(
+            refused.to_string().contains("ceiling"),
+            "the refusal says what it was: {refused}"
+        );
+
         assert_eq!(
-            outcome.unwrap_err().kind(),
-            io::ErrorKind::NotFound,
-            "missing entry defers like a missing file, rather than retiring the row"
+            entry_bytes_within(&card, entry, 8192)
+                .unwrap()
+                .unwrap()
+                .len(),
+            4096,
+            "and the same entry under the ceiling comes back whole"
         );
     }
 

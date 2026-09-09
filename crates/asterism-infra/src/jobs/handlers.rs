@@ -1511,17 +1511,19 @@ pub async fn thumb_gen(env: &JobEnv, payload: &serde_json::Value) -> Result<Stri
     // have no bytes of their own at all (`shot.png#workflow` — a PNG
     // tEXt note); handing a decoder a path for one failed every such
     // job forever [measured 2026-07-31: 2785 failed rows in the dogfood
-    // job_log]. `guess_mime` now answers `text/plain` for these and the
+    // job_log]. `guess_mime` answers `text/plain` for those and the
     // policy above stops them, but a future classification slip must
     // not be able to reopen a failure loop this cheap to close.
     //
-    // A record in a container that opens — a picture inside a `.charx`
-    // card — is the exception, and it is spilled rather than passed
-    // along: every route below takes a path because Quick Look and
-    // ffmpeg are processes that open one. A thumbnail is derived state
-    // already, and the temporary is dropped at the end of this call, so
-    // this is not the second copy of the library that addressing the
-    // entries exists to avoid.
+    // A record a container hands out whole — a picture inside a
+    // `.charx` card — is the exception, and it reaches here because
+    // `guess_mime` reads such an entry through its own address, so the
+    // policy above says yes to a PNG in a card the way it does to one
+    // beside it. It is spilled rather than passed along: every route
+    // below takes a path, because Quick Look and ffmpeg are processes
+    // that open one. A thumbnail is derived state already, and the
+    // temporary is dropped in this call, so this is not the second copy
+    // of the library that addressing the entries exists to avoid.
     let spilled = match &asset.source.locator {
         SourceLocator::Record(_) => {
             match crate::material_bytes::read(&asset.source.locator).await {
@@ -1534,13 +1536,19 @@ pub async fn thumb_gen(env: &JobEnv, payload: &serde_json::Value) -> Result<Stri
                     })?;
                     Some(file)
                 }
-                // The entry was not readable this time. Left for a later
-                // pass rather than recorded, which is what every other
-                // reader of an original does with a temporary failure.
+                // The entry was not readable this time. Said and left,
+                // the way the encode, measure and dims walks each leave
+                // a temporary failure: an `Err` here would be a
+                // `failed` row in the job log, which is the ledger the
+                // comment above cites as the thing not to fill.
                 Some(Err(err)) => {
-                    return Err(DomainError::Infra(anyhow::anyhow!(
-                        "thumb source unreadable: {err}"
-                    )));
+                    tracing::warn!(
+                        event = "job.thumb.unreadable",
+                        locator = %asset.source.locator.to_display(),
+                        error = %err,
+                        "thumb source unreadable; left for a later pass"
+                    );
+                    return Ok("source unreadable, left for a later pass".into());
                 }
                 None => None,
             }
@@ -1644,10 +1652,13 @@ pub async fn preview_gen(env: &JobEnv, payload: &serde_json::Value) -> Result<St
     if !asterism_core::domain::render::needs_video_preview(mime.as_ref()) {
         return Ok("plays natively, no rendition needed, skipped".into());
     }
-    // Same locator-side guard as `thumb_gen`: the transcoder opens a
-    // file, and a record names something inside a container rather than
-    // a file of its own. Cheaper to refuse here than to let a mime slip
-    // turn into a `.failed` marker the pane reports forever.
+    // The locator-side guard `thumb_gen` used to share: the transcoder
+    // opens a file, and a record names something inside a container
+    // rather than a file of its own. Cheaper to refuse here than to let
+    // a mime slip turn into a `.failed` marker the pane reports
+    // forever. `thumb_gen` spills a card-archive entry to a temporary
+    // and goes on; nothing packs a video in a character card, so this
+    // one stays as it is until something does.
     let Some(src_path) = asset.source.locator.local_path() else {
         return Ok("no file of its own, no rendition possible, skipped".into());
     };
@@ -1881,7 +1892,8 @@ async fn material_hash_batch(
     }
     // Chain only on a full page. A short page is the end of the walk,
     // and re-enqueueing on it would spin forever over the materials
-    // that can never be hashed (container records, dead files) — they
+    // that can never be hashed (a record no container hands out, dead
+    // files) — they
     // stay NULL by design, so "nothing was hashed" is not a stop
     // condition, "nothing was scanned" is.
     if full {
@@ -2546,9 +2558,9 @@ async fn asset_dims_batch(
 /// to read.
 ///
 /// Three ways to get `None`, and the job treats them alike because the
-/// column does: no local bytes (a container record, a remote locator),
-/// bytes that could not be read, and bytes no probe recognises (a text
-/// note, an AVI).
+/// column does: no local bytes (a remote locator, a record no container
+/// hands out), bytes that could not be read, and bytes no probe
+/// recognises (a text note, an AVI).
 ///
 /// **Both branches go through `asterism-media-probe`,** which is what
 /// the importers measure through — that is the reason the crate was
@@ -2574,8 +2586,9 @@ async fn asset_dims_batch(
 ///
 /// # Three outcomes, and the middle one is the reason for the enum
 ///
-/// - **No local bytes** — a container record, a remote locator. Nothing
-///   will ever be readable there, so it is `NothingToMeasure`.
+/// - **No local bytes** — a remote locator, or a record naming nothing
+///   a container hands out. Nothing will ever be readable there, so it
+///   is `NothingToMeasure`.
 /// - **Bytes read, no dimensions in them** — a text note, an AVI.
 ///   Also `NothingToMeasure`.
 /// - **Bytes not readable right now** — an unmounted volume, a file
@@ -2586,11 +2599,13 @@ async fn asset_dims_batch(
 /// replaced, so a library on an external disk measured once while the
 /// disk was out would have been marked permanently unmeasurable.
 async fn probe_dims(locator: &SourceLocator) -> DimsProbe {
-    // A record inside a container that opens is measured from the
-    // entry's own bytes. The "path, not the bytes" rule above is about
-    // not making the peak allocation the size of the largest artefact
-    // in the library; an entry has to be inflated in full to be read at
-    // all, so there is no incremental form of it to prefer.
+    // A record inside a container that hands out its entries is
+    // measured from the entry's own bytes. The "path, not the bytes"
+    // rule above is about not making the peak allocation the size of
+    // the largest artefact in the library, and it is kept rather than
+    // broken here: an entry is inflated, so the incremental forms would
+    // each inflate it again, and what bounds the buffer is the reader's
+    // own ceiling rather than the ceiling a probe stops short of.
     if let SourceLocator::Record(_) = locator {
         return match crate::material_bytes::read(locator).await {
             None => DimsProbe::NothingToMeasure,
@@ -2708,10 +2723,10 @@ enum ChapterOutcome {
 /// # A locator with no local bytes files an empty band
 ///
 /// The same judgement `probe_dims` records for the same shape of row: a
-/// container record or a remote locator names no place bytes will ever
-/// appear, so "nothing to read" is a permanent answer rather than a
-/// deferred one, and filing it is what keeps the walk from re-offering
-/// the row on every pass. It is the one case where an empty band means
+/// remote locator, or a record no container hands out, names no place
+/// bytes will ever appear, so "nothing to read" is a permanent answer
+/// rather than a deferred one, and filing it is what keeps the walk
+/// from re-offering the row on every pass. It is the one case where an empty band means
 /// "there was nothing to read" instead of "the file declares nothing",
 /// and the two are indistinguishable to a reader — which is acceptable
 /// because both mean the same thing to a surface: no chapters.
@@ -2981,19 +2996,10 @@ async fn hash_material(
     mime: Option<&MimeType>,
     origin: DetectionOrigin,
 ) -> HashOutcome {
-    // The one question, and it returns the path rather than a `bool`.
-    // The predicate this replaced answered `true` for every `file://`
-    // locator and then handed the *spelling* to `File::open`, which is
-    // not a path: the open failed, no marker was written, and the row
-    // came back on the next backfill pass and the one after that. Here
-    // `file:///pics/a.png` has already become the path it names, and
-    // `file://pics/a.png` — rootless, openable by nobody — takes the
-    // marker branch below and leaves the walk.
     // Where the bytes are, in the shape the fingerprint wants them. A
     // file is streamed by path, which is what keeps a 4 GB video from
-    // becoming a 4 GB buffer; a record inside a container that opens is
-    // inflated whole because that is the only way an entry is read at
-    // all.
+    // becoming a 4 GB buffer; an entry a container hands out is
+    // inflated, because that is the only way one is read at all.
     enum Bytes {
         Path(String),
         Held(Vec<u8>),
@@ -3005,6 +3011,14 @@ async fn hash_material(
             Some(Err(err)) => Some(Bytes::Unreadable(err)),
             None => None,
         },
+        // The path the type gives, not the string the column held. The
+        // predicate this replaced answered `true` for every `file://`
+        // locator and then handed the *spelling* to `File::open`, which
+        // is not a path: the open failed, no marker was written, and the
+        // row came back on the next backfill pass and the one after
+        // that. Here `file:///pics/a.png` has already become the path it
+        // names, and `file://pics/a.png` — rootless, openable by
+        // nobody — takes the marker branch below and leaves the walk.
         _ => locator
             .local_path()
             .map(|path| Bytes::Path(path.to_string_lossy().into_owned())),
@@ -3047,7 +3061,6 @@ async fn hash_material(
     };
     let claimed = mime.cloned();
     let read = match source {
-        // The path the type gives, not the string the column held.
         Bytes::Path(path) => {
             tokio::task::spawn_blocking(move || {
                 hash_artefact(&path, claimed.as_ref(), MAX_CONTENT_WALK_BYTES)
@@ -3253,9 +3266,12 @@ pub async fn disclosure_stamp(
     // because nothing had one to pass.
     let dispatch_id = dispatch_id_of(&asset.extra);
     let Some(path) = asset.source.locator.local_path() else {
-        // A container record or a remote locator has no file to write
-        // into. An answer, not a failure — the same reading the hashing
-        // walk gives the same locator.
+        // A remote locator, or a record with no file of its own, has
+        // nothing to write into. An answer, not a failure. The hashing
+        // walk now reads further than this one — it takes an entry out
+        // of a card archive — and the difference is the point: a
+        // disclosure is stamped into the bytes, and the bytes here are
+        // inside somebody else's container.
         return Ok("no local file, skipped".into());
     };
 

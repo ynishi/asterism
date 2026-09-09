@@ -10,24 +10,24 @@ and this project adheres to
 
 ### Added
 
-- **A character card can arrive as `.charx`** (#269). The third container for
-  the same card, beside the PNG with a chunk in it and the standalone JSON — and
-  the only one where the pictures travel with the card rather than pointing
-  somewhere else. It decomposes exactly as the other two do: the name and the
-  description and the scenario become notes, the greetings become messages, the
-  lorebook entries become notes, and the icon, the background and every emotion
-  in the archive become images filed under the card. The pictures are addressed
-  rather than unpacked. A locator already had a shape for one record inside a
-  container, so an entry is named where it sits and its bytes are read out of
-  the archive when something wants them — a thumbnail, a dimension, a
-  fingerprint. Unpacking into a folder was the alternative and it is what
-  preservation systems do; it also leaves a second copy of every picture, a note
-  saying where the copy came from, and a rule for what happens when one of the
-  two is deleted. A card is a handful of images inside a file somebody already
-  has. A card naming a picture that was never packed keeps pointing at the card
-  rather than at an entry that is not there. **A plain `.zip` is not this**: an
-  archive is not opened for being an archive, and one handed to any route stays
-  one file — `.charx` is opened because the card format says what is inside it.
+- **A character card can arrive as `.charx`** (#269). Another container for the
+  same card, beside the PNG with a chunk in it and the standalone JSON — and the
+  one where the pictures travel with the card rather than pointing somewhere
+  else. It decomposes exactly as the other two do: the name and the description
+  and the scenario become notes, the greetings become messages, the lorebook
+  entries become notes, and the icon, the background and every emotion the card
+  lists become images filed under it. The pictures are addressed rather than
+  unpacked. A locator already had a shape for one record inside a container, so
+  an entry is named where it sits and its bytes are read out of the archive when
+  something wants them — a thumbnail, a dimension, a fingerprint. Unpacking into
+  a folder was the alternative and it is what preservation systems do; it also
+  leaves a second copy of every picture, a note saying where the copy came from,
+  and a rule for what happens when one of the two is deleted. A card is a
+  handful of images inside a file somebody already has. A card naming a picture
+  that was never packed keeps pointing at the card rather than at an entry that
+  is not there. **A plain `.zip` is not this**: an archive is not opened for
+  being an archive, and one handed to any route stays one file — `.charx` is
+  opened because the card format says what is inside it.
 - **A document can be handed over as itself** (#259). Everything a written file
   needed was already here — hand `asset_add` a path to a `.md` and the map calls
   it `text/plain`, which is a format the body cache accepts, so the words reach

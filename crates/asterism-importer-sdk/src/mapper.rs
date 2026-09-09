@@ -154,9 +154,12 @@ pub struct AssetSpec {
     /// from the claim.
     ///
     /// `None` is the right answer for anything whose locator has no
-    /// bytes of its own — one record inside a container file, a remote
-    /// address, a caller-minted name. The server refuses a declaration
-    /// on those, because nothing would ever check it.
+    /// bytes of its own — a record whose bytes are its container's, a
+    /// remote address, a caller-minted name. The server refuses a
+    /// declaration on those, because nothing would ever check it. An
+    /// entry a container hands out whole (a picture inside a `.charx`
+    /// card) is not one of them: the hashing walk reads it, so a
+    /// declaration about one is checked like any other.
     ///
     /// **The pipeline fills this in for you**, and the two conditions
     /// it fills it under are the ones above stated as code: the scanner

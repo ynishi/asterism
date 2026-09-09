@@ -96,13 +96,10 @@ x509-parser = { workspace = true }
 # until the provenance writer's own temporary was found to be a
 # deterministic sibling opened with neither.
 tempfile = "3"
-# Reading one entry out of a card archive (`material_bytes`). Already
-# in the lock through `c2pa`; naming it here adds an edge rather than a
-# crate.
-#
-# `deflate` only, matching the importer side: the archives this opens
-# are the ones that importer wrote footprints for.
-zip = { version = "8", default-features = false, features = ["deflate"] }
+# Reading one entry out of a card archive (`material_bytes`). Same
+# entry as the importer's, from `[workspace.dependencies]`: the
+# archives this opens are the ones that importer wrote footprints for.
+zip = { workspace = true }
 # The use side of the visual features (#112, #250). Linked
 # unconditionally since #250, because the perceptual fingerprint needs
 # no model, no download and no `ort` — it is pixels and arithmetic, and

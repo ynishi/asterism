@@ -1,6 +1,6 @@
 //! `.charx` — a V3 card and its assets inside one ZIP.
 //!
-//! The third container for the same card, beside the PNG tEXt chunk and
+//! Another container for the same card, beside the PNG tEXt chunk and
 //! the standalone `.json`. What it adds is that the assets travel with
 //! it: `card.json` at the root, and the pictures the card refers to
 //! under `assets/<type>/<category>/<file>` (the layout is written down
@@ -11,8 +11,8 @@
 //! footprints it feeds carry `<container>#<entry>` locators, which the
 //! domain reads back as a
 //! `SourceLocator::Record` — a container plus an address its reader
-//! resolves. Nothing is written to disk, so there is no second copy to
-//! keep in step with the first.
+//! resolves. No copy of an entry is filed anywhere, so there is no
+//! second one to keep in step with the first.
 //!
 //! Only the card route reaches this. An archive is not opened because
 //! it is an archive: a plain `.zip` is one asset that states its
@@ -30,10 +30,11 @@ pub const CARD_JSON: &str = "card.json";
 /// write, so it is what this reads.
 pub const EMBEDDED_SCHEME: &str = "embeded://";
 
-/// Local file header magic — the first four bytes of every non-empty
-/// ZIP. An empty archive (`PK\x05\x06`) holds no `card.json` and so is
-/// not a card either way, which is why the one signature is enough to
-/// route on.
+/// Local file header magic — what a ZIP written from the start of the
+/// file opens with. An empty archive (`PK\x05\x06`) holds no
+/// `card.json` and so is not a card either way; an archive with data
+/// prepended to it, or a spanned one, is refused here rather than
+/// opened, which is the answer a card packer's output never needs.
 const LOCAL_FILE_HEADER: &[u8; 4] = b"PK\x03\x04";
 
 /// Whether a payload opens like a ZIP.
@@ -93,13 +94,23 @@ pub fn read(payload: &[u8]) -> Option<Charx> {
 /// container.
 ///
 /// Returns the entry name as the archive spells it, so a caller can use
-/// it as a record address directly. `None` for a URI that points
-/// somewhere else (`http://`, a bare path, a `ccdefault:` sentinel) and
-/// for one that names an entry this archive does not hold — a card may
-/// refer to a picture that was never packed, and addressing that would
-/// mint a locator with nothing behind it.
+/// it as a record address. `None` for a URI that points somewhere else
+/// (`http://`, a bare path, a `ccdefault:` sentinel) and for one that
+/// names an entry this archive does not hold — a card may refer to a
+/// picture that was never packed, and addressing that would mint a
+/// locator with nothing behind it.
+///
+/// Also `None` for an entry whose name contains a `#`. The wire form
+/// of a locator splits container from record on the last one
+/// (`SourceLocator::from_wire`), so `x.charx#a#b.png` would read back
+/// as the record `b.png` inside a container called `x.charx#a` —
+/// silently the wrong thing. An entry nothing can address is left
+/// unaddressed rather than addressed wrongly; no packer writes one.
 pub fn entry_for_uri<'a>(uri: &str, entries: &'a [String]) -> Option<&'a str> {
     let path = uri.strip_prefix(EMBEDDED_SCHEME)?;
+    if path.contains('#') {
+        return None;
+    }
     entries
         .iter()
         .find(|entry| entry.as_str() == path)
@@ -182,12 +193,12 @@ mod tests {
         assert!(read(&buf).is_none());
     }
 
-    /// The one that keeps a locator honest: a card is free to name a
-    /// picture the packer left out, and a footprint addressed at it
-    /// would point into empty space.
     #[test]
     fn a_uri_naming_an_entry_that_was_never_packed_resolves_to_nothing() {
-        let entries = vec!["assets/icon/images/main.png".to_string()];
+        let entries = vec![
+            "assets/icon/images/main.png".to_string(),
+            "assets/icon/images/od#d.png".to_string(),
+        ];
 
         assert_eq!(
             entry_for_uri("embeded://assets/icon/images/main.png", &entries),
@@ -204,5 +215,11 @@ mod tests {
             "a URI that points outside the container is not an entry"
         );
         assert_eq!(entry_for_uri("ccdefault:", &entries), None);
+        assert_eq!(
+            entry_for_uri("embeded://assets/icon/images/od#d.png", &entries),
+            None,
+            "the archive holds it, and the wire form would read it back \
+             as a different entry inside a different container"
+        );
     }
 }

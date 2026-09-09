@@ -49,7 +49,7 @@
 //! | `<file>#book_entry=<uid>` | lorebook entry (id if present, else content hash) | `character_book.entries` / World Info |
 //! | `<file>#L<n>` | line-indexed record (append-heavy source) | SillyTavern chat JSONL |
 //! | `<file>#tree/<msg-id>` | tree-node message | ChatGPT / Claude conversation |
-//! | `<file>#<zip-inner-path>` | ZIP archive inner entry | `.charx` / SillyTavern backup |
+//! | `<file>#<zip-inner-path>` | ZIP archive inner entry | `.charx` |
 //! | `<file>#chunk=<name>` | PNG tEXt chunk | `chara` / `ccv3` |
 //! | `<file>#hash=<sha1>` | content-hash fallback when no stable id | MemoryPlugin, legacy books |
 //!

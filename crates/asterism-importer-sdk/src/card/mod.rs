@@ -11,7 +11,7 @@
 //! - [`envelope`] — the parsed wire shape: [`CardEnvelope`] holds
 //!   `{spec, spec_version, data{…}}` and [`CardContext`] carries the
 //!   caller-supplied ingest metadata (source_kind, locator,
-//!   session_id, occurred_at, platform).
+//!   session_id, occurred_at, platform, archive_entries).
 //! - [`png_chunk`] — base64 UTF-8 JSON decoder for the PNG text chunks
 //!   `chara` (V2) and `ccv3` (V3). Feeds an envelope back to the
 //!   parser; chunk framing is `pngmeta`'s.

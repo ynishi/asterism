@@ -362,14 +362,25 @@ pub const KNOWN_AUDIO_MIMES: &[&str] = &[
 /// Best-effort mime guess from a locator's file extension.
 ///
 /// A [`Record`](SourceLocator::Record) addresses one record *inside* a
-/// container, and what the asset stands for is that record's extracted
-/// text — never the container's format. Every record locator is
-/// therefore `text/plain`, whatever the container extension says.
-/// Reading the extension through the record address is what filed a PNG
-/// tEXt note as `image/png` and sent the thumbnailer off to open
+/// container, and for almost all of them what the asset stands for is
+/// that record's extracted text — never the container's format. Those
+/// answer `text/plain`, whatever the container extension says. Reading
+/// the extension through the *container* is what filed a PNG tEXt note
+/// as `image/png` and sent the thumbnailer off to open
 /// `shot.png#workflow` as a path, which no filesystem has. It is now the
 /// variant that answers, not a `contains('#')` test each caller had to
 /// remember to write.
+///
+/// The exception is a record whose bytes are its own —
+/// [`ContainerRecord::holds_its_own_bytes`] — which today means an entry
+/// inside a character-card archive. `main.png` in there is a PNG, and
+/// calling it text would send every walk that could read it straight
+/// past. So the extension is read off the *record address* for those,
+/// and an address that carries none, or one the map cannot name, falls
+/// back to the `text/plain` every other record gets rather than to
+/// `None`: an entry is not the whole of what a card addresses, and a
+/// slot suffix (`#field=name`) must keep the answer that stops the
+/// decoders reaching it.
 ///
 /// The other three shapes are sniffed over the part of them that can
 /// carry an extension, and each asks for it the way its own shape
@@ -406,7 +417,15 @@ pub fn guess_mime(locator: &SourceLocator) -> Option<MimeType> {
 
     let ext = match locator {
         // The record is the artefact; the container's extension answers
-        // for the wrong thing.
+        // for the wrong thing. An entry with bytes of its own is read
+        // through its own address, and anything the map cannot name
+        // there rejoins the answer beside it.
+        SourceLocator::Record(record) if record.holds_its_own_bytes() => {
+            match extension_of_text(record.record().as_str()) {
+                Some(ext) => ext,
+                None => return Some(MimeType::text_plain()),
+            }
+        }
         SourceLocator::Record(_) => return Some(MimeType::text_plain()),
         SourceLocator::File(path) => path.as_path().extension()?.to_str()?,
         SourceLocator::Remote(remote) => extension_of_text(remote.target().as_str())?,
@@ -443,7 +462,17 @@ pub fn guess_mime(locator: &SourceLocator) -> Option<MimeType> {
         "aiff" | "aif" => MimeType::Audio(AudioFormat::Aiff),
         "json" => MimeType::Json,
         "jsonl" | "md" | "txt" | "db" => MimeType::text_plain(),
-        _ => return None,
+        // An entry the map cannot name keeps the answer every other
+        // record gets, rather than the `None` a file would take: a
+        // record's default is a statement about records, and an
+        // unreadable extension is not a reason to leave one without an
+        // answer at all.
+        _ => {
+            return match locator {
+                SourceLocator::Record(_) => Some(MimeType::text_plain()),
+                _ => None,
+            };
+        }
     };
     Some(mime)
 }
@@ -458,6 +487,48 @@ mod tests {
     /// names would stop compiling rather than stop meaning anything.
     fn loc(raw: &str) -> SourceLocator {
         SourceLocator::from_wire(raw).expect("locator")
+    }
+
+    /// A card archive's entries are the one record shape whose bytes
+    /// are their own, and the walks that would read them are chosen by
+    /// this answer — so a picture in there has to come back a picture,
+    /// while everything else the same card addresses stays out of the
+    /// decoders.
+    #[test]
+    fn an_entry_with_bytes_of_its_own_is_read_through_its_own_address() {
+        assert_eq!(
+            guess_mime(&loc("/cards/lyra.charx#assets/icon/images/main.png")),
+            Some(MimeType::Image(ImageFormat::Png))
+        );
+        assert_eq!(
+            guess_mime(&loc("/cards/lyra.charx#assets/emotion/audio/sigh.flac")),
+            Some(MimeType::Audio(AudioFormat::Flac))
+        );
+        // A slot the card states rather than a file it packs.
+        assert_eq!(
+            guess_mime(&loc("/cards/lyra.charx#field=name")),
+            Some(MimeType::text_plain())
+        );
+        // An entry the map cannot name still gets the record's answer.
+        assert_eq!(
+            guess_mime(&loc("/cards/lyra.charx#assets/x_custom/other/thing.l2d")),
+            Some(MimeType::text_plain())
+        );
+        // Every other container answers for its records as it did.
+        assert_eq!(
+            guess_mime(&loc("/logs/session.jsonl#0198c1c2")),
+            Some(MimeType::text_plain())
+        );
+        assert_eq!(
+            guess_mime(&loc("/pics/shot.png#chunk=workflow")),
+            Some(MimeType::text_plain())
+        );
+        assert_eq!(
+            guess_mime(&loc("/bundles/pictures.zip#a.png")),
+            Some(MimeType::text_plain()),
+            "an archive is not opened for being an archive, so its \
+             entries are not artefacts of their own"
+        );
     }
 
     #[test]

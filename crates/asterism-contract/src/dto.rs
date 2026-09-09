@@ -578,8 +578,10 @@ pub struct AssetDto {
     /// Why [`content_hash`](Self::content_hash) holds what it holds —
     /// the primary material's file-axis status
     /// (`asterism_core::domain::measurement`): `pending`, `computed`,
-    /// `no-bytes` (a record inside a container, a remote locator — no
-    /// digest is ever coming) or `failed` (the original could not be
+    /// `no-bytes` (a remote locator, or a record whose bytes are its
+    /// container's — no digest is ever coming; an entry the container
+    /// hands out whole is read like a file and is not this) or `failed`
+    /// (the original could not be
     /// read when the job ran; the walk retries it).
     ///
     /// Absent exactly when the entity was not hydrated with materials

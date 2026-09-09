@@ -79,7 +79,7 @@ pub struct CardContext<'a> {
     /// ownership rules).
     pub source_kind: &'a str,
     /// Container locator — the caller's stable id for the *card* as a
-    /// whole (typically the PNG or `.json` path). Every per-slot
+    /// whole (the PNG, `.json` or `.charx` path). Every per-slot
     /// footprint derives its own locator by appending a suffix
     /// (`#field=<slot>` / `#greeting=<i>` / `#book_entry=<uid>` — see
     /// [`crate::catalogue`] for the taxonomy).
@@ -105,9 +105,10 @@ pub struct CardContext<'a> {
     /// The entries the container holds, when the container is an
     /// archive the card's assets travel inside (`.charx`).
     ///
-    /// `None` for a PNG or a standalone `.json`: those cards' `assets[]`
-    /// are references to somewhere else, and there is nothing in the
-    /// file to address. `Some` turns an `embeded://` URI into a record
+    /// `None` for a PNG or a standalone `.json`, which is a statement
+    /// about what this code reads rather than about the file: the V3
+    /// spec lets a PNG carry assets in its own chunks, and nothing here
+    /// looks for them. `Some` turns an `embeded://` URI into a record
     /// address — see [`Self::asset_source`].
     pub archive_entries: Option<&'a [String]>,
 }

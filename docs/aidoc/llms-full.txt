@@ -9272,7 +9272,7 @@ executable form.
 - [`envelope`] — the parsed wire shape: [`CardEnvelope`] holds
   `{spec, spec_version, data{…}}` and [`CardContext`] carries the
   caller-supplied ingest metadata (source_kind, locator,
-  session_id, occurred_at, platform).
+  session_id, occurred_at, platform, archive_entries).
 - [`png_chunk`] — base64 UTF-8 JSON decoder for the PNG text chunks
   `chara` (V2) and `ccv3` (V3). Feeds an envelope back to the
   parser; chunk framing is `pngmeta`'s.
@@ -9319,7 +9319,7 @@ locator), so `edge_rebuild` clusters them via
 
 `.charx` — a V3 card and its assets inside one ZIP.
 
-The third container for the same card, beside the PNG tEXt chunk and
+Another container for the same card, beside the PNG tEXt chunk and
 the standalone `.json`. What it adds is that the assets travel with
 it: `card.json` at the root, and the pictures the card refers to
 under `assets/<type>/<category>/<file>` (the layout is written down
@@ -9330,8 +9330,8 @@ in [`crate::catalogue`], V3 section).
 footprints it feeds carry `<container>#<entry>` locators, which the
 domain reads back as a
 `SourceLocator::Record` — a container plus an address its reader
-resolves. Nothing is written to disk, so there is no second copy to
-keep in step with the first.
+resolves. No copy of an entry is filed anywhere, so there is no
+second one to keep in step with the first.
 
 Only the card route reaches this. An archive is not opened because
 it is an archive: a plain `.zip` is one asset that states its
@@ -9467,11 +9467,13 @@ and falling back to raw V2 defaults).
 # asterism-importer-sdk::card::source_parser
 
 [`SourceParser`] adapter that turns any character-card [`RawItem`]
-(PNG tEXt or standalone JSON) into per-slot [`Footprint`]s.
+(PNG tEXt, standalone JSON, or a `.charx` archive) into per-slot
+[`Footprint`]s.
 
 Composes the pipeline:
-[`RawItem`] → [`envelope_from_png`] / [`CardEnvelope::from_json`] →
-[`CardParserRegistry::dispatch`] → `Vec<Footprint>`.
+[`RawItem`] → [`envelope_from_png`] / [`charx::read`] /
+[`CardEnvelope::from_json`] → [`CardParserRegistry::dispatch`] →
+`Vec<Footprint>`.
 
 Importer binaries plug this straight into an [`FsScanner`](crate::FsScanner)
 so they only need to configure the source_kind slug and the batch
@@ -9479,7 +9481,7 @@ posting loop.
 
 ## Types
 
-- `CharaSourceParser` — [`SourceParser`] that decodes character cards from PNG tEXt chunks
+- `CharaSourceParser` — [`SourceParser`] that decodes character cards from PNG tEXt chunks,
 
 
 <!-- asterism_importer_sdk/card__v2.md -->
@@ -9574,7 +9576,7 @@ stable across re-imports (see
 | `<file>#book_entry=<uid>` | lorebook entry (id if present, else content hash) | `character_book.entries` / World Info |
 | `<file>#L<n>` | line-indexed record (append-heavy source) | SillyTavern chat JSONL |
 | `<file>#tree/<msg-id>` | tree-node message | ChatGPT / Claude conversation |
-| `<file>#<zip-inner-path>` | ZIP archive inner entry | `.charx` / SillyTavern backup |
+| `<file>#<zip-inner-path>` | ZIP archive inner entry | `.charx` |
 | `<file>#chunk=<name>` | PNG tEXt chunk | `chara` / `ccv3` |
 | `<file>#hash=<sha1>` | content-hash fallback when no stable id | MemoryPlugin, legacy books |
 
@@ -11515,27 +11517,40 @@ that keeps them apart:
   this time.
 - `Some(Ok(bytes))` — the bytes.
 
-## Which containers open
+## Which containers open, and which of their records
 
 A [`Record`](SourceLocator::Record) is a container plus an address
-inside it, and `SourceLocator::local_path` refuses to hand over the
-container on the record's behalf — a thousand-line log would answer
-every line with the whole file, which is one fingerprint repeated a
-thousand times. That reasoning holds for a record whose bytes *are*
-the container's: a JSONL line is text the importer already carried,
-and there is nothing else in the file that belongs to it alone.
+inside it, and most such records have no bytes of their own.
+`ContainerRecord::holds_its_own_bytes` is the question, and its
+docstring says which shapes answer yes and why the container is not
+opened on the others' behalf.
 
-A ZIP entry is the other case. It has bytes of its own, at a known
-offset, and reading it yields those and nothing else. So the opening
-is per container shape rather than blanket, and [`opens_for_records`]
-is the whole list: `.charx`, the character-card archive. A plain
-`.zip` is not on it and is never handed here — an archive is not
-opened because it is an archive.
+A shape answering `true` there is not the whole test. A card
+archive addresses two kinds of thing with one spelling: the entries
+it packs (`#assets/icon/images/main.png`) and the slots the card
+states (`#field=name`), and only the first names bytes. Which is
+which is a question only the archive can answer, so this module
+asks it — an address the archive does not hold reads as `None`,
+the permanent answer, rather than as a read that failed. Retrying a
+slot suffix on every backfill pass, forever, is the walk that never
+shrinks.
+
+## The ceiling
+
+An entry states its own uncompressed length and the file it sits in
+was written by somebody else, so the length is a claim rather than a
+fact. [`MAX_ENTRY_BYTES`] is the ceiling the read is held to, and an
+entry over it is refused rather than allocated for — the same
+judgement `fingerprint::hash_artefact` makes about a file it is
+asked to hold whole.
 
 ## Functions
 
-- `opens_for_records` — Whether a container's shape is one whose records can be read out of
 - `read` — The bytes this locator addresses.
+
+## Constants
+
+- `MAX_ENTRY_BYTES` — The most an entry is read into memory, at 64 MiB.
 
 
 <!-- asterism_infra/memory.md -->

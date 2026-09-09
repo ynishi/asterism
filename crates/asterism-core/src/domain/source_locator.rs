@@ -236,6 +236,36 @@ impl ContainerRecord {
     pub fn record(&self) -> &RecordAddress {
         &self.record
     }
+
+    /// Whether this record's bytes are its own rather than the
+    /// container's.
+    ///
+    /// Most records are the container's own bytes read a certain way: a
+    /// JSONL line is text somebody already extracted, a PNG `tEXt` note
+    /// is a chunk of the picture it sits in. Nothing in the file
+    /// belongs to those records alone, which is why
+    /// [`local_path`](SourceLocator::local_path) refuses to hand over
+    /// the container on a record's behalf — a thousand-line log would
+    /// answer every line with the whole file.
+    ///
+    /// An archive entry is the other case: it has bytes of its own, at
+    /// an offset, and reading it yields those and nothing else. So the
+    /// question is asked of the container's shape, and the list is one
+    /// long — `.charx`, the character-card archive, whose entries the
+    /// card route files as assets. A plain `.zip` is deliberately not
+    /// on it: an archive is not opened for being an archive, and
+    /// nothing files records inside one.
+    ///
+    /// A `true` here says the shape can answer, not that this entry is
+    /// in there. Only the archive knows that, and the reader that opens
+    /// it says so.
+    pub fn holds_its_own_bytes(&self) -> bool {
+        self.container
+            .as_path()
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("charx"))
+    }
 }
 
 /// A URI scheme, lowercased.

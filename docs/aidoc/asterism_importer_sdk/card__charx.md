@@ -2,7 +2,7 @@
 
 `.charx` — a V3 card and its assets inside one ZIP.
 
-The third container for the same card, beside the PNG tEXt chunk and
+Another container for the same card, beside the PNG tEXt chunk and
 the standalone `.json`. What it adds is that the assets travel with
 it: `card.json` at the root, and the pictures the card refers to
 under `assets/<type>/<category>/<file>` (the layout is written down
@@ -13,8 +13,8 @@ in [`crate::catalogue`], V3 section).
 footprints it feeds carry `<container>#<entry>` locators, which the
 domain reads back as a
 `SourceLocator::Record` — a container plus an address its reader
-resolves. Nothing is written to disk, so there is no second copy to
-keep in step with the first.
+resolves. No copy of an entry is filed anywhere, so there is no
+second one to keep in step with the first.
 
 Only the card route reaches this. An archive is not opened because
 it is an archive: a plain `.zip` is one asset that states its

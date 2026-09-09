@@ -217,8 +217,9 @@ pub(crate) fn hash_artefact(
 /// bytes fingerprint alike.
 ///
 /// Blocking in the same sense as its sibling — it walks the buffer
-/// several times — and the callers run it inside `spawn_blocking` for
-/// that reason rather than for I/O.
+/// several times — so the job caller runs it inside `spawn_blocking`
+/// for that reason rather than for I/O. [`hash_artefact`] calls it
+/// from wherever it was itself called.
 pub(crate) fn hash_bytes(
     bytes: &[u8],
     declared_mime: Option<&MimeType>,

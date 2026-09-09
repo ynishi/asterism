@@ -1,9 +1,11 @@
 //! [`SourceParser`] adapter that turns any character-card [`RawItem`]
-//! (PNG tEXt or standalone JSON) into per-slot [`Footprint`]s.
+//! (PNG tEXt, standalone JSON, or a `.charx` archive) into per-slot
+//! [`Footprint`]s.
 //!
 //! Composes the pipeline:
-//! [`RawItem`] → [`envelope_from_png`] / [`CardEnvelope::from_json`] →
-//! [`CardParserRegistry::dispatch`] → `Vec<Footprint>`.
+//! [`RawItem`] → [`envelope_from_png`] / [`charx::read`] /
+//! [`CardEnvelope::from_json`] → [`CardParserRegistry::dispatch`] →
+//! `Vec<Footprint>`.
 //!
 //! Importer binaries plug this straight into an [`FsScanner`](crate::FsScanner)
 //! so they only need to configure the source_kind slug and the batch
@@ -22,8 +24,8 @@ use super::envelope::{CardContext, CardEnvelope};
 use super::png_chunk::{envelope_from_png, is_png};
 use super::registry::CardParserRegistry;
 
-/// [`SourceParser`] that decodes character cards from PNG tEXt chunks
-/// or standalone JSON and dispatches through a
+/// [`SourceParser`] that decodes character cards from PNG tEXt chunks,
+/// `.charx` archives, or standalone JSON, and dispatches through a
 /// [`CardParserRegistry`].
 ///
 /// Configure the `platform` label (`"SillyTavern"`, `"CharacterHub"`,
@@ -91,10 +93,11 @@ impl Default for CharaSourceParser {
 impl SourceParser for CharaSourceParser {
     fn parse(&self, item: RawItem) -> Result<Vec<Footprint>, ParseError> {
         let Some((env, entries)) = Self::read_payload(&item.payload) else {
-            // Unrecognised shape (non-card PNG, non-envelope JSON) —
-            // skip silently. The scanner's extension filter usually
-            // keeps us from getting here, but a `.png` avatar without
-            // an embedded card is a legitimate case.
+            // Unrecognised shape (non-card PNG, non-envelope JSON, an
+            // archive with no `card.json`) — skip silently. The
+            // scanner's extension filter usually keeps us from getting
+            // here, but a `.png` avatar without an embedded card is a
+            // legitimate case.
             return Ok(Vec::new());
         };
         let session_id = session_id_for(&item.locator);

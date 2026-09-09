@@ -18,25 +18,38 @@ that keeps them apart:
   this time.
 - `Some(Ok(bytes))` — the bytes.
 
-## Which containers open
+## Which containers open, and which of their records
 
 A [`Record`](SourceLocator::Record) is a container plus an address
-inside it, and `SourceLocator::local_path` refuses to hand over the
-container on the record's behalf — a thousand-line log would answer
-every line with the whole file, which is one fingerprint repeated a
-thousand times. That reasoning holds for a record whose bytes *are*
-the container's: a JSONL line is text the importer already carried,
-and there is nothing else in the file that belongs to it alone.
+inside it, and most such records have no bytes of their own.
+`ContainerRecord::holds_its_own_bytes` is the question, and its
+docstring says which shapes answer yes and why the container is not
+opened on the others' behalf.
 
-A ZIP entry is the other case. It has bytes of its own, at a known
-offset, and reading it yields those and nothing else. So the opening
-is per container shape rather than blanket, and [`opens_for_records`]
-is the whole list: `.charx`, the character-card archive. A plain
-`.zip` is not on it and is never handed here — an archive is not
-opened because it is an archive.
+A shape answering `true` there is not the whole test. A card
+archive addresses two kinds of thing with one spelling: the entries
+it packs (`#assets/icon/images/main.png`) and the slots the card
+states (`#field=name`), and only the first names bytes. Which is
+which is a question only the archive can answer, so this module
+asks it — an address the archive does not hold reads as `None`,
+the permanent answer, rather than as a read that failed. Retrying a
+slot suffix on every backfill pass, forever, is the walk that never
+shrinks.
+
+## The ceiling
+
+An entry states its own uncompressed length and the file it sits in
+was written by somebody else, so the length is a claim rather than a
+fact. [`MAX_ENTRY_BYTES`] is the ceiling the read is held to, and an
+entry over it is refused rather than allocated for — the same
+judgement `fingerprint::hash_artefact` makes about a file it is
+asked to hold whole.
 
 ## Functions
 
-- `opens_for_records` — Whether a container's shape is one whose records can be read out of
 - `read` — The bytes this locator addresses.
+
+## Constants
+
+- `MAX_ENTRY_BYTES` — The most an entry is read into memory, at 64 MiB.
 
