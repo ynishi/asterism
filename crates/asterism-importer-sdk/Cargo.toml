@@ -44,6 +44,16 @@ base64       = { workspace = true }
 # unreadable for no reason other than the flag.
 pngmeta      = { version = "0.2.1", features = ["inflate"] }
 
+# ZIP framing for `card::charx`, the third container a V3 card arrives
+# in. Already in the lock as a transitive dependency of `c2pa`, so
+# naming it here adds a direct edge rather than a crate.
+#
+# `deflate` and nothing else: a `.charx` is a card and its pictures,
+# which is what every packer writes with the one method the format has
+# had since 1993. The other codecs (bzip2, zstd, lzma) would each pull
+# their own compressor in to read an archive nobody produces.
+zip          = { version = "8", default-features = false, features = ["deflate"] }
+
 [dev-dependencies]
 # Fixture builder for the chunk-level tests (valid PNGs, duplicate
 # keywords, `zTXt`, deliberately truncated files). Building those by

@@ -548,9 +548,10 @@ async fn encode_material(
     locator: &SourceLocator,
 ) -> Result<EncodeOutcome, DomainError> {
     let identity = encoder.identity().clone();
-    // No local bytes (a container record, a remote locator) is an
-    // answer, not a deferral: nothing will ever decode here.
-    let Some(path) = locator.local_path().map(|p| p.to_path_buf()) else {
+    // No local bytes (a remote locator, a record in a container nothing
+    // opens) is an answer, not a deferral: nothing will ever decode
+    // here.
+    let Some(read) = crate::material_bytes::read(locator).await else {
         env.deps
             .visual_features
             .mark_unextractable(
@@ -566,7 +567,7 @@ async fn encode_material(
     };
     // An unreadable original writes nothing at all — the dims-walk
     // rule: recording it would answer a temporary question permanently.
-    let bytes = match tokio::fs::read(&path).await {
+    let bytes = match read {
         Ok(bytes) => bytes,
         Err(err) => {
             tracing::warn!(
@@ -933,9 +934,10 @@ async fn measure_material(
             .await?;
         return Ok(PerceptualOutcome::Retired);
     }
-    // No local bytes (a container record, a remote locator) is an
-    // answer rather than a deferral: nothing will ever decode here.
-    let Some(path) = locator.local_path().map(|p| p.to_path_buf()) else {
+    // No local bytes (a remote locator, a record in a container nothing
+    // opens) is an answer rather than a deferral: nothing will ever
+    // decode here.
+    let Some(read) = crate::material_bytes::read(locator).await else {
         env.deps
             .assets
             .set_material_perceptual_hash(
@@ -946,7 +948,7 @@ async fn measure_material(
             .await?;
         return Ok(PerceptualOutcome::Retired);
     };
-    let bytes = match tokio::fs::read(&path).await {
+    let bytes = match read {
         Ok(bytes) => bytes,
         Err(err) => {
             tracing::warn!(
@@ -1505,19 +1507,61 @@ pub async fn thumb_gen(env: &JobEnv, payload: &serde_json::Value) -> Result<Stri
         return Ok("not thumbnailable, skipped".into());
     }
     // Second layer, on the locator rather than the mime. A record
-    // addresses something inside a container (`shot.png#workflow` — a
-    // PNG tEXt note), so there is no file of its own for a decoder to
-    // open; handing it one failed every such job forever
-    // [measured 2026-07-31: 2785 failed rows in the dogfood job_log].
-    // `guess_mime` now answers `text/plain` for these and the policy
-    // above stops them, but a future classification slip must not be
-    // able to reopen a failure loop this cheap to close.
+    // addresses something inside a container, and most such records
+    // have no bytes of their own at all (`shot.png#workflow` — a PNG
+    // tEXt note); handing a decoder a path for one failed every such
+    // job forever [measured 2026-07-31: 2785 failed rows in the dogfood
+    // job_log]. `guess_mime` now answers `text/plain` for these and the
+    // policy above stops them, but a future classification slip must
+    // not be able to reopen a failure loop this cheap to close.
     //
-    // `local_path()` is the whole test: it is `Some` exactly when there
-    // is a file, and the path it gives is the path — which is the other
-    // half of the fix, since the string form of a `file://` locator was
-    // never one.
-    let Some(path) = asset.source.locator.local_path() else {
+    // A record in a container that opens — a picture inside a `.charx`
+    // card — is the exception, and it is spilled rather than passed
+    // along: every route below takes a path because Quick Look and
+    // ffmpeg are processes that open one. A thumbnail is derived state
+    // already, and the temporary is dropped at the end of this call, so
+    // this is not the second copy of the library that addressing the
+    // entries exists to avoid.
+    let spilled = match &asset.source.locator {
+        SourceLocator::Record(_) => {
+            match crate::material_bytes::read(&asset.source.locator).await {
+                Some(Ok(bytes)) => {
+                    let mut file = tempfile::NamedTempFile::new().map_err(|e| {
+                        DomainError::Infra(anyhow::anyhow!("thumb spill temp file: {e}"))
+                    })?;
+                    std::io::Write::write_all(&mut file, &bytes).map_err(|e| {
+                        DomainError::Infra(anyhow::anyhow!("thumb spill write: {e}"))
+                    })?;
+                    Some(file)
+                }
+                // The entry was not readable this time. Left for a later
+                // pass rather than recorded, which is what every other
+                // reader of an original does with a temporary failure.
+                Some(Err(err)) => {
+                    return Err(DomainError::Infra(anyhow::anyhow!(
+                        "thumb source unreadable: {err}"
+                    )));
+                }
+                None => None,
+            }
+        }
+        _ => None,
+    };
+    // `local_path()` is the whole test for everything else: it is
+    // `Some` exactly when there is a file, and the path it gives is the
+    // path — which is the other half of the fix, since the string form
+    // of a `file://` locator was never one.
+    let path = spilled
+        .as_ref()
+        .map(|file| file.path().to_path_buf())
+        .or_else(|| {
+            asset
+                .source
+                .locator
+                .local_path()
+                .map(std::path::Path::to_path_buf)
+        });
+    let Some(path) = path else {
         return Ok("no file of its own, not thumbnailable, skipped".into());
     };
     let path_str = path.to_string_lossy().into_owned();
@@ -1543,6 +1587,12 @@ pub async fn thumb_gen(env: &JobEnv, payload: &serde_json::Value) -> Result<Stri
     })
     .await
     .map_err(|e| DomainError::Infra(anyhow::anyhow!("thumb worker join: {e}")))??;
+    // The decode is done with it, and the rest of this job works from
+    // the JPEG in hand. Said rather than left to the end of the scope,
+    // because what keeps the file alive across the `await` above is the
+    // binding, and a later edit that moved this line up would delete
+    // the file out from under the route reading it.
+    drop(spilled);
     let byte_len = bytes.len();
     // Extract the dominant-colour palette from the just-generated
     // thumbnail. Only fires on the smallest size we pre-render
@@ -2536,6 +2586,43 @@ async fn asset_dims_batch(
 /// replaced, so a library on an external disk measured once while the
 /// disk was out would have been marked permanently unmeasurable.
 async fn probe_dims(locator: &SourceLocator) -> DimsProbe {
+    // A record inside a container that opens is measured from the
+    // entry's own bytes. The "path, not the bytes" rule above is about
+    // not making the peak allocation the size of the largest artefact
+    // in the library; an entry has to be inflated in full to be read at
+    // all, so there is no incremental form of it to prefer.
+    if let SourceLocator::Record(_) = locator {
+        return match crate::material_bytes::read(locator).await {
+            None => DimsProbe::NothingToMeasure,
+            Some(Err(err)) => {
+                tracing::warn!(
+                    event = "diag.asset_dims.unreadable",
+                    locator = %locator.to_display(),
+                    error = %err,
+                    "asset_dims left the row for a later pass"
+                );
+                DimsProbe::Unreadable
+            }
+            Some(Ok(bytes)) => match tokio::task::spawn_blocking(move || {
+                asterism_media_probe::coded_dims(&bytes)
+                    .or_else(|| asterism_media_probe::probe(&bytes).and_then(|p| p.dims))
+            })
+            .await
+            {
+                Ok(Some((w, h))) => DimsProbe::Measured(w, h),
+                Ok(None) => DimsProbe::NothingToMeasure,
+                Err(join) => {
+                    tracing::warn!(
+                        event = "diag.asset_dims.join_failed",
+                        locator = %locator.to_display(),
+                        error = %join,
+                        "asset_dims probe did not complete"
+                    );
+                    DimsProbe::Unreadable
+                }
+            },
+        };
+    }
     // A locator with no local path is answered, not deferred: there is
     // no future in which bytes appear at a place that names none.
     let Some(path) = locator.local_path().map(|p| p.to_path_buf()) else {
@@ -2902,13 +2989,33 @@ async fn hash_material(
     // `file:///pics/a.png` has already become the path it names, and
     // `file://pics/a.png` — rootless, openable by nobody — takes the
     // marker branch below and leaves the walk.
-    let Some(path) = locator.local_path() else {
+    // Where the bytes are, in the shape the fingerprint wants them. A
+    // file is streamed by path, which is what keeps a 4 GB video from
+    // becoming a 4 GB buffer; a record inside a container that opens is
+    // inflated whole because that is the only way an entry is read at
+    // all.
+    enum Bytes {
+        Path(String),
+        Held(Vec<u8>),
+        Unreadable(std::io::Error),
+    }
+    let source = match locator {
+        SourceLocator::Record(_) => match crate::material_bytes::read(locator).await {
+            Some(Ok(bytes)) => Some(Bytes::Held(bytes)),
+            Some(Err(err)) => Some(Bytes::Unreadable(err)),
+            None => None,
+        },
+        _ => locator
+            .local_path()
+            .map(|path| Bytes::Path(path.to_string_lossy().into_owned())),
+    };
+    let Some(source) = source else {
         // Record the answer instead of leaving the row NULL. "There
         // are no bytes to read here" is a permanent fact about a
-        // container record or a remote locator, and a NULL would put
-        // the row back in front of every future backfill pass — a walk
-        // that never shrinks, and a "still fingerprinting" notice that
-        // never clears.
+        // remote locator or a record in a container nothing opens, and
+        // a NULL would put the row back in front of every future
+        // backfill pass — a walk that never shrinks, and a "still
+        // fingerprinting" notice that never clears.
         //
         // Every axis takes the same status: the statement is about
         // the locator, so it is equally true on every axis, and
@@ -2938,13 +3045,30 @@ async fn hash_material(
             .await;
         return HashOutcome::Skipped;
     };
-    // The path the type gives, not the string the column held.
-    let path_str = path.to_string_lossy().into_owned();
     let claimed = mime.cloned();
-    let read = tokio::task::spawn_blocking(move || {
-        hash_artefact(&path_str, claimed.as_ref(), MAX_CONTENT_WALK_BYTES)
-    })
-    .await;
+    let read = match source {
+        // The path the type gives, not the string the column held.
+        Bytes::Path(path) => {
+            tokio::task::spawn_blocking(move || {
+                hash_artefact(&path, claimed.as_ref(), MAX_CONTENT_WALK_BYTES)
+            })
+            .await
+        }
+        Bytes::Held(bytes) => {
+            tokio::task::spawn_blocking(move || {
+                Ok(crate::fingerprint::hash_bytes(
+                    &bytes,
+                    claimed.as_ref(),
+                    MAX_CONTENT_WALK_BYTES,
+                ))
+            })
+            .await
+        }
+        // The container is one that opens and this entry did not come
+        // out of it. Answered on the same branch a moved file takes:
+        // the row is marked unreadable and stays in the walk.
+        Bytes::Unreadable(err) => Ok(Err(err)),
+    };
     let fingerprint = match read {
         Ok(Ok(fingerprint)) => fingerprint,
         Ok(Err(err)) => {

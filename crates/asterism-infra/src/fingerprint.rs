@@ -203,10 +203,55 @@ pub(crate) fn hash_artefact(
 
     let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
     file.read_to_end(&mut bytes)?;
-    let meta = probes::meta(&bytes, declared_mime);
-    Ok(MaterialFingerprint {
-        file: Measurement::computed(content_hash::of_bytes(&bytes)),
-        content: probes::content(&bytes, declared_mime).record(),
+    Ok(hash_bytes(&bytes, declared_mime, max_walk))
+}
+
+/// The same three answers, for bytes already in hand.
+///
+/// The record path. An entry inside a container is inflated in full to
+/// be read at all, so there is no streaming shape of it to prefer and
+/// nothing is saved by asking the gates of a handle instead of the
+/// buffer. The gates are still asked: a format no walker handles gets
+/// its digest and the markers that say who declined, exactly as it
+/// would through [`hash_artefact`], so a record and a file of the same
+/// bytes fingerprint alike.
+///
+/// Blocking in the same sense as its sibling — it walks the buffer
+/// several times — and the callers run it inside `spawn_blocking` for
+/// that reason rather than for I/O.
+pub(crate) fn hash_bytes(
+    bytes: &[u8],
+    declared_mime: Option<&MimeType>,
+    max_walk: u64,
+) -> MaterialFingerprint {
+    if !probes::walks_content(declared_mime)
+        && !probes::walks_meta(declared_mime)
+        && !embedded_text::walks_format(declared_mime)
+    {
+        return MaterialFingerprint {
+            file: Measurement::computed(content_hash::of_bytes(bytes)),
+            content: content_region::unsupported_format(declared_mime).record(),
+            meta: material_meta::unsupported_format(declared_mime).record(),
+            meta_kv: None,
+            meta_raw: MetaRaw::Absent.stored_value(),
+            meta_text: None,
+        };
+    }
+    if bytes.len() as u64 > max_walk {
+        return MaterialFingerprint {
+            file: Measurement::computed(content_hash::of_bytes(bytes)),
+            content: Measurement::bare(MeasurementStatus::TooLarge),
+            meta: Measurement::bare(MeasurementStatus::TooLarge),
+            meta_kv: None,
+            meta_raw: MetaRaw::TooLarge.stored_value(),
+            meta_text: None,
+        };
+    }
+
+    let meta = probes::meta(bytes, declared_mime);
+    MaterialFingerprint {
+        file: Measurement::computed(content_hash::of_bytes(bytes)),
+        content: probes::content(bytes, declared_mime).record(),
         meta_kv: meta.canonical().map(str::to_string),
         meta: meta.record(),
         // A third walk over the same buffer, and the cheapest of the
@@ -216,7 +261,7 @@ pub(crate) fn hash_artefact(
         // what it says it in — and a `MaterialMeta` that carried its own
         // input would put a megabyte behind every value the meta axis
         // passes around.
-        meta_raw: probes::meta_raw(&bytes, declared_mime).stored_value(),
+        meta_raw: probes::meta_raw(bytes, declared_mime).stored_value(),
         // The walk whose output is a document rather than a digest.
         // Written once the bytes are in hand — `{}` when they carry no
         // words — because "read and empty" is what retires the row from
@@ -232,8 +277,8 @@ pub(crate) fn hash_artefact(
         // eventually handles it, which is the same rule the early
         // returns above follow.
         meta_text: embedded_text::walks_format(declared_mime)
-            .then(|| embedded_text::render(embedded_text::recover(&bytes, declared_mime).as_ref())),
-    })
+            .then(|| embedded_text::render(embedded_text::recover(bytes, declared_mime).as_ref())),
+    }
 }
 
 /// The file axis on its own, in [`HASH_CHUNK_BYTES`] pieces — the path
@@ -615,6 +660,34 @@ mod tests {
             MAX_CONTENT_WALK_BYTES,
         )
         .expect("the fixture is readable")
+    }
+
+    /// A record and a file of the same bytes fingerprint alike.
+    ///
+    /// The two entry points read their bytes differently — one streams
+    /// a handle, the other is handed a buffer — and every column below
+    /// them is derived from the same walks. If they ever disagreed, the
+    /// same picture would answer one digest inside a card archive and
+    /// another beside it, and the duplicate check between them would
+    /// stop working in the one place it is most wanted.
+    #[test]
+    fn bytes_in_hand_answer_what_the_file_would_have() {
+        for (bytes, declared) in [
+            (CARD_PNG, Some("image/png")),
+            (CARD_PNG, None),
+            // A format no walker handles: the streaming branch on the
+            // file side, so the digest is the one place the two shapes
+            // could have drifted.
+            (b"not a picture at all".as_slice(), Some("application/zip")),
+            (b"".as_slice(), Some("image/png")),
+        ] {
+            let parsed = declared.map(MimeType::parse);
+            assert_eq!(
+                hash_bytes(bytes, parsed.as_ref(), MAX_CONTENT_WALK_BYTES),
+                measure(bytes, declared),
+                "declared {declared:?}"
+            );
+        }
     }
 
     /// **The round trip — and the whole reason the column exists.**

@@ -46,6 +46,7 @@ pub mod forge;
 pub mod generator_params;
 pub mod heads;
 pub mod jobs;
+pub mod material_bytes;
 pub mod memory;
 pub mod observe;
 pub mod paths;

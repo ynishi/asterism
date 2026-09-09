@@ -50,6 +50,7 @@ mod tests {
             session_id: "s",
             occurred_at: Utc::now(),
             platform: Some("SillyTavern"),
+            archive_entries: None,
         };
         let out = V2Parser.parse(&env, &ctx);
         // 2 notes (name/description) + 2 greetings + 1 creator_notes doc +

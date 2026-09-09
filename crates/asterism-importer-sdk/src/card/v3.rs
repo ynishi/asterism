@@ -153,7 +153,10 @@ impl CharacterCardParser for V3Parser {
                 labels.extend(tags.iter().cloned());
 
                 out.push(Footprint::Image(Image {
-                    source: ctx.footprint_source(&format!("asset={atype}/{name}[{i}]")),
+                    // Addressed at the archive entry when the card
+                    // travels with its pictures, and by slot suffix
+                    // when its `assets[]` are references to elsewhere.
+                    source: ctx.asset_source(uri, &format!("asset={atype}/{name}[{i}]")),
                     occurred_at: ctx.occurred_at,
                     external_session_key: None,
                     alt: Some(format!("{atype}:{name}")),
@@ -198,6 +201,7 @@ mod tests {
             session_id: "sid-v3",
             occurred_at: Utc::now(),
             platform: Some("SillyTavern"),
+            archive_entries: None,
         }
     }
 
