@@ -17,6 +17,11 @@ executable form.
 - [`png_chunk`] — base64 UTF-8 JSON decoder for the PNG text chunks
   `chara` (V2) and `ccv3` (V3). Feeds an envelope back to the
   parser; chunk framing is `pngmeta`'s.
+- [`charx`] — the ZIP container: `card.json` read out of the
+  archive, and the names of the assets travelling with it. The
+  entries are addressed rather than extracted, so the pictures a
+  card brings with it are found later without a second copy on
+  disk.
 - [`parser`] — the extension trait [`CharacterCardParser`] and the
   canonical V2 slot logic exposed as free functions
   ([`parser::v2_default`]) so derivatives can chain rather than

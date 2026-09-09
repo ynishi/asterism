@@ -9198,6 +9198,7 @@ per-target split rules, locator patterns, and unverified fields.
 
 - [`bundle`](bundle.md): Deriving the grouping key that ties the footprints of one container
 - [`card`](card.md): # Character-card parser subsystem
+- [`card::charx`](card__charx.md): `.charx` — a V3 card and its assets inside one ZIP.
 - [`card::envelope`](card__envelope.md): Envelope + context types shared by every character-card parser.
 - [`card::parser`](card__parser.md): [`CharacterCardParser`] trait + canonical V2 slot logic.
 - [`card::parser::v2_default`](card__parser__v2_default.md): Canonical V2 slot logic, exposed as free functions so derivatives
@@ -9275,6 +9276,11 @@ executable form.
 - [`png_chunk`] — base64 UTF-8 JSON decoder for the PNG text chunks
   `chara` (V2) and `ccv3` (V3). Feeds an envelope back to the
   parser; chunk framing is `pngmeta`'s.
+- [`charx`] — the ZIP container: `card.json` read out of the
+  archive, and the names of the assets travelling with it. The
+  entries are addressed rather than extracted, so the pictures a
+  card brings with it are found later without a second copy on
+  disk.
 - [`parser`] — the extension trait [`CharacterCardParser`] and the
   canonical V2 slot logic exposed as free functions
   ([`parser::v2_default`]) so derivatives can chain rather than
@@ -9306,6 +9312,45 @@ Every footprint decomposed from one card shares one `session_id`
 (typically [`crate::bundle::session_id_for`] of the container
 locator), so `edge_rebuild` clusters them via
 `time_proximity = 1.0`.
+
+
+<!-- asterism_importer_sdk/card__charx.md -->
+# asterism-importer-sdk::card::charx
+
+`.charx` — a V3 card and its assets inside one ZIP.
+
+The third container for the same card, beside the PNG tEXt chunk and
+the standalone `.json`. What it adds is that the assets travel with
+it: `card.json` at the root, and the pictures the card refers to
+under `assets/<type>/<category>/<file>` (the layout is written down
+in [`crate::catalogue`], V3 section).
+
+**The entries are addressed, not extracted.** This module reads
+`card.json` out of the archive and lists what else is in there; the
+footprints it feeds carry `<container>#<entry>` locators, which the
+domain reads back as a
+`SourceLocator::Record` — a container plus an address its reader
+resolves. Nothing is written to disk, so there is no second copy to
+keep in step with the first.
+
+Only the card route reaches this. An archive is not opened because
+it is an archive: a plain `.zip` is one asset that states its
+format, and nothing looks inside it.
+
+## Functions
+
+- `entry_for_uri` — The entry an `assets[]` URI names, when it names one inside this
+- `is_zip` — Whether a payload opens like a ZIP.
+- `read` — Read a `.charx`: the card at [`CARD_JSON`], and the names of the
+
+## Types
+
+- `Charx` — What one `.charx` holds: the card, and the names of everything else
+
+## Constants
+
+- `CARD_JSON` — Where a `.charx` keeps the card itself. Fixed by the V3 spec.
+- `EMBEDDED_SCHEME` — The scheme a V3 `assets[].uri` uses for something inside the
 
 
 <!-- asterism_importer_sdk/card__envelope.md -->
@@ -9529,7 +9574,7 @@ stable across re-imports (see
 | `<file>#book_entry=<uid>` | lorebook entry (id if present, else content hash) | `character_book.entries` / World Info |
 | `<file>#L<n>` | line-indexed record (append-heavy source) | SillyTavern chat JSONL |
 | `<file>#tree/<msg-id>` | tree-node message | ChatGPT / Claude conversation |
-| `<file>!<zip-inner-path>` | ZIP archive inner entry | `.charx` / SillyTavern backup |
+| `<file>#<zip-inner-path>` | ZIP archive inner entry | `.charx` / SillyTavern backup |
 | `<file>#chunk=<name>` | PNG tEXt chunk | `chara` / `ccv3` |
 | `<file>#hash=<sha1>` | content-hash fallback when no stable id | MemoryPlugin, legacy books |
 
@@ -9600,9 +9645,13 @@ with `creator_notes_multilingual`, `group_only_greetings`, and
   - `group_only_greetings[i]` → `ChatMessage` (`label = "group_only"`)
   - character_book decorators → carried on entry `Note.extra.decorators`
     (parse deferred to downstream)
-- Locator: `<charx>!card.json#field=<slot>` /
-  `<charx>!assets/<type>/<category>/<file>`; PNG same as V2
-  (section 1) but preferring `#chunk=ccv3`.
+- Locator: `<charx>#field=<slot>` for the card's own slots — the
+  card is the container, so the slot needs no second hop through
+  `card.json` — and `<charx>#assets/<type>/<category>/<file>` for a
+  bundled asset, which is the entry its bytes are read from. PNG
+  same as V2 (section 1) but preferring `#chunk=ccv3`.
+  One delimiter throughout: `#` is what
+  `SourceLocator::from_wire` splits a container from a record on.
 
 ### 3. PNG tEXt embed
 
@@ -10748,6 +10797,7 @@ this crate.
 - [`jobs::thumb_ffmpeg`](jobs__thumb_ffmpeg.md): Video frame extraction through an external `ffmpeg`, for the
 - [`jobs::thumb_macos`](jobs__thumb_macos.md): ImageIO fast path for `thumb_gen` on macOS.
 - [`jobs::thumb_video`](jobs__thumb_video.md): Video frame extraction for `thumb_gen` on macOS.
+- [`material_bytes`](material_bytes.md): The bytes a locator addresses, when they are on this machine.
 - [`memory`](memory.md): In-memory adapters — the ports satisfied without a database.
 - [`memory::forge`](memory__forge.md): The forge's ports, over rows held in memory.
 - [`observe`](observe.md): Observation — the `tracing` subscriber and the streams it writes.
@@ -11442,6 +11492,50 @@ add a channel round-trip to get back to it.
 ## Functions
 
 - `make_thumb` — Extracts one frame from the video at `path_str`, scaled to fit a
+
+
+<!-- asterism_infra/material_bytes.md -->
+# asterism-infra::material_bytes
+
+The bytes a locator addresses, when they are on this machine.
+
+Every job that decodes, measures or hashes an original asks the same
+two questions in the same order, and the answers are not the same
+kind of thing: *are there bytes here at all* decides whether the row
+is retired, and *could they be read just now* decides whether it is
+left for a later pass. Recording a temporary failure permanently is
+the dims-walk mistake those jobs each carry a comment about.
+
+[`read`] answers both in one value, so the two stay in the order
+that keeps them apart:
+
+- `None` — nothing here will ever have bytes. A remote locator, a
+  caller-minted name, or a record inside a container nothing opens.
+- `Some(Err(_))` — bytes that should be here and were not readable
+  this time.
+- `Some(Ok(bytes))` — the bytes.
+
+## Which containers open
+
+A [`Record`](SourceLocator::Record) is a container plus an address
+inside it, and `SourceLocator::local_path` refuses to hand over the
+container on the record's behalf — a thousand-line log would answer
+every line with the whole file, which is one fingerprint repeated a
+thousand times. That reasoning holds for a record whose bytes *are*
+the container's: a JSONL line is text the importer already carried,
+and there is nothing else in the file that belongs to it alone.
+
+A ZIP entry is the other case. It has bytes of its own, at a known
+offset, and reading it yields those and nothing else. So the opening
+is per container shape rather than blanket, and [`opens_for_records`]
+is the whole list: `.charx`, the character-card archive. A plain
+`.zip` is not on it and is never handed here — an archive is not
+opened because it is an archive.
+
+## Functions
+
+- `opens_for_records` — Whether a container's shape is one whose records can be read out of
+- `read` — The bytes this locator addresses.
 
 
 <!-- asterism_infra/memory.md -->

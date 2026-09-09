@@ -608,6 +608,21 @@
       "docs": "Extracts one frame from the video at `path_str`, scaled to fit a\n`target_px` box, and returns JPEG-encoded bytes.\n\nRuns synchronously — call inside `spawn_blocking`, like the image\npath it sits beside."
     },
     {
+      "path": "asterism_infra::material_bytes",
+      "kind": "module",
+      "docs": "The bytes a locator addresses, when they are on this machine.\n\nEvery job that decodes, measures or hashes an original asks the same\ntwo questions in the same order, and the answers are not the same\nkind of thing: *are there bytes here at all* decides whether the row\nis retired, and *could they be read just now* decides whether it is\nleft for a later pass. Recording a temporary failure permanently is\nthe dims-walk mistake those jobs each carry a comment about.\n\n[`read`] answers both in one value, so the two stay in the order\nthat keeps them apart:\n\n- `None` — nothing here will ever have bytes. A remote locator, a\n  caller-minted name, or a record inside a container nothing opens.\n- `Some(Err(_))` — bytes that should be here and were not readable\n  this time.\n- `Some(Ok(bytes))` — the bytes.\n\n## Which containers open\n\nA [`Record`](SourceLocator::Record) is a container plus an address\ninside it, and `SourceLocator::local_path` refuses to hand over the\ncontainer on the record's behalf — a thousand-line log would answer\nevery line with the whole file, which is one fingerprint repeated a\nthousand times. That reasoning holds for a record whose bytes *are*\nthe container's: a JSONL line is text the importer already carried,\nand there is nothing else in the file that belongs to it alone.\n\nA ZIP entry is the other case. It has bytes of its own, at a known\noffset, and reading it yields those and nothing else. So the opening\nis per container shape rather than blanket, and [`opens_for_records`]\nis the whole list: `.charx`, the character-card archive. A plain\n`.zip` is not on it and is never handed here — an archive is not\nopened because it is an archive."
+    },
+    {
+      "path": "asterism_infra::material_bytes::opens_for_records",
+      "kind": "function",
+      "docs": "Whether a container's shape is one whose records can be read out of\nit.\n\nExtension-keyed, like `source_text`'s reader dispatch. The list is\nshort on purpose: a shape joins it when something files records\ninside that shape, not because the format could be opened."
+    },
+    {
+      "path": "asterism_infra::material_bytes::read",
+      "kind": "function",
+      "docs": "The bytes this locator addresses.\n\nSee the module docstring for what each of the three answers means to\na caller; the ordering (`None` before `Err`) is the whole point of\nreturning them together."
+    },
+    {
       "path": "asterism_infra::memory",
       "kind": "module",
       "docs": "In-memory adapters — the ports satisfied without a database.\n\nThese are not test doubles in the usual sense. A double stands in\nfor a thing; these are the thing, built over a `Mutex<Vec<Row>>`\ninstead of over SQLite. What makes that worth having is what it\nforces: a store keeps rows, so an adapter here decomposes a domain\nvalue on the way in and rebuilds it on the way out, and the rebuild\ngoes through the same door a real one will.\n\nThe alternative — a fake that keeps the domain objects themselves —\nsatisfies the same traits and answers the same calls, and never\nonce meets the question the read half exists to ask. A service\npassing against one of those has been tested against a `HashMap`\nwearing a port's name."
