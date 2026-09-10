@@ -96,10 +96,11 @@ impl ReleaseAct {
 
 /// What a released file says about the work that reached it.
 ///
-/// Assembled once, where a release is recorded, and rendered by both
-/// halves of the disclosure that carry it — today the manifest's custom
-/// assertion, which is the signed half and the only one with a field
-/// for any of this.
+/// Assembled once, when the run that carried the files reports what it
+/// wrote, and rendered into the manifest's custom assertion. Manifest
+/// only, for the reason
+/// [`DisclosureRecord::release`](super::DisclosureRecord::release)
+/// gives on the field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReleaseDisclosure {
     /// The release's own act: when the set was written out, and whether

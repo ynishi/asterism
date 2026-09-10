@@ -704,8 +704,10 @@ pub struct RenameForgeThreadCommand {
 ///
 /// It names one change point and two rows of the raw layer: the freeze
 /// of what that change point carried, and the run that carried the
-/// bytes. It is not on the chain — releasing a change point moves no
-/// line, and two releases of one change point are two of these.
+/// bytes. What a release *is*, and why it is not on the chain, is
+/// `asterism_core::domain::release` — this crate names no Asterism crate
+/// and so cannot link at it, which is also why nothing here restates the
+/// argument.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct ForgeReleaseDto {
     /// Release id (UUID hyphenated).

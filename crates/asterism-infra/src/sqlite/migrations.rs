@@ -7884,22 +7884,16 @@ fn v107_audio_material_mime(tx: &Transaction<'_>) -> Result<(), rusqlite::Error>
 
 /// V108 — a change point's state, written out.
 ///
-/// A release names one change point, the freeze of what that change
-/// point carried, and the run that carried the bytes. It is not on the
-/// chain: nothing here touches `change_point`, and the head a line
-/// reports is unaffected by any number of releases of it. That is the
-/// same reading `line`'s rename and standing already get — the history
-/// says what happened to what the line carries, and a set going out did
-/// not happen to any of that.
+/// What a release is, and why it is not a change point, is
+/// `asterism_core::domain::release`. Nothing here touches
+/// `change_point`, which is that statement in columns.
 ///
 /// # Why the prefix
 ///
-/// The forge's own nouns are unprefixed here (`line`, `pursuit`,
-/// `change_point`) and only the ones whose word was already taken carry
-/// `forge_`. This one is prefixed for a different reason: `RELEASE` is
-/// an SQLite keyword — it ends a savepoint — so an unquoted `release`
-/// would have to be quoted at every site that names it, and one of them
-/// would eventually not be.
+/// `RELEASE` is an SQLite keyword — it ends a savepoint — so an
+/// unquoted `release` would have to be quoted at every site that names
+/// it, and one of them would eventually not be. The forge's own nouns
+/// beside it (`line`, `pursuit`, `change_point`) need no such escape.
 ///
 /// # Two tables, because a stamp is per file
 ///
@@ -7910,11 +7904,12 @@ fn v107_audio_material_mime(tx: &Transaction<'_>) -> Result<(), rusqlite::Error>
 /// from "the certificate stopped working" — the distinction
 /// `disclosure::Half` exists to keep and a boolean would collapse.
 ///
-/// The rows arrive after the release does. A dispatch is started and
-/// runs later, so a release is recorded with none of these and the run
-/// fills them in; empty therefore means "not written yet" as well as
-/// "this build does not stamp", and the dispatch row beside it is what
-/// tells the two apart.
+/// The rows arrive after the release does, for the reason
+/// `Release::files` gives. A file whose stamp could not be attempted is
+/// written as a failure carrying the reason rather than left out, so an
+/// empty set has two meanings and not three: the run has not finished,
+/// or this build does not stamp. The dispatch row beside it tells those
+/// apart.
 ///
 /// # What has an FK and what does not
 ///
@@ -7927,8 +7922,11 @@ fn v107_audio_material_mime(tx: &Transaction<'_>) -> Result<(), rusqlite::Error>
 /// record pointing at something removed is still a record.
 ///
 /// Every reference is `RESTRICT`, so a release has to be taken with the
-/// line it belongs to. `Lines::discard` is where that happens, and it is
-/// the only place anything here is deleted.
+/// line it belongs to; `Lines::discard` is the definition of what a drop
+/// takes and now names releases among them. Nothing else deletes a
+/// release. The file rows are replaced rather than accumulated —
+/// `ReleaseRepository::note_files` says why — so those go and come back
+/// on every pass over one release.
 const V108_FORGE_RELEASE: &str = r#"
 CREATE TABLE forge_release (
     id           BLOB PRIMARY KEY,
