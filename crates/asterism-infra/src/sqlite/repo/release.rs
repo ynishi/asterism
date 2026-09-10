@@ -236,7 +236,10 @@ impl ReleaseRepository for SqliteReleaseRepository {
 
     async fn find(&self, id: &ReleaseId) -> Result<Option<Release>, DomainError> {
         self.one(
-            format!("SELECT {} FROM forge_release WHERE id = ?1", ReleaseRow::COLUMNS),
+            format!(
+                "SELECT {} FROM forge_release WHERE id = ?1",
+                ReleaseRow::COLUMNS
+            ),
             *id.as_uuid(),
         )
         .await

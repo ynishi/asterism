@@ -207,20 +207,8 @@ mod tests {
     fn two_releases_of_one_change_point_are_two_records() {
         let line = LineId::new();
         let point = ChangePointId::new();
-        let first = Release::new(
-            line,
-            point,
-            SnapshotId::new(),
-            DispatchId::new(),
-            act(10),
-        );
-        let second = Release::new(
-            line,
-            point,
-            SnapshotId::new(),
-            DispatchId::new(),
-            act(20),
-        );
+        let first = Release::new(line, point, SnapshotId::new(), DispatchId::new(), act(10));
+        let second = Release::new(line, point, SnapshotId::new(), DispatchId::new(), act(20));
 
         assert_ne!(first.id(), second.id());
         assert_eq!(first.change_point(), second.change_point());

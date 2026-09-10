@@ -45,6 +45,7 @@ use crate::domain::forge::model::table::EntryStates;
 // its own, and they are different things: those hang off a card, these
 // hang off a forge node. The same distinction `CoreCtx` draws by
 // naming one service `forge_thread_service`.
+use crate::domain::disclosure::Half;
 use crate::domain::forge::model::thread::{
     Anchor, Body, Message as ForgeMessage, Revision, Thread as ForgeThread,
 };
@@ -60,7 +61,6 @@ use crate::domain::persona::Persona;
 use crate::domain::persona_profile::PersonaProfile;
 use crate::domain::persona_theme::PersonaTheme;
 use crate::domain::release::{FileStamp, Release};
-use crate::domain::disclosure::Half;
 use crate::domain::render::render_policy;
 use crate::domain::repository::{Evidence, RegisteredStrategy, Route};
 use crate::domain::series::Path as SeriesPath;

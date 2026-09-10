@@ -277,11 +277,7 @@ async fn a_landed_line(
     )
     .await;
 
-    let history = ok(
-        router,
-        get(&format!("/asterism/forge/lines/{line_id}")),
-    )
-    .await;
+    let history = ok(router, get(&format!("/asterism/forge/lines/{line_id}"))).await;
     let point = history["changes"]
         .as_array()
         .expect("a chain")
@@ -316,9 +312,7 @@ async fn run_to_done(core: &CoreCtx, tmp: &std::path::Path, dispatch: &str) {
         .await
         .expect("a handle for the runner");
     let env = DispatchRunEnv {
-        registry: ExporterRegistry::single(Arc::new(
-            asterism_exporter_file::FileExporter::new(),
-        )),
+        registry: ExporterRegistry::single(Arc::new(asterism_exporter_file::FileExporter::new())),
         service: core.support.dispatch_runner.clone(),
         snapshots: Arc::new(sqlite::repo::SqliteSnapshotRepository::new(isle.clone())),
         dispatches: Arc::new(sqlite::repo::SqliteDispatchRepository::new(isle.clone())),
@@ -387,7 +381,10 @@ async fn a_release_freezes_what_the_change_point_carried_and_stamps_what_leaves(
         .collect();
     assert_eq!(frozen.len(), assets.len());
     for asset in &assets {
-        assert!(frozen.contains(asset), "the freeze holds {asset}: {frozen:?}");
+        assert!(
+            frozen.contains(asset),
+            "the freeze holds {asset}: {frozen:?}"
+        );
     }
     let dispatch_id = release["dispatch_id"].as_str().expect("a dispatch id");
     let dispatch = ok(&router, get(&format!("/asterism/dispatch/{dispatch_id}"))).await;
@@ -448,9 +445,10 @@ async fn a_release_freezes_what_the_change_point_carried_and_stamps_what_leaves(
         assert_eq!(file["manifest"]["state"], "skipped");
         assert_eq!(file["manifest"]["detail"], "no_signing_identity");
         assert!(
-            file["path"].as_str().expect("a path").starts_with(
-                out.to_str().expect("a utf-8 temporary directory")
-            ),
+            file["path"]
+                .as_str()
+                .expect("a path")
+                .starts_with(out.to_str().expect("a utf-8 temporary directory")),
             "the stamp names the copy, not the original: {file}"
         );
     }
@@ -525,7 +523,11 @@ async fn releasing_a_change_point_that_carries_nothing_is_refused() {
 
     // Take the only entry off, which lands a change point whose fold
     // has nothing alive in it.
-    let states = ok(&router, get(&format!("/asterism/forge/lines/{line}/states"))).await;
+    let states = ok(
+        &router,
+        get(&format!("/asterism/forge/lines/{line}/states")),
+    )
+    .await;
     let entry = states
         .as_array()
         .expect("a state per entry")

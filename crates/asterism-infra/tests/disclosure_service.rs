@@ -559,7 +559,11 @@ async fn a_file_that_carries_nothing_is_stamped_from_the_database() {
         "the file starts with nothing to read"
     );
 
-    let stamped = fx.service.apply_to(&asset, &returned, None, None).await.unwrap();
+    let stamped = fx
+        .service
+        .apply_to(&asset, &returned, None, None)
+        .await
+        .unwrap();
     assert_eq!(stamped.xmp, Half::Written);
     assert!(stamped.discloses());
     assert_eq!(
@@ -588,9 +592,15 @@ async fn re_applying_is_idempotent() {
     let path = dir.path().join("shot.png");
     std::fs::write(&path, png()).unwrap();
 
-    fx.service.apply_to(&asset, &path, None, None).await.unwrap();
+    fx.service
+        .apply_to(&asset, &path, None, None)
+        .await
+        .unwrap();
     let once = std::fs::read(&path).unwrap();
-    fx.service.apply_to(&asset, &path, None, None).await.unwrap();
+    fx.service
+        .apply_to(&asset, &path, None, None)
+        .await
+        .unwrap();
     let twice = std::fs::read(&path).unwrap();
 
     assert_eq!(
