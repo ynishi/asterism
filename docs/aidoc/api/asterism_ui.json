@@ -530,7 +530,7 @@
     {
       "path": "asterism_ui::commands::list_forge_releases_of_change_point",
       "kind": "function",
-      "docs": "Every time one change point was written out, most recent first.\n\nA list, because two releases of one change point are two records\n([`Release`](asterism_core::domain::release::Release)). The line is\nnamed beside the node for the reason the route is shaped that way:\na node of another line answers 404 rather than being answered for."
+      "docs": "Every time one change point was written out, most recent first.\n\nA list, for the reason\n[`release`](asterism_core::domain::release) gives.\n\nBoth ids are arguments, and both are used: a node this line does not\nhave comes back as [`UiError::NotFound`] rather than being answered\nfor."
     },
     {
       "path": "asterism_ui::commands::list_forge_strategies",
