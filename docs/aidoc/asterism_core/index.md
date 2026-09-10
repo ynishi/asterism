@@ -95,6 +95,7 @@ the private design notes.
 - [`domain::derived_text`](domain__derived_text.md): Derived text — the one string an asset offers a full-text index,
 - [`domain::dir`](domain__dir.md): `Dir` — a persona-scoped folder tree for organising the sidebar.
 - [`domain::disclosure`](domain__disclosure.md): What an artefact discloses about how it was made, and the rule that
+- [`domain::disclosure::carried`](domain__disclosure__carried.md): What a file currently carries, and whether it still stands up.
 - [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [`domain::disclosure::record`](domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
 - [`domain::disclosure::source_type`](domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to

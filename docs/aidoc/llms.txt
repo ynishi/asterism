@@ -66,6 +66,7 @@
 - [asterism-core::domain::derived_text](asterism_core/domain__derived_text.md): Derived text — the one string an asset offers a full-text index,
 - [asterism-core::domain::dir](asterism_core/domain__dir.md): `Dir` — a persona-scoped folder tree for organising the sidebar.
 - [asterism-core::domain::disclosure](asterism_core/domain__disclosure.md): What an artefact discloses about how it was made, and the rule that
+- [asterism-core::domain::disclosure::carried](asterism_core/domain__disclosure__carried.md): What a file currently carries, and whether it still stands up.
 - [asterism-core::domain::disclosure::outcome](asterism_core/domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [asterism-core::domain::disclosure::record](asterism_core/domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
 - [asterism-core::domain::disclosure::source_type](asterism_core/domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
