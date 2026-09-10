@@ -54,6 +54,7 @@ this crate.
 - [`jobs::thumb_ffmpeg`](jobs__thumb_ffmpeg.md): Video frame extraction through an external `ffmpeg`, for the
 - [`jobs::thumb_macos`](jobs__thumb_macos.md): ImageIO fast path for `thumb_gen` on macOS.
 - [`jobs::thumb_video`](jobs__thumb_video.md): Video frame extraction for `thumb_gen` on macOS.
+- [`material_bytes`](material_bytes.md): The bytes a locator addresses, when they are on this machine.
 - [`memory`](memory.md): In-memory adapters — the ports satisfied without a database.
 - [`memory::forge`](memory__forge.md): The forge's ports, over rows held in memory.
 - [`observe`](observe.md): Observation — the `tracing` subscriber and the streams it writes.

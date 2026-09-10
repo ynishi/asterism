@@ -89,6 +89,7 @@ mod tests {
             session_id: "s",
             occurred_at: Utc::now(),
             platform: None,
+            archive_entries: None,
         }
     }
 

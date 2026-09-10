@@ -608,6 +608,21 @@
       "docs": "Extracts one frame from the video at `path_str`, scaled to fit a\n`target_px` box, and returns JPEG-encoded bytes.\n\nRuns synchronously — call inside `spawn_blocking`, like the image\npath it sits beside."
     },
     {
+      "path": "asterism_infra::material_bytes",
+      "kind": "module",
+      "docs": "The bytes a locator addresses, when they are on this machine.\n\nEvery job that decodes, measures or hashes an original asks the same\ntwo questions in the same order, and the answers are not the same\nkind of thing: *are there bytes here at all* decides whether the row\nis retired, and *could they be read just now* decides whether it is\nleft for a later pass. Recording a temporary failure permanently is\nthe dims-walk mistake those jobs each carry a comment about.\n\n[`read`] answers both in one value, so the two stay in the order\nthat keeps them apart:\n\n- `None` — nothing here will ever have bytes. A remote locator, a\n  caller-minted name, or a record inside a container nothing opens.\n- `Some(Err(_))` — bytes that should be here and were not readable\n  this time.\n- `Some(Ok(bytes))` — the bytes.\n\n## Which containers open, and which of their records\n\nA [`Record`](SourceLocator::Record) is a container plus an address\ninside it, and most such records have no bytes of their own.\n`ContainerRecord::holds_its_own_bytes` is the question, and its\ndocstring says which shapes answer yes and why the container is not\nopened on the others' behalf.\n\nA shape answering `true` there is not the whole test. A card\narchive addresses two kinds of thing with one spelling: the entries\nit packs (`#assets/icon/images/main.png`) and the slots the card\nstates (`#field=name`), and only the first names bytes. Which is\nwhich is a question only the archive can answer, so this module\nasks it — an address the archive does not hold reads as `None`,\nthe permanent answer, rather than as a read that failed. Retrying a\nslot suffix on every backfill pass, forever, is the walk that never\nshrinks.\n\n## The ceiling\n\nAn entry states its own uncompressed length and the file it sits in\nwas written by somebody else, so the length is a claim rather than a\nfact. [`MAX_ENTRY_BYTES`] is the ceiling the read is held to, and an\nentry over it is refused rather than allocated for — the same\njudgement `fingerprint::hash_artefact` makes about a file it is\nasked to hold whole."
+    },
+    {
+      "path": "asterism_infra::material_bytes::MAX_ENTRY_BYTES",
+      "kind": "constant",
+      "docs": "The most an entry is read into memory, at 64 MiB.\n\nThe same ceiling the content walk holds a file to\n(`MAX_CONTENT_WALK_BYTES`), and for the same reason: the buffer is\nthis process's memory, and what is on the other side of the number\nis a picture nobody put in a character card."
+    },
+    {
+      "path": "asterism_infra::material_bytes::read",
+      "kind": "function",
+      "docs": "The bytes this locator addresses.\n\nSee the module docstring for what each of the three answers means to\na caller; the ordering (`None` before `Err`) is the whole point of\nreturning them together."
+    },
+    {
       "path": "asterism_infra::memory",
       "kind": "module",
       "docs": "In-memory adapters — the ports satisfied without a database.\n\nThese are not test doubles in the usual sense. A double stands in\nfor a thing; these are the thing, built over a `Mutex<Vec<Row>>`\ninstead of over SQLite. What makes that worth having is what it\nforces: a store keeps rows, so an adapter here decomposes a domain\nvalue on the way in and rebuilds it on the way out, and the rebuild\ngoes through the same door a real one will.\n\nThe alternative — a fake that keeps the domain objects themselves —\nsatisfies the same traits and answers the same calls, and never\nonce meets the question the read half exists to ask. A service\npassing against one of those has been tested against a `HashMap`\nwearing a port's name."

@@ -49,7 +49,7 @@
 //! | `<file>#book_entry=<uid>` | lorebook entry (id if present, else content hash) | `character_book.entries` / World Info |
 //! | `<file>#L<n>` | line-indexed record (append-heavy source) | SillyTavern chat JSONL |
 //! | `<file>#tree/<msg-id>` | tree-node message | ChatGPT / Claude conversation |
-//! | `<file>!<zip-inner-path>` | ZIP archive inner entry | `.charx` / SillyTavern backup |
+//! | `<file>#<zip-inner-path>` | ZIP archive inner entry | `.charx` |
 //! | `<file>#chunk=<name>` | PNG tEXt chunk | `chara` / `ccv3` |
 //! | `<file>#hash=<sha1>` | content-hash fallback when no stable id | MemoryPlugin, legacy books |
 //!
@@ -120,9 +120,13 @@
 //!   - `group_only_greetings[i]` → `ChatMessage` (`label = "group_only"`)
 //!   - character_book decorators → carried on entry `Note.extra.decorators`
 //!     (parse deferred to downstream)
-//! - Locator: `<charx>!card.json#field=<slot>` /
-//!   `<charx>!assets/<type>/<category>/<file>`; PNG same as V2
-//!   (section 1) but preferring `#chunk=ccv3`.
+//! - Locator: `<charx>#field=<slot>` for the card's own slots — the
+//!   card is the container, so the slot needs no second hop through
+//!   `card.json` — and `<charx>#assets/<type>/<category>/<file>` for a
+//!   bundled asset, which is the entry its bytes are read from. PNG
+//!   same as V2 (section 1) but preferring `#chunk=ccv3`.
+//!   One delimiter throughout: `#` is what
+//!   `SourceLocator::from_wire` splits a container from a record on.
 //!
 //! ### 3. PNG tEXt embed
 //!

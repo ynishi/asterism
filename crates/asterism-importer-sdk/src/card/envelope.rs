@@ -79,7 +79,7 @@ pub struct CardContext<'a> {
     /// ownership rules).
     pub source_kind: &'a str,
     /// Container locator — the caller's stable id for the *card* as a
-    /// whole (typically the PNG or `.json` path). Every per-slot
+    /// whole (the PNG, `.json` or `.charx` path). Every per-slot
     /// footprint derives its own locator by appending a suffix
     /// (`#field=<slot>` / `#greeting=<i>` / `#book_entry=<uid>` — see
     /// [`crate::catalogue`] for the taxonomy).
@@ -102,6 +102,15 @@ pub struct CardContext<'a> {
     /// Optional platform label (`"SillyTavern"`, `"CharacterHub"`,
     /// `"RisuAI"`, …). Flows into every [`FootprintSource::platform`].
     pub platform: Option<&'a str>,
+    /// The entries the container holds, when the container is an
+    /// archive the card's assets travel inside (`.charx`).
+    ///
+    /// `None` for a PNG or a standalone `.json`, which is a statement
+    /// about what this code reads rather than about the file: the V3
+    /// spec lets a PNG carry assets in its own chunks, and nothing here
+    /// looks for them. `Some` turns an `embeded://` URI into a record
+    /// address — see [`Self::asset_source`].
+    pub archive_entries: Option<&'a [String]>,
 }
 
 impl<'a> CardContext<'a> {
@@ -116,6 +125,27 @@ impl<'a> CardContext<'a> {
             // A card's fields are addressed by suffix, and the card
             // states no id of its own for them to be named by.
             external_id: None,
+        }
+    }
+
+    /// Build a [`FootprintSource`] for an asset the card names by URI.
+    ///
+    /// `<container>#<entry>` when the container is an archive that
+    /// really holds the entry — the spelling the domain reads back as
+    /// one record inside a container, which is how the bytes are found
+    /// later without a second copy of them on disk.
+    ///
+    /// Falls back to `suffix` otherwise: a PNG or `.json` card whose
+    /// assets are references to somewhere else, and an archive card
+    /// naming a picture that was never packed. Addressing either at an
+    /// entry would mint a locator with nothing behind it.
+    pub fn asset_source(&self, uri: &str, suffix: &str) -> FootprintSource {
+        match self
+            .archive_entries
+            .and_then(|entries| super::charx::entry_for_uri(uri, entries))
+        {
+            Some(entry) => self.footprint_source(entry),
+            None => self.footprint_source(suffix),
         }
     }
 }
@@ -172,6 +202,7 @@ mod tests {
             session_id: "sid-42",
             occurred_at: now,
             platform: Some("SillyTavern"),
+            archive_entries: None,
         };
         let src = ctx.footprint_source("field=name");
         assert_eq!(src.kind, "chara");

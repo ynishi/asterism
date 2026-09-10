@@ -429,6 +429,7 @@ mod tests {
             session_id: "sid-42",
             occurred_at: Utc::now(),
             platform: Some("SillyTavern"),
+            archive_entries: None,
         }
     }
 

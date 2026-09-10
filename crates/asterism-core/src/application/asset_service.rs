@@ -1229,19 +1229,29 @@ impl AssetService {
             .as_deref()
             .map(content_hash::parse_declaration)
             .transpose()?;
-        // A locator with no bytes of its own — a record inside a
-        // container file, a URL, a caller-minted name — is never
+        // A locator with no bytes of its own — a URL, a caller-minted
+        // name, a record whose bytes are its container's — is never
         // hashed: the job records the `no-bytes` status and moves on.
         // A declaration about it would therefore sit forever in the
         // "not checked yet" state, which is the one state a reader must
         // be able to trust. Refused on the same grounds as the content
         // axis: an assertion whose verification cannot arrive is worse
         // than no assertion, because it looks like one that is pending.
-        if declared_hash.is_some() && locator.local_path().is_none() {
+        //
+        // The question is "will anything ever read these bytes", which
+        // is not the same as "is there a file". An entry a container
+        // hands out has neither a path nor a reason to be refused: the
+        // hashing walk opens the container and reads it, so a
+        // declaration about one is checked like any other.
+        let hashable = match &locator {
+            SourceLocator::Record(record) => record.holds_its_own_bytes(),
+            other => other.local_path().is_some(),
+        };
+        if declared_hash.is_some() && !hashable {
             return Err(DomainError::Validation(format!(
                 "declared_content_hash was supplied for {:?}, which has no bytes to \
-                 read (a record inside a container file, a remote address, or a name \
-                 that is not a path) — nothing would ever check it",
+                 read (a record whose bytes are its container's, a remote address, or \
+                 a name that is not a path) — nothing would ever check it",
                 command.locator
             )));
         }

@@ -11,10 +11,15 @@
 //! - [`envelope`] — the parsed wire shape: [`CardEnvelope`] holds
 //!   `{spec, spec_version, data{…}}` and [`CardContext`] carries the
 //!   caller-supplied ingest metadata (source_kind, locator,
-//!   session_id, occurred_at, platform).
+//!   session_id, occurred_at, platform, archive_entries).
 //! - [`png_chunk`] — base64 UTF-8 JSON decoder for the PNG text chunks
 //!   `chara` (V2) and `ccv3` (V3). Feeds an envelope back to the
 //!   parser; chunk framing is `pngmeta`'s.
+//! - [`charx`] — the ZIP container: `card.json` read out of the
+//!   archive, and the names of the assets travelling with it. The
+//!   entries are addressed rather than extracted, so the pictures a
+//!   card brings with it are found later without a second copy on
+//!   disk.
 //! - [`parser`] — the extension trait [`CharacterCardParser`] and the
 //!   canonical V2 slot logic exposed as free functions
 //!   ([`parser::v2_default`]) so derivatives can chain rather than
@@ -47,6 +52,7 @@
 //! locator), so `edge_rebuild` clusters them via
 //! `time_proximity = 1.0`.
 
+pub mod charx;
 pub mod envelope;
 pub mod parser;
 pub mod png_chunk;
@@ -55,6 +61,7 @@ pub mod source_parser;
 pub mod v2;
 pub mod v3;
 
+pub use charx::{Charx, is_zip};
 pub use envelope::{CardContext, CardEnvelope};
 pub use parser::{CharacterCardParser, v2_default};
 pub use png_chunk::{CCV3_KEYWORD, CHARA_KEYWORD, envelope_from_chunk, envelope_from_png, is_png};

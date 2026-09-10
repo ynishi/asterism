@@ -102,6 +102,7 @@ per-target split rules, locator patterns, and unverified fields.
 
 - [`bundle`](bundle.md): Deriving the grouping key that ties the footprints of one container
 - [`card`](card.md): # Character-card parser subsystem
+- [`card::charx`](card__charx.md): `.charx` — a V3 card and its assets inside one ZIP.
 - [`card::envelope`](card__envelope.md): Envelope + context types shared by every character-card parser.
 - [`card::parser`](card__parser.md): [`CharacterCardParser`] trait + canonical V2 slot logic.
 - [`card::parser::v2_default`](card__parser__v2_default.md): Canonical V2 slot logic, exposed as free functions so derivatives

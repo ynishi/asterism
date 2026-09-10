@@ -94,6 +94,7 @@ fn ctx() -> CardContext<'static> {
         session_id: "sess-card",
         occurred_at: Utc::now(),
         platform: Some("SillyTavern"),
+        archive_entries: None,
     }
 }
 

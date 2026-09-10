@@ -203,6 +203,7 @@
 - [asterism-importer-sdk overview](asterism_importer_sdk/index.md): # asterism-importer-sdk
 - [asterism-importer-sdk::bundle](asterism_importer_sdk/bundle.md): Deriving the grouping key that ties the footprints of one container
 - [asterism-importer-sdk::card](asterism_importer_sdk/card.md): # Character-card parser subsystem
+- [asterism-importer-sdk::card::charx](asterism_importer_sdk/card__charx.md): `.charx` — a V3 card and its assets inside one ZIP.
 - [asterism-importer-sdk::card::envelope](asterism_importer_sdk/card__envelope.md): Envelope + context types shared by every character-card parser.
 - [asterism-importer-sdk::card::parser](asterism_importer_sdk/card__parser.md): [`CharacterCardParser`] trait + canonical V2 slot logic.
 - [asterism-importer-sdk::card::parser::v2_default](asterism_importer_sdk/card__parser__v2_default.md): Canonical V2 slot logic, exposed as free functions so derivatives
@@ -258,6 +259,7 @@
 - [asterism-infra::jobs::thumb_ffmpeg](asterism_infra/jobs__thumb_ffmpeg.md): Video frame extraction through an external `ffmpeg`, for the
 - [asterism-infra::jobs::thumb_macos](asterism_infra/jobs__thumb_macos.md): ImageIO fast path for `thumb_gen` on macOS.
 - [asterism-infra::jobs::thumb_video](asterism_infra/jobs__thumb_video.md): Video frame extraction for `thumb_gen` on macOS.
+- [asterism-infra::material_bytes](asterism_infra/material_bytes.md): The bytes a locator addresses, when they are on this machine.
 - [asterism-infra::memory](asterism_infra/memory.md): In-memory adapters — the ports satisfied without a database.
 - [asterism-infra::memory::forge](asterism_infra/memory__forge.md): The forge's ports, over rows held in memory.
 - [asterism-infra::observe](asterism_infra/observe.md): Observation — the `tracing` subscriber and the streams it writes.

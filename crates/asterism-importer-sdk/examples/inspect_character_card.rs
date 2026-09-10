@@ -63,6 +63,7 @@ fn report(keyword: &str, env: &CardEnvelope) {
         session_id: "sess-card",
         occurred_at: Utc::now(),
         platform: Some("SillyTavern"),
+        archive_entries: None,
     };
     let reg = CardParserRegistry::with_defaults();
     let out = reg.dispatch(env, &ctx).expect("registry claims this spec");

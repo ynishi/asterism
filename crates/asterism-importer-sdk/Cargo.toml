@@ -44,6 +44,11 @@ base64       = { workspace = true }
 # unreadable for no reason other than the flag.
 pngmeta      = { version = "0.2.1", features = ["inflate"] }
 
+# ZIP framing for `card::charx`, the container a V3 card can arrive in.
+# Feature choice and version are in `[workspace.dependencies]`, with
+# the reasoning for reading deflate through `flate2`.
+zip          = { workspace = true }
+
 [dev-dependencies]
 # Fixture builder for the chunk-level tests (valid PNGs, duplicate
 # keywords, `zTXt`, deliberately truncated files). Building those by

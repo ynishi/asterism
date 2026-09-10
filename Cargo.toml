@@ -288,6 +288,19 @@ rmcp = { version = "3", features = [
 rusqlite-isle = { version = "0.3", features = ["tokio", "pool"] }
 rusqlite      = { version = "0.32", features = ["bundled", "uuid"] }
 
+# The ZIP a character card can arrive in (`.charx`): the importer reads
+# `card.json` and lists the entries, the job side reads one entry back
+# out. Two members take it, so the version is settled here rather than
+# in each.
+#
+# `deflate-flate2-zlib-rs` rather than the `deflate` umbrella. The
+# umbrella is that plus `deflate-zopfli`, and zopfli is an encoder —
+# nothing here writes an archive, and a card is read as it arrived.
+# What this does add is `zlib-rs`, the backend: `zip` takes `flate2`
+# with no default features, so naming a backend is not optional, and
+# the plain `deflate-flate2` fails to build for that reason.
+zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
 # --- asterism-infra: filesystem + media pipeline (future work) ---
 walkdir      = "2"
 notify       = "8"

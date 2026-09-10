@@ -1,9 +1,11 @@
 //! [`SourceParser`] adapter that turns any character-card [`RawItem`]
-//! (PNG tEXt or standalone JSON) into per-slot [`Footprint`]s.
+//! (PNG tEXt, standalone JSON, or a `.charx` archive) into per-slot
+//! [`Footprint`]s.
 //!
 //! Composes the pipeline:
-//! [`RawItem`] → [`envelope_from_png`] / [`CardEnvelope::from_json`] →
-//! [`CardParserRegistry::dispatch`] → `Vec<Footprint>`.
+//! [`RawItem`] → [`envelope_from_png`] / [`charx::read`] /
+//! [`CardEnvelope::from_json`] → [`CardParserRegistry::dispatch`] →
+//! `Vec<Footprint>`.
 //!
 //! Importer binaries plug this straight into an [`FsScanner`](crate::FsScanner)
 //! so they only need to configure the source_kind slug and the batch
@@ -17,12 +19,13 @@ use crate::bundle::session_id_for;
 use crate::parser::{ParseError, SourceParser};
 use crate::scanner::RawItem;
 
+use super::charx;
 use super::envelope::{CardContext, CardEnvelope};
 use super::png_chunk::{envelope_from_png, is_png};
 use super::registry::CardParserRegistry;
 
-/// [`SourceParser`] that decodes character cards from PNG tEXt chunks
-/// or standalone JSON and dispatches through a
+/// [`SourceParser`] that decodes character cards from PNG tEXt chunks,
+/// `.charx` archives, or standalone JSON, and dispatches through a
 /// [`CardParserRegistry`].
 ///
 /// Configure the `platform` label (`"SillyTavern"`, `"CharacterHub"`,
@@ -57,16 +60,26 @@ impl CharaSourceParser {
         self
     }
 
-    /// Try to decode a payload as either PNG (chara / ccv3 chunk) or
-    /// standalone JSON envelope. Returns `None` when the payload is
-    /// neither a recognised PNG card nor a valid card envelope.
+    /// Try to decode a payload as a PNG (chara / ccv3 chunk), a
+    /// `.charx` archive, or a standalone JSON envelope. Returns `None`
+    /// when the payload is none of those.
     pub fn envelope_from_payload(payload: &[u8]) -> Option<CardEnvelope> {
+        Self::read_payload(payload).map(|(envelope, _)| envelope)
+    }
+
+    /// The envelope, and the archive's entry names when the container
+    /// was one. The names go on to [`CardContext::archive_entries`],
+    /// which is what lets a bundled asset be addressed at the entry it
+    /// really occupies.
+    fn read_payload(payload: &[u8]) -> Option<(CardEnvelope, Option<Vec<String>>)> {
         if is_png(payload) {
-            envelope_from_png(payload)
+            envelope_from_png(payload).map(|envelope| (envelope, None))
+        } else if charx::is_zip(payload) {
+            charx::read(payload).map(|charx| (charx.envelope, Some(charx.entries)))
         } else {
             let s = std::str::from_utf8(payload).ok()?;
             let v: Value = serde_json::from_str(s).ok()?;
-            CardEnvelope::from_json(v)
+            CardEnvelope::from_json(v).map(|envelope| (envelope, None))
         }
     }
 }
@@ -79,11 +92,12 @@ impl Default for CharaSourceParser {
 
 impl SourceParser for CharaSourceParser {
     fn parse(&self, item: RawItem) -> Result<Vec<Footprint>, ParseError> {
-        let Some(env) = Self::envelope_from_payload(&item.payload) else {
-            // Unrecognised shape (non-card PNG, non-envelope JSON) —
-            // skip silently. The scanner's extension filter usually
-            // keeps us from getting here, but a `.png` avatar without
-            // an embedded card is a legitimate case.
+        let Some((env, entries)) = Self::read_payload(&item.payload) else {
+            // Unrecognised shape (non-card PNG, non-envelope JSON, an
+            // archive with no `card.json`) — skip silently. The
+            // scanner's extension filter usually keeps us from getting
+            // here, but a `.png` avatar without an embedded card is a
+            // legitimate case.
             return Ok(Vec::new());
         };
         let session_id = session_id_for(&item.locator);
@@ -94,6 +108,7 @@ impl SourceParser for CharaSourceParser {
             session_id: &session_id,
             occurred_at,
             platform: self.platform.as_deref(),
+            archive_entries: entries.as_deref(),
         };
         // `dispatch` returns None when the envelope's spec has no
         // registered parser; treat that the same as an unrecognised
@@ -167,6 +182,81 @@ mod tests {
         let out = parser.parse(item).unwrap();
         // 1 Note (name) + 1 ChatMessage (first_mes) = 2.
         assert_eq!(out.len(), 2);
+    }
+
+    /// A `.charx` carrying an icon: the card decomposes exactly as the
+    /// other two containers do, and the picture that travelled with it
+    /// is addressed at the archive entry rather than at a slot suffix —
+    /// which is the address its bytes are read back through.
+    #[test]
+    fn a_charx_addresses_its_bundled_asset_at_the_entry_it_occupies() {
+        let card = json!({
+            "spec": "chara_card_v3",
+            "spec_version": "3.0",
+            "data": {
+                "name": "Lyra",
+                "first_mes": "hello",
+                "assets": [
+                    {
+                        "type": "icon",
+                        "name": "main",
+                        "uri": "embeded://assets/icon/images/main.png",
+                        "ext": "png"
+                    },
+                    {
+                        "type": "emotion",
+                        "name": "joy",
+                        "uri": "embeded://assets/emotion/images/joy.png",
+                        "ext": "png"
+                    }
+                ]
+            }
+        });
+
+        let mut payload = Vec::new();
+        {
+            use std::io::Write;
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut payload));
+            let opts = zip::write::SimpleFileOptions::default();
+            zip.start_file("card.json", opts).unwrap();
+            zip.write_all(card.to_string().as_bytes()).unwrap();
+            // Only the icon is packed. The emotion the card names is
+            // not in here, and nothing should claim it is.
+            zip.start_file("assets/icon/images/main.png", opts).unwrap();
+            zip.write_all(b"\x89PNG").unwrap();
+            zip.finish().unwrap();
+        }
+
+        let out = CharaSourceParser::new()
+            .parse(RawItem {
+                source_kind: "chara".into(),
+                locator: "/tmp/lyra.charx".into(),
+                payload,
+                occurred_at: None,
+                extra: json!({}),
+            })
+            .unwrap();
+
+        let locators: Vec<&str> = out
+            .iter()
+            .filter_map(|f| match f {
+                Footprint::Image(i) => Some(i.source.locator.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            locators,
+            vec![
+                "/tmp/lyra.charx#assets/icon/images/main.png",
+                "/tmp/lyra.charx#asset=emotion/joy[1]",
+            ],
+            "the packed one is addressed at its entry; the one the \
+             archive does not hold keeps the slot suffix, which points \
+             at the card rather than at empty space"
+        );
+
+        // 1 Note (name) + 1 ChatMessage (first_mes) + 2 Images = 4.
+        assert_eq!(out.len(), 4);
     }
 
     #[test]
