@@ -69,7 +69,7 @@ the private design notes.
 - [`application::persona_service`](application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
 - [`application::query_group_invalidation`](application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [`application::query_group_service`](application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
-- [`application::release_service`](application__release_service.md): `ReleaseService` — writing out what a change point carries, and
+- [`application::release_service`](application__release_service.md): `ReleaseService` — writing out what a change point carries.
 - [`application::series_strategy_service`](application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
 - [`application::session_service`](application__session_service.md): `SessionService` — use cases for the Session 1st-class entity.
 - [`application::snapshot_service`](application__snapshot_service.md): `SnapshotService` — application surface for the immutable `Snapshot`
@@ -80,6 +80,7 @@ the private design notes.
 - [`application_support::chapter_intake`](application_support__chapter_intake.md): What a fresh reading of a material's chapter list means for the
 - [`application_support::dispatch_runner_service`](application_support__dispatch_runner_service.md): `DispatchRunnerService` — the runner-side half of the outbound
 - [`application_support::duplicate_detection`](application_support__duplicate_detection.md): Duplicate detection — what happens the moment a fingerprint lands on
+- [`application_support::outbound_stamp`](application_support__outbound_stamp.md): Stamping what a dispatch wrote, before the run reports done.
 - [`application_support::query_group_refresh_service`](application_support__query_group_refresh_service.md): `QueryGroupRefreshService` — bulk Query Group re-evaluation.
 - [`application_support::retention_service`](application_support__retention_service.md): `RetentionService` — the trash retention sweep.
 - [`domain`](domain.md): Domain layer — entities, value objects, and repository ports.

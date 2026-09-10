@@ -24,6 +24,12 @@ conversion with its manifest stripped can be handed to
 again — the answer never lived in the file. That is the property a
 manifest cannot have on its own, since any re-encode removes it.
 
+What comes back is what the rows establish. The release block is not
+among them: it is the caller's context, so a copy re-applied through
+any door but a release gets the disclosure and not the statement
+about who chose it. Nothing on the asset names a release, and
+[`apply_to`](DisclosureService::apply_to)'s own argument says why.
+
 # Why the ports are here and not in `repository`
 
 [`DisclosureWriter`] and [`DisclosureReader`] are outbound ports

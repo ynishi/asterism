@@ -17,10 +17,11 @@ and its `digitalSourceType` is the same IPTC URI the XMP packet
 states. That is the half a validator understands.
 
 `io.github.ynishi.asterism.disclosure` carries what the database
-knows and the standard has no field for: the asset id, the dispatch
-the file left through, and the ids it was derived from. A reader that
-has this Asterism instance can resolve those; a reader that does not
-at least learns that the lineage exists and is recorded somewhere.
+knows and the standard has no field for — [`definition`] is the list,
+and it grows there rather than here. What every entry of it has in
+common is that a reader holding this Asterism instance can resolve
+it, and a reader who does not at least learns that the record exists
+and is kept somewhere.
 
 The label is reverse-DNS under a domain that resolves to the author,
 which is the convention the C2PA specification asks third-party

@@ -40,7 +40,7 @@
 - [asterism-core::application::persona_service](asterism_core/application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
 - [asterism-core::application::query_group_invalidation](asterism_core/application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [asterism-core::application::query_group_service](asterism_core/application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
-- [asterism-core::application::release_service](asterism_core/application__release_service.md): `ReleaseService` — writing out what a change point carries, and
+- [asterism-core::application::release_service](asterism_core/application__release_service.md): `ReleaseService` — writing out what a change point carries.
 - [asterism-core::application::series_strategy_service](asterism_core/application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
 - [asterism-core::application::session_service](asterism_core/application__session_service.md): `SessionService` — use cases for the Session 1st-class entity.
 - [asterism-core::application::snapshot_service](asterism_core/application__snapshot_service.md): `SnapshotService` — application surface for the immutable `Snapshot`
@@ -51,6 +51,7 @@
 - [asterism-core::application_support::chapter_intake](asterism_core/application_support__chapter_intake.md): What a fresh reading of a material's chapter list means for the
 - [asterism-core::application_support::dispatch_runner_service](asterism_core/application_support__dispatch_runner_service.md): `DispatchRunnerService` — the runner-side half of the outbound
 - [asterism-core::application_support::duplicate_detection](asterism_core/application_support__duplicate_detection.md): Duplicate detection — what happens the moment a fingerprint lands on
+- [asterism-core::application_support::outbound_stamp](asterism_core/application_support__outbound_stamp.md): Stamping what a dispatch wrote, before the run reports done.
 - [asterism-core::application_support::query_group_refresh_service](asterism_core/application_support__query_group_refresh_service.md): `QueryGroupRefreshService` — bulk Query Group re-evaluation.
 - [asterism-core::application_support::retention_service](asterism_core/application_support__retention_service.md): `RetentionService` — the trash retention sweep.
 - [asterism-core::domain](asterism_core/domain.md): Domain layer — entities, value objects, and repository ports.

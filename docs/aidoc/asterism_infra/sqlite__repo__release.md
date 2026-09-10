@@ -11,11 +11,10 @@ question it exists to answer.
 
 # Why this is not on `SqliteForge`
 
-That adapter satisfies the forge's four ports and is stated in the
-forge's own words. This port is not one of them — a release names a
-snapshot and a dispatch, which the forge may not
-([`asterism_core::domain::release`]) — so putting it there would
-give one type two vocabularies and no reason to have both.
+That adapter satisfies the forge's ports and is stated in the
+forge's own words. This port is not one of them — see
+[`asterism_core::domain::release`] — so putting it there would give
+one type two vocabularies and no reason to have both.
 
 What it does borrow is [`ActRow`], because an act is stored the same
 way wherever it appears: three columns, and a kind this build refuses

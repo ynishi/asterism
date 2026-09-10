@@ -530,7 +530,7 @@
     {
       "path": "asterism_ui::commands::list_forge_releases_of_change_point",
       "kind": "function",
-      "docs": "Every time one change point was written out, most recent first.\n\nA list rather than one, because a set going out twice is two things\nthat happened and the earlier one is what a rejection was about."
+      "docs": "Every time one change point was written out, most recent first.\n\nA list, because two releases of one change point are two records\n([`Release`](asterism_core::domain::release::Release)). The line is\nnamed beside the node for the reason the route is shaped that way:\na node of another line answers 404 rather than being answered for."
     },
     {
       "path": "asterism_ui::commands::list_forge_strategies",
@@ -835,7 +835,7 @@
     {
       "path": "asterism_ui::commands::release_forge_change_point",
       "kind": "function",
-      "docs": "Freezes what a change point carried, copies it into a directory, and\nstamps each copy on the way out.\n\nAnswers with the release as it was recorded, which is before its\nfiles exist: the run is started here and finishes afterwards, so\n`files` is empty and reading the release again once the run has\nfinished carries a stamp per file.\n\nThe ids are arguments rather than path segments, which is the one\ndifference from the HTTP surface — the command's own `line_id` and\n`change_point_id` fields exist for callers that have no path, and\nthis is one of them."
+      "docs": "Freezes what a change point carried, copies it into a directory, and\nstamps each copy on the way out.\n\nAnswers with the release as it was recorded, which is before its\nfiles exist — see\n[`ForgeReleaseDto::files`](asterism_contract::forge::ForgeReleaseDto::files).\n\nTwo things differ from the HTTP surface, and both are what every\nforge command here does. The ids are arguments rather than path\nsegments, which is what the command's own `line_id` and\n`change_point_id` fields exist for. And the write is the owner's:\nthis surface is the owner's own, so the attribution is\n[`AttributionContext::owner_surface`] and the command's\n`author_kind` / `author_subject` / `operator_ai` are not read —\nthose carry a remote caller's assertion, which is a claim this\nprocess is in no position to receive from itself."
     },
     {
       "path": "asterism_ui::commands::remeasure_dims",
