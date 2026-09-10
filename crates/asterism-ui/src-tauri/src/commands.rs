@@ -4731,14 +4731,18 @@ mod teams_error_tests {
 /// stamps each copy on the way out.
 ///
 /// Answers with the release as it was recorded, which is before its
-/// files exist: the run is started here and finishes afterwards, so
-/// `files` is empty and reading the release again once the run has
-/// finished carries a stamp per file.
+/// files exist — see
+/// [`ForgeReleaseDto::files`](asterism_contract::forge::ForgeReleaseDto::files).
 ///
-/// The ids are arguments rather than path segments, which is the one
-/// difference from the HTTP surface — the command's own `line_id` and
-/// `change_point_id` fields exist for callers that have no path, and
-/// this is one of them.
+/// Two things differ from the HTTP surface, and both are what every
+/// forge command here does. The ids are arguments rather than path
+/// segments, which is what the command's own `line_id` and
+/// `change_point_id` fields exist for. And the write is the owner's:
+/// this surface is the owner's own, so the attribution is
+/// [`AttributionContext::owner_surface`] and the command's
+/// `author_kind` / `author_subject` / `operator_ai` are not read —
+/// those carry a remote caller's assertion, which is a claim this
+/// process is in no position to receive from itself.
 #[tauri::command]
 pub async fn release_forge_change_point(
     state: State<'_, AppState>,
@@ -4772,16 +4776,22 @@ pub async fn get_forge_release(
 
 /// Every time one change point was written out, most recent first.
 ///
-/// A list rather than one, because a set going out twice is two things
-/// that happened and the earlier one is what a rejection was about.
+/// A list, because two releases of one change point are two records
+/// ([`Release`](asterism_core::domain::release::Release)). The line is
+/// named beside the node for the reason the route is shaped that way:
+/// a node of another line answers 404 rather than being answered for.
 #[tauri::command]
 pub async fn list_forge_releases_of_change_point(
     state: State<'_, AppState>,
+    line_id: String,
     change_point_id: String,
 ) -> Result<Vec<ForgeReleaseDto>, UiError> {
     let found = state
         .release_service
-        .of_change_point(&forge_change_point_id(&change_point_id, "change point id")?)
+        .of_change_point(
+            &forge_line_id(&line_id, "line id")?,
+            &forge_change_point_id(&change_point_id, "change point id")?,
+        )
         .await?;
     Ok(found.iter().map(forge_release_to_dto).collect())
 }

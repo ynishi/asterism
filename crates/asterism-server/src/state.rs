@@ -85,10 +85,12 @@ pub struct ServerCtx {
     /// `CoreCtx` names it apart — the forge's conversations hang off a
     /// forge node, and the other ones hang off a card.
     pub forge_thread_service: Arc<asterism_core::application::forge::ThreadService>,
-    /// Writing out what a change point carries, and stamping the copies
-    /// on the way out. Not a forge service — see `CoreCtx` for why a
-    /// release names both vocabularies and therefore neither layer's
-    /// ports hold it.
+    /// Writing out what a change point carries — the record, the
+    /// freeze, and the run that carries the bytes.
+    /// [`release`](asterism_core::domain::release) is what a release is
+    /// and why it is not the forge's. Stamping the copies is the other
+    /// half and is not reachable from here, by design: only the runner
+    /// drives it.
     pub release_service: Arc<asterism_core::application::ReleaseService>,
     /// Registered exporters — surfaces which backends the server can
     /// dispatch to.

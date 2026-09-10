@@ -4050,11 +4050,10 @@ async fn threads_about_change(
 /// each copy on the way out.
 ///
 /// Answers with the release as it was recorded, which is before its
-/// files exist: the dispatch is started here and runs afterwards, so
-/// `files` is empty and the same release read again once the run has
-/// finished carries a stamp per file. That is the honest shape for a
-/// verb that hands work to a queue, and the alternative — waiting here
-/// — would hold a request open for as long as copying a set takes.
+/// files exist — see
+/// [`ForgeReleaseDto::files`](asterism_contract::forge::ForgeReleaseDto::files).
+/// Waiting here instead would hold a request open for as long as
+/// copying a set takes.
 ///
 /// The ids come off the path; the command's own fields for them exist
 /// for the transports that have no path.
@@ -4084,15 +4083,20 @@ async fn release_forge_change_point(
 /// `GET /asterism/forge/lines/{id}/points/{point}/releases` — every
 /// time this change point was written out, most recent first.
 ///
-/// A list rather than one, because a set going out twice is two things
-/// that happened and the earlier one is what a rejection was about.
+/// A list, because two releases of one change point are two records
+/// ([`Release`](asterism_core::domain::release::Release)). Both ids off
+/// the path are used: a point that is not on the line named answers 404
+/// here exactly as it does to the write beside it.
 async fn list_forge_releases_of_change_point(
     State(ctx): State<Arc<ServerCtx>>,
-    Path((_id, point)): Path<(String, String)>,
+    Path((id, point)): Path<(String, String)>,
 ) -> ApiResult<Vec<ForgeReleaseDto>> {
     let found = ctx
         .release_service
-        .of_change_point(&forge_change_point_id(&point, "change point id")?)
+        .of_change_point(
+            &line_id(&id)?,
+            &forge_change_point_id(&point, "change point id")?,
+        )
         .await?;
     Ok(Json(found.iter().map(forge_release_to_dto).collect()))
 }

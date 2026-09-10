@@ -10,8 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use asterism_core::application::mapping::card_to_dto;
-use asterism_core::application::{OutboundFile, OutboundStamping};
-use asterism_core::application_support::DispatchRunnerService;
+use asterism_core::application_support::{DispatchRunnerService, OutboundFile, OutboundStamping};
 use asterism_core::domain::asset::AssetCard;
 use asterism_core::domain::dispatch::DispatchState;
 use asterism_core::domain::job::JobKind;
@@ -429,14 +428,19 @@ pub async fn run_dispatch_run(
 
 /// Asks the outbound hook to stamp what this run wrote.
 ///
-/// # Why a failure here is not the run's failure
+/// # Why a failure here does not fail the tick
 ///
-/// The bytes are on disk. A stamp that did not land leaves a file that
-/// exists and is not marked, and the mark is derived from stored rows so
-/// it can be made again; failing the tick instead would hand the job
-/// back to the queue, and the retry would find the row still `Running`
-/// and stamp the same files a second time. Said out loud rather than
-/// swallowed, on the same terms as the attempt record above.
+/// This is the state machine's rule rather than the port's. Returning
+/// `Err` from the handler hands the job back to the queue, and the retry
+/// would find the row still `Running` and stamp the same files a second
+/// time — a duplicate rewrite of files that have already left, in
+/// exchange for a note about the first attempt. What a failure *means*
+/// is the port's own doc; what happens to it here is that it is said out
+/// loud, on the same terms as the attempt record above.
+///
+/// A run whose outputs this cannot pair with its inputs is said out loud
+/// too. Nothing is offered for stamping in that case, so a release would
+/// otherwise end with no file rows and no line anywhere saying why.
 async fn stamp_outbound(
     env: &DispatchRunEnv,
     id: &DispatchId,
@@ -448,6 +452,16 @@ async fn stamp_outbound(
     };
     let files = copies(inputs, derived);
     if files.is_empty() {
+        if !derived.is_empty() {
+            tracing::warn!(
+                event = "diag.dispatch.outbound_unpaired",
+                dispatch_id = %id,
+                inputs = inputs.len(),
+                derived = derived.len(),
+                "this run's outputs could not be paired with its inputs, so nothing \
+                 was offered for stamping"
+            );
+        }
         return;
     }
     if let Err(err) = outbound.stamp(id, &files).await {

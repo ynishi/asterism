@@ -1,46 +1,27 @@
-//! `ReleaseService` — writing out what a change point carries, and
-//! stamping what leaves.
+//! `ReleaseService` — writing out what a change point carries.
 //!
-//! One verb and one hook:
+//! One verb: [`release`](ReleaseService::release) freezes the change
+//! point's folded state, starts a `file` dispatch in `copy` mode over
+//! it, and records that it happened.
 //!
-//! - [`release`](ReleaseService::release) — freeze the change point's
-//!   folded state, start a `file` dispatch in `copy` mode over it, and
-//!   record that it happened.
-//! - [`OutboundStamping`] — what the run calls back when it has written
-//!   the files, so that each copy carries the disclosure and the history
-//!   that chose it before the dispatch reports done.
+//! Stamping the copies is the other half and is not here. Only the
+//! runner drives it, so it sits in
+//! [`application_support::outbound_stamp`](crate::application_support::outbound_stamp)
+//! where no transport can reach it — the placement rule this module's
+//! own doc states.
 //!
 //! # The freeze is driven from here, not from inside the forge
 //!
-//! [`boundary::Store`](crate::domain::forge::boundary::store::Store)
-//! asks the layer below exactly one question, and its module doc says
-//! the rest — freezing a set among them — waits for the work that needs
-//! it. This is that work, and the answer is that the store does not grow
-//! a `freeze` method.
+//! [`boundary`](crate::domain::forge::boundary) says which questions the
+//! forge asks downward, and [`Release`] says why the record that names a
+//! snapshot and a dispatch is not one of them. The consequence for this
+//! service is the shape of [`release`](ReleaseService::release): it
+//! reads the line, folds the chain and calls the services that freeze
+//! and dispatch, the way `asterism-teams-client::publish` hands a line's
+//! state to a receiver the forge does not control.
 //!
-//! Two reasons, and the second is the one that decides it.
-//!
-//! **The forge may not name what a freeze produces.** A `SnapshotId` and
-//! a `DispatchId` are core words, `tests/forge_boundary.rs` holds the
-//! list of words a contract across that boundary may be written in, and
-//! `freeze(change_point) -> SnapshotId` would put two more on it. That
-//! list is a statement about what the forge would have to carry when it
-//! is lifted into a crate of its own, and paying two entries of it for a
-//! record that does not have to live inside the forge is the reversal
-//! #254 asked to be argued before it was written.
-//!
-//! **The same walk already happens outward, from outside.**
-//! `asterism-teams-client::publish` hands a line's current state to a
-//! receiver the forge does not control, and it does that by reading the
-//! line and calling the far side — not by asking the forge to hand
-//! anything down. A release to a filesystem is that walk with a
-//! different transport, so it is driven the same way: read the line,
-//! fold the chain, and call the services that freeze and dispatch.
-//!
-//! What the forge keeps is what it kept before: it decides, and the raw
-//! layer carries. Nothing here writes a forge word onto a core row, and
-//! nothing writes a core id onto a forge one — the release is a row of
-//! its own that names both ([`Release`]).
+//! Nothing here writes a forge word onto a core row, and nothing writes
+//! a core id onto a forge one.
 //!
 //! # A release with nothing live is refused
 //!
@@ -51,29 +32,12 @@
 //! inventing a record of an export that never happened. It is refused,
 //! as [`Blocked`](crate::error::ConflictKind::Blocked): put something on
 //! the line and the same request works.
-//!
-//! # Stamping is the same writer, pointed at the copy
-//!
-//! [`DisclosureService::apply_to`] is what the `disclosure_stamp` job
-//! already calls on the library's own artefacts. A release calls it on
-//! the *copies* the exporter wrote, and never on the library's own
-//! file — the record is derived from stored rows either way, so what
-//! differs is only which path is handed in.
-//!
-//! The manifest half being [`Skipped`](crate::domain::disclosure::Skipped)
-//! on a build with no certificate is a supported state and not a
-//! failure, so it is recorded per file and reported rather than raised.
 
-use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
-use async_trait::async_trait;
-
-use crate::application::disclosure_service::DisclosureService;
 use crate::application::dispatch_service::DispatchService;
 use crate::application::snapshot_service::SnapshotService;
 use crate::domain::attribution::AttributionContext;
-use crate::domain::disclosure::{Hand, ReleaseAct, ReleaseDisclosure};
 use crate::domain::forge::boundary::actors::Actors;
 use crate::domain::forge::clock::Clock;
 use crate::domain::forge::lines::Lines;
@@ -82,10 +46,9 @@ use crate::domain::forge::model::history::ChangePoint;
 use crate::domain::forge::model::line::Line;
 use crate::domain::forge::model::table::states;
 use crate::domain::forge::model::value::{ChangePointId, LineId};
-use crate::domain::forge::pursuits::Pursuits;
-use crate::domain::release::{FileStamp, Release};
+use crate::domain::release::Release;
 use crate::domain::repository::ReleaseRepository;
-use crate::domain::value::{AssetId, DispatchId, PersonaId, ReleaseId};
+use crate::domain::value::{AssetId, PersonaId, ReleaseId};
 use crate::error::DomainError;
 
 /// The exporter a release writes through.
@@ -99,82 +62,31 @@ const FILE_EXPORTER: &str = "file";
 /// The action that exporter takes.
 const WRITE_ACTION: &str = "write";
 
-/// One file a run wrote, and the library row it is a copy of.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OutboundFile {
-    /// The row the copy was made from.
-    pub asset: AssetId,
-    /// Where the copy landed.
-    pub path: PathBuf,
-}
-
-/// What a dispatch calls when it has written its files and has not yet
-/// reported done.
-///
-/// A port, declared beside the service that owns the concept for the
-/// same reason
-/// [`DisclosureWriter`](crate::application::disclosure_service::DisclosureWriter)
-/// is: the caller is the runner in `asterism-infra`, and a runner that
-/// named this service would have to know what a release is in order to
-/// finish a dispatch that is not one.
-///
-/// # Why nothing here fails a dispatch
-///
-/// The bytes are written by the time this is called. A stamp that does
-/// not land leaves a file that exists and is not marked, and the mark
-/// can be made again from stored rows; failing the run instead would
-/// discard an export that produced exactly what it was asked for. So the
-/// error channel carries what went wrong for the caller to log, and the
-/// caller logs it.
-#[async_trait]
-pub trait OutboundStamping: Send + Sync {
-    /// Stamps the files one dispatch wrote.
-    ///
-    /// A dispatch that is not a release is the ordinary case, and the
-    /// answer for it is that nothing happens.
-    async fn stamp(&self, dispatch: &DispatchId, files: &[OutboundFile])
-    -> Result<(), DomainError>;
-}
-
-/// Releasing a change point, and stamping what leaves.
+/// Recording a release.
 pub struct ReleaseService {
     lines: Arc<dyn Lines>,
-    pursuits: Arc<dyn Pursuits>,
     releases: Arc<dyn ReleaseRepository>,
     snapshots: Arc<SnapshotService>,
     dispatches: Arc<DispatchService>,
-    /// The disclosure service, late-bound.
-    ///
-    /// A cell rather than an `Arc` because that service is built after
-    /// this one in the composition root and may not be built at all —
-    /// the same handle the job runtime holds, for the same reason. An
-    /// unbound cell means this build does not stamp, which is a
-    /// configuration rather than a fault.
-    disclosure: Arc<OnceLock<Arc<DisclosureService>>>,
     actors: Arc<dyn Actors>,
     clock: Arc<dyn Clock>,
 }
 
 impl ReleaseService {
     /// Wires the service around its ports.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         lines: Arc<dyn Lines>,
-        pursuits: Arc<dyn Pursuits>,
         releases: Arc<dyn ReleaseRepository>,
         snapshots: Arc<SnapshotService>,
         dispatches: Arc<DispatchService>,
-        disclosure: Arc<OnceLock<Arc<DisclosureService>>>,
         actors: Arc<dyn Actors>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
             lines,
-            pursuits,
             releases,
             snapshots,
             dispatches,
-            disclosure,
             actors,
             clock,
         }
@@ -267,58 +179,27 @@ impl ReleaseService {
             .ok_or_else(|| DomainError::not_found("release", id))
     }
 
-    /// Every release of one change point, most recent first.
+    /// Every release of one change point on one line, most recent
+    /// first.
+    ///
+    /// The line is read and the node checked against it rather than
+    /// taken as decoration. A caller that named a change point of
+    /// another line and got the answer anyway would be told a line
+    /// holds something it does not — the same refusal
+    /// [`release`](Self::release) makes at the same address, which is
+    /// what makes reading and writing there answer for the same thing.
     pub async fn of_change_point(
         &self,
+        line: &LineId,
         change_point: &ChangePointId,
     ) -> Result<Vec<Release>, DomainError> {
-        self.releases.of_change_point(change_point).await
-    }
-
-    /// The shape of the work a released change point came out of, as the
-    /// files will state it.
-    ///
-    /// The translation from the forge's vocabulary into the
-    /// disclosure's happens here and nowhere else — see
-    /// [`ReleaseDisclosure`] for why the renderer is not given a
-    /// `Pursuit` to walk.
-    async fn shape_of(&self, release: &Release) -> Result<ReleaseDisclosure, DomainError> {
         let held = self
             .lines
-            .get(&release.line())
+            .get(line)
             .await?
-            .ok_or_else(|| DomainError::not_found("forge line", release.line()))?;
-        let point = point_on(&held, &release.change_point())?;
-        let work = self
-            .pursuits
-            .get(&point.from())
-            .await?
-            .ok_or_else(|| DomainError::not_found("forge pursuit", point.from()))?;
-        // A change point exists because a pursuit was satisfied, so the
-        // close is there. `by()` names it, and reading the act off the
-        // pursuit's own ending rather than off the change point is what
-        // keeps the two logs' answers from being conflated: they are
-        // stamped together today and are still two records.
-        let closed = work
-            .close()
-            .map(|close| act_of(close.act()))
-            .ok_or_else(|| {
-                DomainError::Validation(format!(
-                    "the work a released change point came out of has no ending: {}",
-                    point.from()
-                ))
-            })?;
-        Ok(ReleaseDisclosure::new(
-            act_of(release.act()),
-            point.from().to_string(),
-            work.opening()
-                .intent()
-                .title
-                .as_ref()
-                .map(|title| title.as_str().to_string()),
-            work.rounds().len() as u32,
-            closed,
-        ))
+            .ok_or_else(|| DomainError::not_found("forge line", line))?;
+        crate::application_support::outbound_stamp::point_on(&held, change_point)?;
+        self.releases.of_change_point(change_point).await
     }
 
     /// Stamps an act: now, by whoever this write is from.
@@ -328,65 +209,6 @@ impl ReleaseService {
             Actor::User(self.actors.resolve(by).await?),
         ))
     }
-}
-
-#[async_trait]
-impl OutboundStamping for ReleaseService {
-    async fn stamp(
-        &self,
-        dispatch: &DispatchId,
-        files: &[OutboundFile],
-    ) -> Result<(), DomainError> {
-        let Some(release) = self.releases.by_dispatch(dispatch).await? else {
-            // Most dispatches are not releases. Nothing to say.
-            return Ok(());
-        };
-        let Some(disclosure) = self.disclosure.get() else {
-            // No writer configured. The files are written and carry no
-            // mark, which is the state a build that has not asked for
-            // stamping is in — and the release says so by holding no
-            // stamps rather than by holding failures.
-            return Ok(());
-        };
-        let shape = self.shape_of(&release).await?;
-        let carried = dispatch.to_string();
-        let mut stamps = Vec::with_capacity(files.len());
-        for file in files {
-            let outcome = disclosure
-                .apply_to(&file.asset, &file.path, Some(&carried), Some(&shape))
-                .await?;
-            stamps.push(FileStamp {
-                asset: file.asset,
-                path: file.path.display().to_string(),
-                outcome,
-            });
-        }
-        self.releases.note_files(&release.id(), &stamps).await
-    }
-}
-
-/// One act, in the words a file may state it in.
-fn act_of(act: &Act) -> ReleaseAct {
-    ReleaseAct::new(
-        act.at(),
-        if act.by().is_system() {
-            Hand::Rule
-        } else {
-            Hand::Person
-        },
-    )
-}
-
-/// The change point, if this line's history has it.
-fn point_on<'a>(
-    line: &'a Line,
-    change_point: &ChangePointId,
-) -> Result<&'a ChangePoint, DomainError> {
-    line.history()
-        .changes()
-        .iter()
-        .find(|point| point.id() == *change_point)
-        .ok_or_else(|| DomainError::not_found("forge change point", change_point))
 }
 
 /// What the line carried when `change_point` landed, as the contents of
@@ -517,14 +339,5 @@ mod tests {
                 ..
             })
         ));
-    }
-
-    #[test]
-    fn a_rule_and_a_person_read_differently_in_the_assertion() {
-        assert_eq!(
-            act_of(&Act::new(act(0).at(), Actor::System(ActorId::new()))).by,
-            Hand::Rule
-        );
-        assert_eq!(act_of(&act(0)).by, Hand::Person);
     }
 }

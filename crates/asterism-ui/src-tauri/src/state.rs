@@ -192,9 +192,9 @@ pub struct AppState {
     /// names it apart: the forge's conversations hang off a forge node,
     /// and the other ones hang off a card.
     pub forge_thread_service: Arc<asterism_core::application::forge::ThreadService>,
-    /// Writing out what a change point carries, and stamping the copies
-    /// on the way out. Not a forge service — a release names a snapshot
-    /// and a dispatch, which the forge may not.
+    /// Writing out what a change point carries.
+    /// [`release`](asterism_core::domain::release) is what a release is
+    /// and why it is not the forge's.
     pub release_service: Arc<asterism_core::application::ReleaseService>,
     /// Read-only handle to the apalis job DB pool. Used by the
     /// `jobs_stats` Tauri command that drives the progress banner.

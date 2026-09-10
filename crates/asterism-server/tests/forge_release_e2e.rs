@@ -138,8 +138,9 @@ fn comfy() -> String {
     serde_json::json!({ "Software": "ComfyUI", "workflow": "{}" }).to_string()
 }
 
-/// A persona, and `count` assets whose files exist on disk and whose
-/// container metadata has been fingerprinted.
+/// A persona and `count` assets whose files exist on disk, the first
+/// `fingerprinted` of them carrying the container metadata a disclosure
+/// is built from.
 ///
 /// The fingerprint goes in through the repository rather than through a
 /// route, on the same terms `disclosure_service`'s fixtures take: it
@@ -147,10 +148,15 @@ fn comfy() -> String {
 /// `material_hash` job is the only writer of it and this takes that
 /// job's road rather than reaching around it. A second handle over the
 /// same file is what a worker would hold.
+///
+/// Leaving one unfingerprinted is the state a release racing the hash
+/// job sees, and it is a state the stamping pass has to record rather
+/// than abort on.
 async fn seed(
     router: &Router,
     tmp: &std::path::Path,
     count: usize,
+    fingerprinted: usize,
 ) -> (String, Vec<String>, Vec<std::path::PathBuf>) {
     let persona = ok(
         router,
@@ -195,21 +201,23 @@ async fn seed(
         .await;
         let id = added["id"].as_str().expect("an asset id").to_string();
         let parsed = AssetId::from_uuid(uuid::Uuid::parse_str(&id).expect("a uuid"));
-        asterism_core::domain::repository::AssetRepository::set_material_fingerprint(
-            &assets,
-            &parsed,
-            0,
-            &MaterialFingerprint {
-                file: Measurement::bare(MeasurementStatus::NoBytes),
-                content: Measurement::bare(MeasurementStatus::NoBytes),
-                meta: Measurement::computed("m1-sha256:0".into()),
-                meta_kv: Some(comfy()),
-                meta_raw: None,
-                meta_text: None,
-            },
-        )
-        .await
-        .expect("the fingerprint the hash job would have written");
+        if nth < fingerprinted {
+            asterism_core::domain::repository::AssetRepository::set_material_fingerprint(
+                &assets,
+                &parsed,
+                0,
+                &MaterialFingerprint {
+                    file: Measurement::bare(MeasurementStatus::NoBytes),
+                    content: Measurement::bare(MeasurementStatus::NoBytes),
+                    meta: Measurement::computed("m1-sha256:0".into()),
+                    meta_kv: Some(comfy()),
+                    meta_raw: None,
+                    meta_text: None,
+                },
+            )
+            .await
+            .expect("the fingerprint the hash job would have written");
+        }
         ids.push(id);
         paths.push(path);
     }
@@ -226,8 +234,9 @@ async fn a_landed_line(
     router: &Router,
     tmp: &std::path::Path,
     count: usize,
+    fingerprinted: usize,
 ) -> (String, String, Vec<String>, Vec<std::path::PathBuf>) {
-    let (persona, assets, paths) = seed(router, tmp, count).await;
+    let (persona, assets, paths) = seed(router, tmp, count, fingerprinted).await;
     let line = ok(
         router,
         post(
@@ -319,8 +328,10 @@ async fn run_to_done(core: &CoreCtx, tmp: &std::path::Path, dispatch: &str) {
         assets: Arc::new(sqlite::repo::SqliteAssetRepository::new(isle)),
         reenqueue: Arc::new(Silent),
         // The wiring under test: the runner hands the copies over, and
-        // the release decides what to do with them.
-        outbound: Some(core.release_service.clone()),
+        // the release's stamping pass decides what to do with them. The
+        // same object `core_init` hands the runner, reached through the
+        // support bundle no transport context carries.
+        outbound: Some(core.support.release_stamping.clone()),
     };
     let payload = serde_json::json!({ "dispatch_id": dispatch });
     for _ in 0..8 {
@@ -337,7 +348,7 @@ async fn run_to_done(core: &CoreCtx, tmp: &std::path::Path, dispatch: &str) {
 async fn a_release_freezes_what_the_change_point_carried_and_stamps_what_leaves() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let (core, router) = harness(tmp.path()).await;
-    let (line, point, assets, held) = a_landed_line(&router, tmp.path(), 2).await;
+    let (line, point, assets, held) = a_landed_line(&router, tmp.path(), 2, 2).await;
     let out = tmp.path().join("outbound");
 
     let before = ok(&router, get(&format!("/asterism/forge/lines/{line}"))).await;
@@ -459,7 +470,7 @@ async fn a_release_freezes_what_the_change_point_carried_and_stamps_what_leaves(
 async fn two_releases_of_one_change_point_are_two_records() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let (_core, router) = harness(tmp.path()).await;
-    let (line, point, _, _) = a_landed_line(&router, tmp.path(), 1).await;
+    let (line, point, _, _) = a_landed_line(&router, tmp.path(), 1, 1).await;
     let persona = core_persona(&router).await;
 
     let first = ok(
@@ -518,7 +529,7 @@ async fn two_releases_of_one_change_point_are_two_records() {
 async fn releasing_a_change_point_that_carries_nothing_is_refused() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let (_core, router) = harness(tmp.path()).await;
-    let (line, landed, _, _) = a_landed_line(&router, tmp.path(), 1).await;
+    let (line, landed, _, _) = a_landed_line(&router, tmp.path(), 1, 1).await;
     let persona = core_persona(&router).await;
 
     // Take the only entry off, which lands a change point whose fold
@@ -616,6 +627,122 @@ async fn releasing_a_change_point_that_carries_nothing_is_refused() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+}
+
+/// A member the hash job has not reached yet does not silence the rest
+/// of the pass.
+///
+/// `record_for` refuses an asset whose container metadata has not been
+/// fingerprinted, and that refusal used to abort the whole stamping
+/// pass: the copies already written kept their packet, nothing was
+/// recorded, and the release ended with no file rows — a third meaning
+/// of "empty" that nothing beside it could tell from "this build does
+/// not stamp". Every copy gets a row now, and the one that could not be
+/// stamped carries the reason on both halves.
+#[tokio::test]
+async fn a_member_that_cannot_be_stamped_is_recorded_rather_than_skipped() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (core, router) = harness(tmp.path()).await;
+    // Two members, one of them still waiting on the hash job.
+    let (line, point, assets, _) = a_landed_line(&router, tmp.path(), 2, 1).await;
+    let out = tmp.path().join("outbound");
+
+    let release = ok(
+        &router,
+        post(
+            &format!("/asterism/forge/lines/{line}/points/{point}/releases"),
+            serde_json::json!({
+                "persona_id": core_persona(&router).await,
+                "output_dir": out.display().to_string(),
+            }),
+        ),
+    )
+    .await;
+    run_to_done(
+        &core,
+        tmp.path(),
+        release["dispatch_id"].as_str().expect("a dispatch id"),
+    )
+    .await;
+
+    let read_back = ok(
+        &router,
+        get(&format!(
+            "/asterism/forge/releases/{}",
+            release["id"].as_str().expect("a release id")
+        )),
+    )
+    .await;
+    let files = read_back["files"].as_array().expect("files");
+    assert_eq!(files.len(), assets.len(), "a row per copy, always");
+
+    let stamped: Vec<&serde_json::Value> = files
+        .iter()
+        .filter(|file| file["xmp"]["state"] == "written")
+        .collect();
+    let refused: Vec<&serde_json::Value> = files
+        .iter()
+        .filter(|file| file["xmp"]["state"] == "failed")
+        .collect();
+    assert_eq!(stamped.len(), 1, "the fingerprinted member was stamped");
+    assert_eq!(refused.len(), 1, "and the other one says why it was not");
+    assert_eq!(refused[0]["manifest"]["state"], "failed");
+    let cause = refused[0]["xmp"]["detail"]
+        .as_str()
+        .expect("a failed half carries its cause");
+    assert!(
+        cause.contains("fingerprint"),
+        "the reason travels with the row: {cause}"
+    );
+    // The run itself is untouched by any of it: the bytes were written
+    // before the stamping pass ran.
+    let dispatch = ok(
+        &router,
+        get(&format!(
+            "/asterism/dispatch/{}",
+            release["dispatch_id"].as_str().expect("a dispatch id")
+        )),
+    )
+    .await;
+    assert_eq!(dispatch["state"], "done");
+}
+
+/// The read at a change point answers for the line the path names, or
+/// it does not answer.
+#[tokio::test]
+async fn reading_the_releases_of_a_point_on_another_line_is_refused() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (_core, router) = harness(tmp.path()).await;
+    let (line, point, _, _) = a_landed_line(&router, tmp.path(), 1, 1).await;
+    let elsewhere = ok(
+        &router,
+        post(
+            "/asterism/forge/lines",
+            serde_json::json!({ "name": "another", "strategy_id": "mainline-first" }),
+        ),
+    )
+    .await;
+    let elsewhere = elsewhere["id"].as_str().expect("a line id").to_string();
+
+    // The point is real and the line is real; they are not each other's.
+    let (status, body) = call(
+        &router,
+        get(&format!(
+            "/asterism/forge/lines/{elsewhere}/points/{point}/releases"
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    // The same read on the line that has it answers, empty.
+    let listed = ok(
+        &router,
+        get(&format!(
+            "/asterism/forge/lines/{line}/points/{point}/releases"
+        )),
+    )
+    .await;
+    assert!(listed.as_array().expect("a list").is_empty());
 }
 
 /// The one persona this suite registers.

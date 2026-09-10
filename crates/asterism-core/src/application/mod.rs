@@ -31,10 +31,11 @@
 //! `author_kind` / `author_subject` / `operator_ai` fields.
 //!
 //! Most services here take that argument without persisting it: the
-//! attribution columns exist on `asset`, `dispatch_job`, and the
-//! pursuit family (V79 — forge events are actor-carrying by design,
-//! #29) alone, and adding another table is a design decision, not a
-//! wiring step. Receiving
+//! attribution columns exist on `asset`, `dispatch_job`, the pursuit
+//! family (V79 — forge events are actor-carrying by design, #29) and
+//! `forge_release` (V108, which carries an actor for the same reason
+//! the pursuit family does) alone, and adding another table is a design
+//! decision, not a wiring step. Receiving
 //! it is still the point — the argument is what makes a new mutation,
 //! or a new caller of an old one, name the channel it arrived through
 //! before it compiles, so recording operations later is a wiring change
@@ -88,7 +89,7 @@ pub use material_mark_service::MaterialMarkService;
 pub use modality_service::ModalityService;
 pub use persona_service::PersonaService;
 pub use query_group_service::QueryGroupService;
-pub use release_service::{OutboundFile, OutboundStamping, ReleaseService};
+pub use release_service::ReleaseService;
 pub use series_strategy_service::SeriesStrategyService;
 pub use session_service::SessionService;
 pub use snapshot_service::SnapshotService;
