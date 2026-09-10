@@ -1,10 +1,12 @@
 //! What an artefact discloses about how it was made, and the rule that
 //! decides it.
 //!
-//! Three things live here, and they are one concept: the vocabulary
+//! Four things live here, and they are one concept: the vocabulary
 //! ([`DigitalSourceType`], [`DisclosureRecord`], [`Stamped`]), the rule
-//! that turns stored metadata into a statement ([`record_for`]), and the
-//! policy the rule takes ([`PromptDisclosure`]). Rendering a record into
+//! that turns stored metadata into a statement ([`record_for`]), the
+//! policy the rule takes ([`PromptDisclosure`]), and the reading of a
+//! file that already carries something ([`Carried`], [`Mark`],
+//! [`Signer`]). Rendering a record into
 //! an XMP packet or a C2PA manifest definition is not here — that is
 //! `asterism-disclosure-format`, and putting a packet's bytes beside the
 //! term it carries would be the container formats leaking into the
@@ -79,10 +81,14 @@
 //! one reads as *declared* ([`ParentOrigin::declared`]), never as
 //! unknown.
 
+pub mod carried;
 pub mod outcome;
 pub mod record;
 pub mod source_type;
 
+pub use carried::{
+    BINDING_FAILURES, Carried, Mark, SIGNATURE_MISMATCH, Signer, TRUST_FAILURES, integrity_of,
+};
 pub use outcome::{DISCLOSURE_NOTE_SCHEMA, Half, Skipped, Stamped};
 pub use record::DisclosureRecord;
 pub use source_type::DigitalSourceType;

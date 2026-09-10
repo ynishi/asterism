@@ -2582,34 +2582,129 @@ mod tests {
         c2pa::Reader::from_context(c2pa::Context::new()).with_stream(format, Cursor::new(bytes))
     }
 
-    /// Whether a reader reports the *hard binding* as broken.
-    ///
-    /// Narrower than "is this manifest valid", and deliberately so. The
-    /// throwaway identity chains to nothing, and two of the failures
-    /// that produces say nothing about the file's bytes:
-    ///
-    /// - `signingCredential.untrusted` — the expected verdict on a
-    ///   certificate with no trust anchor.
-    /// - `claimSignature.mismatch` — which reads like a cryptographic
-    ///   failure and is not one here: `c2pa` emits it whenever the
-    ///   certificate info comes back with `validated == false`, and that
-    ///   flag is set by the trust check rather than by verifying the
-    ///   signature bytes (`claim.rs`, `verify_internal`). An untrusted
-    ///   certificate therefore always produces it.
-    ///
-    /// What is left is the hash over the asset's own bytes, which is
-    /// exactly the claim under test: does editing the XMP packet after
-    /// signing break the binding.
-    fn reports_a_binding_failure(reader: &c2pa::Reader) -> bool {
-        reader
+    /// Signs a PNG with `identity` and reports what a read-back says:
+    /// the failure codes, and whether the signature carries an issuer
+    /// name.
+    fn signed_readback(identity: SigningIdentity) -> (Vec<String>, Option<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shot.png");
+        std::fs::write(&path, png_fixture()).unwrap();
+        DisclosureWriter::signed_with(identity)
+            .apply(&path, &record())
+            .unwrap();
+        let reader = read_manifest("image/png", std::fs::read(&path).unwrap())
+            .expect("a manifest signed over these bytes");
+        let codes = reader
             .validation_results()
             .and_then(|results| results.active_manifest())
-            .is_some_and(|statuses| {
-                statuses.failure().iter().any(|status| {
-                    status.code() == "assertion.dataHash.mismatch"
-                        || status.code() == "assertion.bmffHash.mismatch"
-                })
+            .map(|statuses| {
+                statuses
+                    .failure()
+                    .iter()
+                    .map(|status| status.code().to_string())
+                    .collect()
             })
+            .unwrap_or_default();
+        let issuer = reader
+            .active_manifest()
+            .and_then(|manifest| manifest.signature_info())
+            .and_then(|info| info.issuer.clone());
+        (codes, issuer)
+    }
+
+    /// **What this SDK version reports for this repository's own signed
+    /// files**, measured here rather than believed.
+    ///
+    /// Every sentence about `claimSignature.mismatch` in
+    /// `asterism_core::domain::disclosure::carried` follows from this
+    /// table, and two rounds of that prose were written from a reading
+    /// of the c2pa source instead — one of them said an untrusted
+    /// certificate always produces the code, which this shows it does
+    /// not.
+    ///
+    /// | certificate | failures | issuer |
+    /// |---|---|---|
+    /// | with `organizationName` | (this test says) | named |
+    /// | without | (this test says) | none |
+    ///
+    /// Pinned so that the day the answer moves — the upstream fix
+    /// merging, or the pin advancing past it — this fails rather than
+    /// the domain's reasoning going quietly false.
+    #[test]
+    fn what_the_sdk_reports_for_this_builds_own_signatures() {
+        let (cert, key) = issued_shaped_pair();
+        let organisation = SigningIdentity::from_bytes(
+            cert,
+            key,
+            "es256",
+            None,
+            // The signing-side check, not a validator's: what is under
+            // test is the read-back, and refusing here would test the
+            // wrong half.
+            Strictness::Permissive,
+        )
+        .expect("a certificate shaped like an issued one");
+
+        let (with_org, with_org_issuer) = signed_readback(organisation);
+        let (without_org, without_org_issuer) = signed_readback(throwaway_identity());
+
+        assert_eq!(
+            with_org,
+            ["signingCredential.untrusted"],
+            "a correctly signed file under an unanchored certificate fails on trust \
+             and on nothing else"
+        );
+        assert!(
+            with_org_issuer.is_some(),
+            "and its signature carries the organisation as the issuer name"
+        );
+
+        assert_eq!(
+            without_org,
+            ["signingCredential.untrusted", "claimSignature.mismatch"],
+            "the same file signed by a certificate with no organisation also reports \
+             its claim signature mismatched — the upstream defect #179 records, not a \
+             statement about these bytes"
+        );
+        assert_eq!(
+            without_org_issuer, None,
+            "and the missing issuer name is the only field that separates that from a \
+             real forgery, which is why the domain's mapping takes it"
+        );
+    }
+
+    /// Whether a reader reports the *hard binding* as broken.
+    ///
+    /// The judgement is
+    /// [`disclosure::integrity_of`](asterism_core::domain::disclosure::integrity_of)
+    /// — which failures are about the bytes and which are about the
+    /// certificate is domain knowledge, and it used to be written out
+    /// here, where nothing outside the test module could reach it. This
+    /// is now the part that belongs to this crate: pulling the codes
+    /// out of a `c2pa::Reader`.
+    ///
+    /// Narrower than "is this manifest valid", and deliberately so:
+    /// what these tests ask is whether editing the XMP packet after
+    /// signing breaks the hash over the asset's own bytes, and the
+    /// throwaway identity produces certificate failures that say
+    /// nothing about them.
+    fn reports_a_binding_failure(reader: &c2pa::Reader) -> bool {
+        let Some(statuses) = reader
+            .validation_results()
+            .and_then(|results| results.active_manifest())
+        else {
+            return false;
+        };
+        let codes: Vec<&str> = statuses.failure().iter().map(|s| s.code()).collect();
+        // The fixture's certificate carries no organisation, so its
+        // signer has no name: `signer_named` is false, and a signature
+        // mismatch from it lands as `Undetermined` rather than as the
+        // binding failure this asks about.
+        matches!(
+            asterism_core::domain::disclosure::integrity_of(codes.iter().copied(), false),
+            asterism_core::domain::disclosure::Mark::Broken(code)
+                if asterism_core::domain::disclosure::BINDING_FAILURES.contains(&code.as_str())
+        )
     }
 
     /// Copies one of the workspace's generated video fixtures into
