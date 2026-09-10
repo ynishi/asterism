@@ -4,6 +4,26 @@ Shared conventions for changes to this repository, for humans and coding agents
 alike. The disclosure policy in [PUBLIC_DEVELOPMENT.md](PUBLIC_DEVELOPMENT.md)
 outranks this file.
 
+Three kinds of statement share this file, and the boundary between them is a
+rule of its own. What the repository decides binds everyone who contributes:
+never on `main`, the commit format, what a gate is and when it runs. What
+installed tooling decides travels with the tool: the `prose-shape` hook checks
+markdown under `workspace/` and nowhere else, `reviewer` writes its record
+there, and a repository that installs them takes that path with them, whether or
+not it copies this file. What one setup decides — which directory holds a second
+checkout, how its build directory gets seeded — binds nobody, and a file
+contributors read as policy does not state it as policy. Where a recipe here
+fixes one of those choices, this file says so as a fact about the recipe, next
+to the rule the recipe is serving, so a repository that copies this file takes
+the rule and leaves the recipe's choice behind. What belongs to your own setup
+goes somewhere the tree does not track — for Claude Code, a `CLAUDE*.md` of your
+own, which `.gitignore` keeps out of the tree for the reason
+[Working with coding agents](#working-with-coding-agents--the-recommended-pattern)
+gives. Until #272 this file stated the layout as policy — `.worktrees/` and
+`workspace/` as places a contributor was told to use, with nothing saying whose
+choice either was — and the first repository to copy it had to separate them by
+hand.
+
 ## Issue conventions
 
 ### Labels
@@ -19,28 +39,36 @@ Four categories. Assign at least one when you open an issue.
 
 ## Branches
 
-Never work on `main`. One worktree per issue, under the gitignored
-`.worktrees/`:
+Never work on `main`. One branch per issue, cut from `origin/main` after a fetch
+and named `<type>/<slug>`, where `<type>` is `ci`, `fix`, `feat` or `docs`.
 
-```bash
-just worktree-new <type> <slug>   # ci/, fix/, feat/, docs/
-```
-
-That is `git fetch origin`, then
-`git worktree add .worktrees/<slug> -b <type>/<slug> origin/main`, then
-`just branch-check` to verify the base before you build on it. What the recipe
-adds to those three is a copy of `target/` into the new worktree, so its first
-gate is not a rebuild of the whole dependency graph. Measured on
-`asterism-infra`: `cargo check` took 1 min 17 s in a cold worktree against 39 s
-in a copied one.
-
-A copy, and deliberately not one shared target directory. Cargo treats path
+Whether that branch lives in a second worktree or in the checkout you already
+have is your setup's decision, and so is how its build directory gets there. Two
+things about the choice are not. If the second checkout sits inside this tree,
+it sits where `.gitignore` already covers: the `-changed` gates refuse anything
+`git status` reports, untracked entries included, so a checkout at a path of
+your own makes the gates of the checkout containing it refuse to answer. And if
+you run several checkouts, give each its own `target`. Cargo treats path
 dependencies with the same name, version and workspace-relative path as the same
 crate even across checkouts
 ([cargo#12516](https://github.com/rust-lang/cargo/issues/12516)), which every
-crate here satisfies against every other worktree — so two worktrees pointed at
+crate here satisfies against every other checkout — so two of them pointed at
 one directory can report a gate green against the other branch's binaries, with
-no error to notice. Copies collide with nothing.
+no error to notice. A `target` of its own collides with nothing.
+
+Here a recipe makes both choices, and this is what it chooses:
+
+```bash
+just worktree-new <type> <slug>
+```
+
+That is `git fetch origin`, then
+`git worktree add .worktrees/<slug> -b <type>/<slug> origin/main` — one worktree
+per issue, under the gitignored `.worktrees/` — then `just branch-check` to
+verify the base before you build on it. What the recipe adds to those three is a
+copy of `target/` into the new worktree, so its first gate is not a rebuild of
+the whole dependency graph. Measured on `asterism-infra`: `cargo check` took 1
+min 17 s in a cold worktree against 39 s in a copied one.
 
 The copy itself is
 [`cargo shared-target`](https://crates.io/crates/cargo-shared-target)
@@ -62,13 +90,16 @@ merged.
 
 ## Verification
 
-`just check` is the definition of green, and CI is where it runs. Two of its
-gates cost what the workspace costs rather than what the change costs:
-`rust-test` links every test binary at once — one linker process each, gigabytes
-resident each, as many at a time as `jobs` allows — and `rust-clippy` compiles
-every target in every crate. That is minutes on any machine, and on a shared or
-memory-tight one the test half is enough to push the box into swap and take down
-whatever else is running there.
+`just check` is the definition of green, and CI is where it runs. What this
+section decides — what green is, when a full run is owed and where it happens,
+and that a report names what was actually run — is the repository's; the recipes
+it names to get there exist here and nowhere else. Two of the gates cost what
+the workspace costs rather than what the change costs: `rust-test` links every
+test binary at once — one linker process each, gigabytes resident each, as many
+at a time as `jobs` allows — and `rust-clippy` compiles every target in every
+crate. That is minutes on any machine, and on a shared or memory-tight one the
+test half is enough to push the box into swap and take down whatever else is
+running there.
 
 **Do not run either over the whole workspace locally as a matter of course.**
 Reach for `just rust-test` by hand only when CI has reported something a narrow
@@ -180,8 +211,9 @@ Refs #<issue>
   question: it says the tree is formatted, not that the formatting belongs in
   the commit next to the behaviour it touched.
 - Update `CHANGELOG.md` under `## [Unreleased]` as its own commit.
-- Never commit `workspace/`, `.worktrees/`, or local agent state. If a commit
-  needs `git add -f`, stop: something is filed wrong.
+- Never commit working notes, another checkout, or local agent state;
+  `.gitignore` names them. If a commit needs `git add -f`, stop: something is
+  filed wrong.
 - A pull request title reaches `main`'s merge commit, and GitHub reads a CI skip
   keyword there the same way it reads one in a message: the run is skipped, its
   checks stay _pending_ rather than failing, and nothing looks wrong. Write "the
@@ -317,13 +349,15 @@ that includes the gate:
    including any recipe that reported it did not check anything — `aidoc-guard`
    says so out loud and still exits 0.
 2. **Write the PR body to a file** under `workspace/`, which is gitignored, and
-   say where it is. Not a summary in the chat, not "a draft" — a file, so that
-   the command handed over can be `--body-file <path>` and the human reads the
-   same bytes that will be posted. The review record —
-   `workspace/review-<issue>.md`, the rounds and what became of each finding —
-   goes into that body. A finding declined there is a decision the pull request
-   is making, so it travels with it rather than staying in a worktree that is
-   about to be deleted.
+   say where it is. That directory is not a preference: the `prose-shape` hook
+   looks at markdown written there and nowhere else, so a body written to any
+   other untracked path is never checked. Not a summary in the chat, not "a
+   draft" — a file, so that the command handed over can be `--body-file <path>`
+   and the human reads the same bytes that will be posted. The review record —
+   `workspace/review-<issue>.md`, where the `reviewer` agent writes its rounds
+   and what became of each finding — goes into that body. A finding declined
+   there is a decision the pull request is making, so it travels with it rather
+   than staying in a worktree that is about to be deleted.
 3. Hand over the literal commands. These two are the only ones that write to
    anything remote:
 

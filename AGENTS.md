@@ -13,9 +13,12 @@ tracks. Nothing to wire up; nothing said twice.
 - Security reports: [SECURITY.md](SECURITY.md)
 - API detail lives in RustDoc (`cargo doc`) and `docs/aidoc/`; code
   documentation outranks stale issue text.
-- Never work on `main`; one worktree per issue under `.worktrees/`, cut with
-  `just worktree-new <type> <slug>` from the main checkout — the recipe runs
-  `just branch-check` in the new worktree, so there is no second run to make.
+- Never work on `main`; one branch per issue, cut from `origin/main` after a
+  fetch. `just worktree-new <type> <slug>` from the main checkout does that,
+  gives the branch a worktree of its own, and runs `just branch-check` there, so
+  there is no second run to make. Where the worktree lands is the recipe's
+  choice, not a rule — [CONTRIBUTING.md](CONTRIBUTING.md#branches) draws that
+  line.
 - The `-changed` gates answer for the commits on the branch and refuse a dirty
   tree. Commit, then run them; while editing, reach for
   `just rust-test-one <crate> <cargo args>…`, which passes a filter, `--lib`, or
