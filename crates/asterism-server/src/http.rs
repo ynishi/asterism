@@ -655,7 +655,7 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         // for it.
         .route(
             "/asterism/forge/lines/{id}/points/{point}/releases",
-            post(release_change_point).get(releases_of_change_point),
+            post(release_forge_change_point).get(list_forge_releases_of_change_point),
         )
         .route("/asterism/forge/releases/{id}", get(get_forge_release))
         .with_state(ctx)
@@ -4058,7 +4058,7 @@ async fn threads_about_change(
 ///
 /// The ids come off the path; the command's own fields for them exist
 /// for the transports that have no path.
-async fn release_change_point(
+async fn release_forge_change_point(
     State(ctx): State<Arc<ServerCtx>>,
     Path((id, point)): Path<(String, String)>,
     Json(command): Json<ReleaseChangePointCommand>,
@@ -4086,7 +4086,7 @@ async fn release_change_point(
 ///
 /// A list rather than one, because a set going out twice is two things
 /// that happened and the earlier one is what a rejection was about.
-async fn releases_of_change_point(
+async fn list_forge_releases_of_change_point(
     State(ctx): State<Arc<ServerCtx>>,
     Path((_id, point)): Path<(String, String)>,
 ) -> ApiResult<Vec<ForgeReleaseDto>> {
