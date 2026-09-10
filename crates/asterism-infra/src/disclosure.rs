@@ -2533,6 +2533,91 @@ mod tests {
         assert!(json.contains("asset-1"), "and names the asset: {json}");
     }
 
+    /// A released file states who chose it, and a reader holding only
+    /// the file can get that back out.
+    ///
+    /// The whole point of the feature, executed rather than described:
+    /// the record carries the work's shape, the writer signs it into
+    /// the manifest, and a reference reader reports the manifest intact
+    /// with the signer untrusted — which is what an unanchored
+    /// certificate is owed and what every install ships until a
+    /// conformance record lands (#179).
+    ///
+    /// `issued_shaped_pair` rather than the throwaway identity, and the
+    /// reason is not tidiness: a certificate with no `organizationName`
+    /// also reports `claimSignature.mismatch`, which is the upstream
+    /// defect #179 records and not a statement about these bytes. A
+    /// test asserting "intact" against that fixture would be asserting
+    /// the defect.
+    #[test]
+    fn a_released_file_carries_the_work_that_chose_it_past_a_signature() {
+        use asterism_core::domain::disclosure::{Hand, ReleaseAct, ReleaseDisclosure};
+        use chrono::TimeZone;
+
+        let released_at = chrono::Utc
+            .with_ymd_and_hms(2026, 9, 11, 12, 30, 0)
+            .unwrap();
+        let closed_at = chrono::Utc
+            .with_ymd_and_hms(2026, 9, 11, 12, 10, 0)
+            .unwrap();
+        let record = record().with_release(ReleaseDisclosure::new(
+            ReleaseAct::new(released_at, Hand::Person),
+            "0198c1c2-0000-7000-8000-000000000009",
+            Some("the key visual".into()),
+            2,
+            ReleaseAct::new(closed_at, Hand::Rule),
+        ));
+
+        let (cert, key) = issued_shaped_pair();
+        let identity = SigningIdentity::from_bytes(
+            cert,
+            key,
+            "es256",
+            None,
+            // The signing-side check, not a validator's — the read-back
+            // below is what is under test.
+            Strictness::Permissive,
+        )
+        .expect("a certificate shaped like an issued one");
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shot.png");
+        std::fs::write(&path, png_fixture()).unwrap();
+        let outcome = DisclosureWriter::signed_with(identity)
+            .apply(&path, &record)
+            .unwrap();
+        assert_eq!(outcome.manifest, Half::Written);
+
+        let reader = read_manifest("image/png", std::fs::read(&path).unwrap())
+            .expect("a manifest signed over these bytes");
+        let codes: Vec<&str> = reader
+            .validation_results()
+            .and_then(|results| results.active_manifest())
+            .map(|statuses| statuses.failure().iter().map(|s| s.code()).collect())
+            .unwrap_or_default();
+        assert_eq!(
+            codes,
+            ["signingCredential.untrusted"],
+            "intact, and untrusted on the certificate alone: {}",
+            reader.json()
+        );
+
+        // What a reviewer reads off the file: the act that released it,
+        // the work it came out of, and whose hand each act was.
+        let json = reader.json();
+        assert!(
+            json.contains(&released_at.to_rfc3339()),
+            "the release's own act is in the assertion: {json}"
+        );
+        assert!(
+            json.contains(&closed_at.to_rfc3339()),
+            "and so is the close's: {json}"
+        );
+        assert!(json.contains("0198c1c2-0000-7000-8000-000000000009"));
+        assert!(json.contains("the key visual"));
+        assert!(json.contains("person") && json.contains("rule"));
+    }
+
     #[test]
     fn the_packet_is_written_before_the_manifest_is_signed() {
         // The ordering claim in the module docs, made observable. The

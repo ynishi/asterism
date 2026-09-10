@@ -20,6 +20,12 @@ path = "src/main.rs"
 
 [dev-dependencies]
 tempfile = "3"
+# `forge_release_e2e` builds the PNG a release copies, and a PNG chunk
+# written with a wrong CRC is one a strict decoder rejects — the same
+# reason `asterism-disclosure-format` takes it rather than re-deriving
+# the polynomial. A file the exporter copies and the stamp rewrites has
+# to be a real container on both sides of that.
+crc32fast = "1"
 # `transport_parity` reads two source files and pairs what they declare.
 # Over a string scan, a name inside a block comment or a path literal is
 # a route that does not exist, and a call rustfmt wrapped is a route that
