@@ -218,6 +218,11 @@
       "docs": "Reads something somebody said, refusing an empty one."
     },
     {
+      "path": "asterism_core::application::mapping::forge_change_point_id",
+      "kind": "function",
+      "docs": "Reads a change point id off the wire."
+    },
+    {
       "path": "asterism_core::application::mapping::forge_collisions_to_dto",
       "kind": "function",
       "docs": "Converts what work still collides with to what a screen reads\nbefore offering to resolve it."
@@ -276,6 +281,16 @@
       "path": "asterism_core::application::mapping::forge_pursuit_to_dto",
       "kind": "function",
       "docs": "Converts a piece of work to what a caller reads: how it opened,\nevery round, and how it ended if it has."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_release_id",
+      "kind": "function",
+      "docs": "Reads a release id off the wire."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_release_to_dto",
+      "kind": "function",
+      "docs": "Converts a release to what a caller reads."
     },
     {
       "path": "asterism_core::application::mapping::forge_revision_to_dto",
@@ -606,6 +621,26 @@
       "path": "asterism_core::application::query_group_service::QueryGroupService",
       "kind": "struct",
       "docs": "Application-layer surface for Query Group evaluation."
+    },
+    {
+      "path": "asterism_core::application::release_service",
+      "kind": "module",
+      "docs": "`ReleaseService` — writing out what a change point carries, and\nstamping what leaves.\n\nOne verb and one hook:\n\n- [`release`](ReleaseService::release) — freeze the change point's\n  folded state, start a `file` dispatch in `copy` mode over it, and\n  record that it happened.\n- [`OutboundStamping`] — what the run calls back when it has written\n  the files, so that each copy carries the disclosure and the history\n  that chose it before the dispatch reports done.\n\n# The freeze is driven from here, not from inside the forge\n\n[`boundary::Store`](crate::domain::forge::boundary::store::Store)\nasks the layer below exactly one question, and its module doc says\nthe rest — freezing a set among them — waits for the work that needs\nit. This is that work, and the answer is that the store does not grow\na `freeze` method.\n\nTwo reasons, and the second is the one that decides it.\n\n**The forge may not name what a freeze produces.** A `SnapshotId` and\na `DispatchId` are core words, `tests/forge_boundary.rs` holds the\nlist of words a contract across that boundary may be written in, and\n`freeze(change_point) -> SnapshotId` would put two more on it. That\nlist is a statement about what the forge would have to carry when it\nis lifted into a crate of its own, and paying two entries of it for a\nrecord that does not have to live inside the forge is the reversal\n#254 asked to be argued before it was written.\n\n**The same walk already happens outward, from outside.**\n`asterism-teams-client::publish` hands a line's current state to a\nreceiver the forge does not control, and it does that by reading the\nline and calling the far side — not by asking the forge to hand\nanything down. A release to a filesystem is that walk with a\ndifferent transport, so it is driven the same way: read the line,\nfold the chain, and call the services that freeze and dispatch.\n\nWhat the forge keeps is what it kept before: it decides, and the raw\nlayer carries. Nothing here writes a forge word onto a core row, and\nnothing writes a core id onto a forge one — the release is a row of\nits own that names both ([`Release`]).\n\n# A release with nothing live is refused\n\nA change point whose folded state has no live entry has nothing to\nwrite out. Recording one would produce a release naming a snapshot\nthat cannot exist — [`Snapshot::new`](crate::domain::snapshot::Snapshot::new)\nrejects an empty membership — so the choice is between refusing and\ninventing a record of an export that never happened. It is refused,\nas [`Blocked`](crate::error::ConflictKind::Blocked): put something on\nthe line and the same request works.\n\n# Stamping is the same writer, pointed at the copy\n\n[`DisclosureService::apply_to`] is what the `disclosure_stamp` job\nalready calls on the library's own artefacts. A release calls it on\nthe *copies* the exporter wrote, and never on the library's own\nfile — the record is derived from stored rows either way, so what\ndiffers is only which path is handed in.\n\nThe manifest half being [`Skipped`](crate::domain::disclosure::Skipped)\non a build with no certificate is a supported state and not a\nfailure, so it is recorded per file and reported rather than raised."
+    },
+    {
+      "path": "asterism_core::application::release_service::OutboundFile",
+      "kind": "struct",
+      "docs": "One file a run wrote, and the library row it is a copy of."
+    },
+    {
+      "path": "asterism_core::application::release_service::OutboundStamping",
+      "kind": "trait",
+      "docs": "What a dispatch calls when it has written its files and has not yet\nreported done.\n\nA port, declared beside the service that owns the concept for the\nsame reason\n[`DisclosureWriter`](crate::application::disclosure_service::DisclosureWriter)\nis: the caller is the runner in `asterism-infra`, and a runner that\nnamed this service would have to know what a release is in order to\nfinish a dispatch that is not one.\n\n# Why nothing here fails a dispatch\n\nThe bytes are written by the time this is called. A stamp that does\nnot land leaves a file that exists and is not marked, and the mark\ncan be made again from stored rows; failing the run instead would\ndiscard an export that produced exactly what it was asked for. So the\nerror channel carries what went wrong for the caller to log, and the\ncaller logs it."
+    },
+    {
+      "path": "asterism_core::application::release_service::ReleaseService",
+      "kind": "struct",
+      "docs": "Releasing a change point, and stamping what leaves."
     },
     {
       "path": "asterism_core::application::series_strategy_service",
@@ -1346,6 +1381,26 @@
       "path": "asterism_core::domain::disclosure::record_for",
       "kind": "function",
       "docs": "Builds the record for one artefact.\n\n`meta_kv` is the canonical metadata of the material the file came\nfrom; `params` is what the extraction port read out of that same\nmetadata ([`GeneratorParams`], [`GeneratorParams::not_yet`] where\nnothing ran); `parents` are its recorded `derived_from` edges, in\nthe order they were read; `asserted` is the person's own source-type\nstatement when one is recorded ([`asserted_source_type`]); `prompts`\ndecides whether the prompt is disclosed at all\n([`PromptDisclosure`])."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::release",
+      "kind": "module",
+      "docs": "The shape of the work a released file came out of, as the file\nitself will state it.\n\nA disclosure says how an artefact was made. This says who chose it:\na person opened work with something in mind, took some number of\nrounds at it, ended it, and later released what the line then\ncarried. Those are the facts a reviewer holding only the file has to\nbe able to read, and the reason the forge records an\n[`Act`](crate::domain::forge::model::act::Act) on every node.\n\n# Why the forge's own words do not travel\n\nThis module names nothing in the forge. It carries a pursuit id as\ntext, an actor as [`Hand`], and two instants — none of which is a\nforge type — because a disclosure is rendered by\n`asterism-disclosure-format`, and a renderer that had to know what a\n`Pursuit` is would put the intentional history into a crate whose\nsubject is container formats. The translation happens once, where\nthe release is assembled.\n\n# What is left out, and why each one\n\n**Round notes.** Free text somebody wrote for themselves, in a\nsigned document nobody can edit afterwards. The team publish path\nalready decided this for a receiver it does not control\n(`asterism-teams-client::publish`), and a marketplace reviewer is a\nstranger by a wider margin than a team is.\n\n**The operations.** What a round added, replaced, renamed or removed\nis the deliberation, and the released set is the conclusion. A\nreader holding the files can see what was chosen; what they cannot\nsee, and what this supplies, is that somebody chose it.\n\n**The prompt.** Kept out of the manifest wherever it appears, on the\nterms `PromptDisclosure` already sets: it is disclosed once, in the\npacket, under the IPTC property defined for it.\n\n# A count rather than the acts of every round\n\n[`rounds`](ReleaseDisclosure::rounds) says how many, not who did\neach. Which rounds a person did and which a rule did is a question\nabout the deliberation, and the two acts that are carried whole —\nthe close and the release — are the two that decide something."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::release::Hand",
+      "kind": "enum",
+      "docs": "Whether a person or a rule did something.\n\nThe disclosure's own word for the distinction\n[`Actor`](crate::domain::forge::model::act::Actor) draws, spelled\nhere so that this value carries no forge type. Which person is not\ndisclosed and could not be: an `ActorId` is a handle this\napplication resolves and a reader of the file cannot, and the\ncertificate the manifest is signed under is the name that travels."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::release::ReleaseAct",
+      "kind": "struct",
+      "docs": "One act, reduced to what a file may say about it.\n\nWhen, and whose hand. That pair is the whole of what a validator can\nact on, and it is exactly what the forge records on every node."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::release::ReleaseDisclosure",
+      "kind": "struct",
+      "docs": "What a released file says about the work that reached it.\n\nAssembled once, where a release is recorded, and rendered by both\nhalves of the disclosure that carry it — today the manifest's custom\nassertion, which is the signed half and the only one with a field\nfor any of this."
     },
     {
       "path": "asterism_core::domain::disclosure::source_type",
@@ -2383,6 +2438,21 @@
       "docs": "Whether `target` is reachable from `start` by following dependency\nedges (including `start == target` via a non-empty path — pass the\ncandidate edge's endpoints to ask \"would adding `X → start` close a\ncycle?\" as `reaches(graph, start, X)`)."
     },
     {
+      "path": "asterism_core::domain::release",
+      "kind": "module",
+      "docs": "`Release` — the record that a change point's state was written out.\n\n```text\n  Line ── History ── ChangePoint          Snapshot ── DispatchJob\n                         ▲                    ▲            ▲\n                         └──── Release ───────┴────────────┘\n                                 act\n                                 file stamps*\n```\n\n# A release is not a change point\n\nNothing the line carries changes when its contents go out. Putting a\nrelease on the chain would make \"the line moved\" and \"what the line\nholds was sent somewhere\" the same event — the argument\n[`line`](crate::domain::forge::model::line) already gives for keeping\na rename off the history. So a release is a record beside the chain\nthat names one change point, carries its own\n[`Act`](crate::domain::forge::model::act::Act), and leaves the head\nwhere it was.\n\nTwo releases of one change point are two records. Nothing here keys\non the change point, and nothing refuses a second one: a set going\nout twice is two things that happened, and a store that collapsed\nthem would answer \"when did this leave\" with one of the two dates.\n\n# Why this is not in the forge\n\nIt is the forge's kind of statement — an operator's account, with an\nactor and a time — and it names a [`SnapshotId`] and a\n[`DispatchId`], which the forge may not. `tests/forge_boundary.rs`\nholds the list of words a contract across that boundary may be\nwritten in, and adding two core ids to it would be the reversal\n#254's \"boundary that moves\" section describes, paid for a record\nthat does not have to live inside the forge to be written.\n\nSo it sits here, where both vocabularies are already legal, and the\ndirection the forge's own module doc states is preserved: the\noutside may name the forge, and the forge may not name the outside.\nNothing the forge holds moves, and no core row learns a forge word —\nthe release is a row of its own that names both by id.\n\n# What the stamps are, and why they are per file\n\n[`Stamped`] is what applying a disclosure to one file achieved, and\nits two halves fail independently. A release writes out as many\nfiles as the change point had live entries, so the honest record is\none outcome per file: a build with no certificate configured reports\nthe manifest half [`Skipped`](crate::domain::disclosure::Skipped) on\nevery one of them, and a container that could not take a packet\nreports it on one. A summary would have to pick which of those to\nreport, and the caller reading it could not get back to the file."
+    },
+    {
+      "path": "asterism_core::domain::release::FileStamp",
+      "kind": "struct",
+      "docs": "What became of the disclosure on one written-out file.\n\nThe asset is the library's own row the file is a copy of; the path\nis where the copy landed. Both are recorded because neither answers\nfor the other: two entries of one line can name one asset, and a\npath outlives nothing — the file it names may be moved by whoever\nreceives it the moment after this is written."
+    },
+    {
+      "path": "asterism_core::domain::release::Release",
+      "kind": "struct",
+      "docs": "One change point's state, written out."
+    },
+    {
       "path": "asterism_core::domain::render",
       "kind": "module",
       "docs": "How an asset is rendered — thumbnail eligibility, media path, and\npreview mode, decided in one place.\n\n## Why this exists\n\n\"Can this be shown as a tile?\" is a question about the **bytes**, and\nthe bytes answer it: `image/png` is an image whatever the asset is\n*about*. Before this module the question was routed through the\nsemantic axis instead — `asset.modality` → the Modality master's\n`kind` → `ContentKind::capabilities()` — with a second, mime-based\npath bolted on for rows carrying no modality (asset-model v4 left\nconversation rows unclassified).\n\nTwo paths answering one question is not merely redundant; they\ndisagreed. Classifying a PNG as `memory` (a `text` kind) made it\nstop being thumbnailable, so the same file rendered differently\ndepending on what it was filed under [measured 2026-07-29, dogfood:\n25 unclassified PNGs all had thumbnails, the 5 classified as\n`memory` / `work_product` had none].\n\n## The split\n\nMaterial (mime) answers what the bytes *are* — thumbnail, media\npath, \"is this text\". Modality answers only what mime cannot: a\nterminal transcript is `text/plain` like any other note, and no\namount of byte inspection reveals that it should render as a\nterminal. That is a genuine semantic input, and it is the *only*\none this policy takes."
@@ -2631,6 +2701,11 @@
       "path": "asterism_core::domain::repository::RegisteredStrategy",
       "kind": "struct",
       "docs": "One `series_strategy` row: the rule, and what the row says about\nitself.\n\nThe provenance travels beside the rule rather than on it because\n[`Strategy`](crate::domain::series::Strategy) is what\n[`derive`](crate::domain::series::derive) reads, and neither stamp\nnor the `system` flag is an input to a key. Putting them on the\ndomain type would mean every fixture that exercises the derivation\nhad to invent a creation time."
+    },
+    {
+      "path": "asterism_core::domain::repository::ReleaseRepository",
+      "kind": "trait",
+      "docs": "Persistence port for [`Release`] — one change point's state written\nout.\n\nNarrow in the same way [`SnapshotRepository`] is, and for a related\nreason: a release is a record of something that happened, so it is\nwritten once, learns what the run wrote, and is read. Nothing here\nedits what was released, and nothing deletes a release on its own —\nit goes when the line it names is discarded, which is where every\nother forge-side record ends."
     },
     {
       "path": "asterism_core::domain::repository::RetrievalIntent",
@@ -3206,6 +3281,11 @@
       "path": "asterism_core::domain::value::RegisterNote",
       "kind": "struct",
       "docs": "Short annotation about the asset's register / tone; the presentation\nlayer decides how to render it."
+    },
+    {
+      "path": "asterism_core::domain::value::ReleaseId",
+      "kind": "struct",
+      "docs": "Surrogate id for a `Release` — one change point's state written\nout.\n\nSurrogate rather than the change point it names, because a set\ncan go out more than once: two releases of one change point are\ntwo things that happened, and an id derived from what was\nreleased could only hold one of them."
     },
     {
       "path": "asterism_core::domain::value::SessionId",

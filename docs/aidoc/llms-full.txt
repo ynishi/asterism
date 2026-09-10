@@ -414,15 +414,19 @@ showing how a line got where it is.
 - `ForgeOpDto` — One operation of a round.
 - `ForgePursuitActCommand` — Asks the line's rule to answer whatever this work collides with.
 - `ForgePursuitDto` — A piece of work against a line, whole: how it opened, every round
+- `ForgeReleaseDto` — What a release left behind.
+- `ForgeReleaseFileDto` — What the disclosure writer reported about one file that left.
 - `ForgeResolvedDto` — What `resolve` did.
 - `ForgeRevisionDto` — One correction to something said.
 - `ForgeRoundDto` — One round of work — what it asks the line to say, and who asked.
+- `ForgeStampHalfDto` — One half of a stamp: what happened, and what there is to say about
 - `ForgeStrategyDto` — A rule a line can be pointed at.
 - `ForgeThreadDto` — A conversation, whole.
 - `OpenForgeLineCommand` — Opens a line.
 - `OpenForgePursuitCommand` — Opens work against a line.
 - `OpenForgeThreadCommand` — Opens a conversation about something in the forge.
 - `PushForgeRoundCommand` — Writes a round.
+- `ReleaseChangePointCommand` — Writes out what a change point carries.
 - `RenameForgeLineCommand` — Renames a line. The name is the line's own description, so this is
 - `RenameForgeThreadCommand` — Renames a conversation, or takes its name off.
 - `SayInForgeThreadCommand` — Says something in a conversation.
@@ -699,6 +703,7 @@ the private design notes.
 - [`application::persona_service`](application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
 - [`application::query_group_invalidation`](application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [`application::query_group_service`](application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
+- [`application::release_service`](application__release_service.md): `ReleaseService` — writing out what a change point carries, and
 - [`application::series_strategy_service`](application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
 - [`application::session_service`](application__session_service.md): `SessionService` — use cases for the Session 1st-class entity.
 - [`application::snapshot_service`](application__snapshot_service.md): `SnapshotService` — application surface for the immutable `Snapshot`
@@ -728,6 +733,7 @@ the private design notes.
 - [`domain::disclosure::carried`](domain__disclosure__carried.md): What a file currently carries, and whether it still stands up.
 - [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [`domain::disclosure::record`](domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
+- [`domain::disclosure::release`](domain__disclosure__release.md): The shape of the work a released file came out of, as the file
 - [`domain::disclosure::source_type`](domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
 - [`domain::disclosure::generator_keys`](domain__disclosure__generator_keys.md): Keys that only a generator writes, one per family.
 - [`domain::dispatch`](domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
@@ -780,6 +786,7 @@ the private design notes.
 - [`domain::provenance`](domain__provenance.md): `ProvenanceRef` — how a re-ingested artefact names where it came from.
 - [`domain::provenance::source`](domain__provenance__source.md): `_trace.source` vocabulary — which channel a provenance claim
 - [`domain::query_group_eval`](domain__query_group_eval.md): Query Group evaluation — the pure pieces of the materialize pipeline.
+- [`domain::release`](domain__release.md): `Release` — the record that a change point's state was written out.
 - [`domain::render`](domain__render.md): How an asset is rendered — thumbnail eligibility, media path, and
 - [`domain::repository`](domain__repository.md): Repository ports — the persistence traits declared here and implemented
 - [`domain::series`](domain__series.md): `series` — "made the same way": a rule for reading a material's
@@ -1320,6 +1327,7 @@ so on) live in `asterism-contract`'s crate docs.
 - `entity_ref_to_dto` — Converts a domain [`EntityRef`] to its wire DTO.
 - `forge_anchored` — Reads which thing a conversation is about.
 - `forge_body` — Reads something somebody said, refusing an empty one.
+- `forge_change_point_id` — Reads a change point id off the wire.
 - `forge_collisions_to_dto` — Converts what work still collides with to what a screen reads
 - `forge_discarded_to_dto` — Converts what a drop released.
 - `forge_history_to_dto` — Converts a line and its whole chain, in the chain's order.
@@ -1332,6 +1340,8 @@ so on) live in `asterism-contract`'s crate docs.
 - `forge_outcome` — Reads how a caller says work ended.
 - `forge_pursuit_id` — Reads a pursuit id off the wire.
 - `forge_pursuit_to_dto` — Converts a piece of work to what a caller reads: how it opened,
+- `forge_release_id` — Reads a release id off the wire.
+- `forge_release_to_dto` — Converts a release to what a caller reads.
 - `forge_revision_to_dto` — Converts one correction.
 - `forge_round_to_dto` — Converts one round to what a caller reads.
 - `forge_states_to_dto` — Converts the fold of a line's chain to what is on it.
@@ -1691,6 +1701,85 @@ same on every refresh.
 ## Types
 
 - `QueryGroupService` — Application-layer surface for Query Group evaluation.
+
+
+<!-- asterism_core/application__release_service.md -->
+# asterism-core::application::release_service
+
+`ReleaseService` — writing out what a change point carries, and
+stamping what leaves.
+
+One verb and one hook:
+
+- [`release`](ReleaseService::release) — freeze the change point's
+  folded state, start a `file` dispatch in `copy` mode over it, and
+  record that it happened.
+- [`OutboundStamping`] — what the run calls back when it has written
+  the files, so that each copy carries the disclosure and the history
+  that chose it before the dispatch reports done.
+
+# The freeze is driven from here, not from inside the forge
+
+[`boundary::Store`](crate::domain::forge::boundary::store::Store)
+asks the layer below exactly one question, and its module doc says
+the rest — freezing a set among them — waits for the work that needs
+it. This is that work, and the answer is that the store does not grow
+a `freeze` method.
+
+Two reasons, and the second is the one that decides it.
+
+**The forge may not name what a freeze produces.** A `SnapshotId` and
+a `DispatchId` are core words, `tests/forge_boundary.rs` holds the
+list of words a contract across that boundary may be written in, and
+`freeze(change_point) -> SnapshotId` would put two more on it. That
+list is a statement about what the forge would have to carry when it
+is lifted into a crate of its own, and paying two entries of it for a
+record that does not have to live inside the forge is the reversal
+#254 asked to be argued before it was written.
+
+**The same walk already happens outward, from outside.**
+`asterism-teams-client::publish` hands a line's current state to a
+receiver the forge does not control, and it does that by reading the
+line and calling the far side — not by asking the forge to hand
+anything down. A release to a filesystem is that walk with a
+different transport, so it is driven the same way: read the line,
+fold the chain, and call the services that freeze and dispatch.
+
+What the forge keeps is what it kept before: it decides, and the raw
+layer carries. Nothing here writes a forge word onto a core row, and
+nothing writes a core id onto a forge one — the release is a row of
+its own that names both ([`Release`]).
+
+# A release with nothing live is refused
+
+A change point whose folded state has no live entry has nothing to
+write out. Recording one would produce a release naming a snapshot
+that cannot exist — [`Snapshot::new`](crate::domain::snapshot::Snapshot::new)
+rejects an empty membership — so the choice is between refusing and
+inventing a record of an export that never happened. It is refused,
+as [`Blocked`](crate::error::ConflictKind::Blocked): put something on
+the line and the same request works.
+
+# Stamping is the same writer, pointed at the copy
+
+[`DisclosureService::apply_to`] is what the `disclosure_stamp` job
+already calls on the library's own artefacts. A release calls it on
+the *copies* the exporter wrote, and never on the library's own
+file — the record is derived from stored rows either way, so what
+differs is only which path is handed in.
+
+The manifest half being [`Skipped`](crate::domain::disclosure::Skipped)
+on a build with no certificate is a supported state and not a
+failure, so it is recorded per file and reported rather than raised.
+
+## Types
+
+- `OutboundFile` — One file a run wrote, and the library row it is a copy of.
+- `ReleaseService` — Releasing a change point, and stamping what leaves.
+
+## Traits
+
+- `OutboundStamping` — What a dispatch calls when it has written its files and has not yet
 
 
 <!-- asterism_core/application__series_strategy_service.md -->
@@ -3355,6 +3444,60 @@ manufacture exactly the evidence it is supposed to record.
 ## Types
 
 - `DisclosureRecord` — What one exported artefact will disclose.
+
+
+<!-- asterism_core/domain__disclosure__release.md -->
+# asterism-core::domain::disclosure::release
+
+The shape of the work a released file came out of, as the file
+itself will state it.
+
+A disclosure says how an artefact was made. This says who chose it:
+a person opened work with something in mind, took some number of
+rounds at it, ended it, and later released what the line then
+carried. Those are the facts a reviewer holding only the file has to
+be able to read, and the reason the forge records an
+[`Act`](crate::domain::forge::model::act::Act) on every node.
+
+# Why the forge's own words do not travel
+
+This module names nothing in the forge. It carries a pursuit id as
+text, an actor as [`Hand`], and two instants — none of which is a
+forge type — because a disclosure is rendered by
+`asterism-disclosure-format`, and a renderer that had to know what a
+`Pursuit` is would put the intentional history into a crate whose
+subject is container formats. The translation happens once, where
+the release is assembled.
+
+# What is left out, and why each one
+
+**Round notes.** Free text somebody wrote for themselves, in a
+signed document nobody can edit afterwards. The team publish path
+already decided this for a receiver it does not control
+(`asterism-teams-client::publish`), and a marketplace reviewer is a
+stranger by a wider margin than a team is.
+
+**The operations.** What a round added, replaced, renamed or removed
+is the deliberation, and the released set is the conclusion. A
+reader holding the files can see what was chosen; what they cannot
+see, and what this supplies, is that somebody chose it.
+
+**The prompt.** Kept out of the manifest wherever it appears, on the
+terms `PromptDisclosure` already sets: it is disclosed once, in the
+packet, under the IPTC property defined for it.
+
+# A count rather than the acts of every round
+
+[`rounds`](ReleaseDisclosure::rounds) says how many, not who did
+each. Which rounds a person did and which a rule did is a question
+about the deliberation, and the two acts that are carried whole —
+the close and the release — are the two that decide something.
+
+## Types
+
+- `Hand` — Whether a person or a rule did something.
+- `ReleaseAct` — One act, reduced to what a file may say about it.
+- `ReleaseDisclosure` — What a released file says about the work that reached it.
 
 
 <!-- asterism_core/domain__disclosure__source_type.md -->
@@ -6708,6 +6851,68 @@ neither complete nor deterministic, so it could not define one.
 - `DependencyGraph` — Dependency graph over groups for the query-cycle guard.
 
 
+<!-- asterism_core/domain__release.md -->
+# asterism-core::domain::release
+
+`Release` — the record that a change point's state was written out.
+
+```text
+  Line ── History ── ChangePoint          Snapshot ── DispatchJob
+                         ▲                    ▲            ▲
+                         └──── Release ───────┴────────────┘
+                                 act
+                                 file stamps*
+```
+
+# A release is not a change point
+
+Nothing the line carries changes when its contents go out. Putting a
+release on the chain would make "the line moved" and "what the line
+holds was sent somewhere" the same event — the argument
+[`line`](crate::domain::forge::model::line) already gives for keeping
+a rename off the history. So a release is a record beside the chain
+that names one change point, carries its own
+[`Act`](crate::domain::forge::model::act::Act), and leaves the head
+where it was.
+
+Two releases of one change point are two records. Nothing here keys
+on the change point, and nothing refuses a second one: a set going
+out twice is two things that happened, and a store that collapsed
+them would answer "when did this leave" with one of the two dates.
+
+# Why this is not in the forge
+
+It is the forge's kind of statement — an operator's account, with an
+actor and a time — and it names a [`SnapshotId`] and a
+[`DispatchId`], which the forge may not. `tests/forge_boundary.rs`
+holds the list of words a contract across that boundary may be
+written in, and adding two core ids to it would be the reversal
+#254's "boundary that moves" section describes, paid for a record
+that does not have to live inside the forge to be written.
+
+So it sits here, where both vocabularies are already legal, and the
+direction the forge's own module doc states is preserved: the
+outside may name the forge, and the forge may not name the outside.
+Nothing the forge holds moves, and no core row learns a forge word —
+the release is a row of its own that names both by id.
+
+# What the stamps are, and why they are per file
+
+[`Stamped`] is what applying a disclosure to one file achieved, and
+its two halves fail independently. A release writes out as many
+files as the change point had live entries, so the honest record is
+one outcome per file: a build with no certificate configured reports
+the manifest half [`Skipped`](crate::domain::disclosure::Skipped) on
+every one of them, and a container that could not take a packet
+reports it on one. A summary would have to pick which of those to
+report, and the caller reading it could not get back to the file.
+
+## Types
+
+- `FileStamp` — What became of the disclosure on one written-out file.
+- `Release` — One change point's state, written out.
+
+
 <!-- asterism_core/domain__render.md -->
 # asterism-core::domain::render
 
@@ -6829,6 +7034,7 @@ projection instead of full `Asset` entities.
 - `PersonaThemeRepository` — Persistence port for [`PersonaTheme`]. The theme is a 1:1 side
 - `ProgressEmitter` — Port for pushing job progress to the UI. In Tauri, the adapter emits
 - `QueryGroupRepository` — Persistence port for the Query Group evaluation core.
+- `ReleaseRepository` — Persistence port for [`Release`] — one change point's state written
 - `SeriesRepository` — Persistence port for the series axis — the [`Strategy`] rules
 - `SessionRepository` — Persistence port for the [`Session`] entity — the Dialog-modality
 - `SnapshotRepository` — Persistence port for [`Snapshot`] — the immutable content-addressed
@@ -7599,6 +7805,7 @@ Design notes:
 - `PreviewMode` — Preview mode selected by a [`ContentKind`] for the QuickLook overlay.
 - `Progress` — Job progress payload; the `ProgressEmitter` forwards it to the UI.
 - `RegisterNote` — Short annotation about the asset's register / tone; the presentation
+- `ReleaseId` — Surrogate id for a `Release` — one change point's state written
 - `SessionId` — Session identifier attached to a dialogue asset — after the
 - `SnapshotId` — Surrogate id for a `Snapshot` — the immutable, content-addressed
 - `SourceKind` — Ingest source slug for an asset (open slug).
@@ -10905,6 +11112,7 @@ this crate.
 - [`sqlite::repo::persona_profile`](sqlite__repo__persona_profile.md): SQLite adapter for the `PersonaProfileRepository` port.
 - [`sqlite::repo::persona_theme`](sqlite__repo__persona_theme.md): SQLite adapter for the `PersonaThemeRepository` port.
 - [`sqlite::repo::query_group`](sqlite__repo__query_group.md): SQLite adapter for `QueryGroupRepository` — the persistence half of
+- [`sqlite::repo::release`](sqlite__repo__release.md): SQLite adapter for the `ReleaseRepository` port.
 - [`sqlite::repo::series`](sqlite__repo__series.md): SQLite adapter for the `SeriesRepository` port — the series axis's
 - [`sqlite::repo::session`](sqlite__repo__session.md): SQLite adapter for the [`SessionRepository`] port.
 - [`sqlite::repo::snapshot`](sqlite__repo__snapshot.md): SQLite adapter for the `SnapshotRepository` port.
@@ -13384,6 +13592,43 @@ Three primitives, all against the existing schema (no migration — the
 - `SqliteQueryGroupRepository` — SQLite adapter (writer isle).
 
 
+<!-- asterism_infra/sqlite__repo__release.md -->
+# asterism-infra::sqlite::repo::release
+
+SQLite adapter for the `ReleaseRepository` port.
+
+`forge_release` holds what was released, by whom and when;
+`forge_release_file` holds what the disclosure writer reported for
+each copy that left, in the order the run wrote them. Reads join the
+two, on the same terms the snapshot adapter joins its membership: a
+release read without its stamps is a release that cannot answer the
+question it exists to answer.
+
+# Why this is not on `SqliteForge`
+
+That adapter satisfies the forge's four ports and is stated in the
+forge's own words. This port is not one of them — a release names a
+snapshot and a dispatch, which the forge may not
+([`asterism_core::domain::release`]) — so putting it there would
+give one type two vocabularies and no reason to have both.
+
+What it does borrow is [`ActRow`], because an act is stored the same
+way wherever it appears: three columns, and a kind this build refuses
+to widen by guessing.
+
+# The two halves of a stamp, as columns
+
+[`Half`] is three states, and the third carries words. So each half
+is a state column and a detail column, and the table's own `CHECK`
+says a state that is not `written` has to carry one — a skipped half
+with no reason and a failed half with no cause are the values the
+type exists to refuse, and a row is where they would come back.
+
+## Types
+
+- `SqliteReleaseRepository` — SQLite adapter for `ReleaseRepository`.
+
+
 <!-- asterism_infra/sqlite__repo__series.md -->
 # asterism-infra::sqlite::repo::series
 
@@ -14890,6 +15135,7 @@ other.
 - `get_forge_pursuit` — The work, whole — one read rather than the line's two.
 - `get_forge_pursuit_behind` — The landings this work has not seen, oldest first.
 - `get_forge_pursuit_collisions` — What this work still asks for that the line has moved since.
+- `get_forge_release` — One release, its file stamps included.
 - `get_forge_thread` — The conversation, whole — every message and every correction to
 - `get_persona_profile` — Fetches the persona's identity signal (avatar / bio / role).
 - `get_persona_theme` — Fetches the persona's UI chrome (wallpaper reference). `None`
@@ -14919,6 +15165,7 @@ other.
 - `list_forge_lines` — Every line, without its history.
 - `list_forge_pursuit_children` — Work opened from this work.
 - `list_forge_pursuits_of_line` — Every piece of work against a line, open and ended alike.
+- `list_forge_releases_of_change_point` — Every time one change point was written out, most recent first.
 - `list_forge_strategies` — Every rule a line can be pointed at, built from the rules this
 - `list_forge_threads_about` — Conversations about one thing in the forge — the work as a whole,
 - `list_format_asset_counts` — Sidebar FORMAT facet counts (asset-model v4) — `(format, count)`
@@ -14979,6 +15226,7 @@ other.
 - `register_persona` — Registers a new persona.
 - `rehome_dropped_path` — Rehomes a dropped path into `$HOME/asterism/dropped/`
 - `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
+- `release_forge_change_point` — Freezes what a change point carried, copies it into a directory, and
 - `remeasure_dims` — Re-reads artefacts and rewrites `width_px` / `height_px` — the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
 - `remove_team_member` — Removes a member from the team.

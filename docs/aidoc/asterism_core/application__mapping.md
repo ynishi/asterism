@@ -22,6 +22,7 @@ so on) live in `asterism-contract`'s crate docs.
 - `entity_ref_to_dto` — Converts a domain [`EntityRef`] to its wire DTO.
 - `forge_anchored` — Reads which thing a conversation is about.
 - `forge_body` — Reads something somebody said, refusing an empty one.
+- `forge_change_point_id` — Reads a change point id off the wire.
 - `forge_collisions_to_dto` — Converts what work still collides with to what a screen reads
 - `forge_discarded_to_dto` — Converts what a drop released.
 - `forge_history_to_dto` — Converts a line and its whole chain, in the chain's order.
@@ -34,6 +35,8 @@ so on) live in `asterism-contract`'s crate docs.
 - `forge_outcome` — Reads how a caller says work ended.
 - `forge_pursuit_id` — Reads a pursuit id off the wire.
 - `forge_pursuit_to_dto` — Converts a piece of work to what a caller reads: how it opened,
+- `forge_release_id` — Reads a release id off the wire.
+- `forge_release_to_dto` — Converts a release to what a caller reads.
 - `forge_revision_to_dto` — Converts one correction.
 - `forge_round_to_dto` — Converts one round to what a caller reads.
 - `forge_states_to_dto` — Converts the fold of a line's chain to what is on it.

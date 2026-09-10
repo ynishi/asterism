@@ -378,6 +378,11 @@
       "docs": "What this work still asks for that the line has moved since.\n\nDerived from both logs on every call, so it cannot go stale. This is\nwhat a screen shows before offering [`resolve_forge_pursuit`]."
     },
     {
+      "path": "asterism_ui::commands::get_forge_release",
+      "kind": "function",
+      "docs": "One release, its file stamps included."
+    },
+    {
       "path": "asterism_ui::commands::get_forge_thread",
       "kind": "function",
       "docs": "The conversation, whole — every message and every correction to\neach.\n\nA payload carrying only what each message says now would leave a\nwithdrawn sentence attributed to the person who withdrew it."
@@ -521,6 +526,11 @@
       "path": "asterism_ui::commands::list_forge_pursuits_of_line",
       "kind": "function",
       "docs": "Every piece of work against a line, open and ended alike."
+    },
+    {
+      "path": "asterism_ui::commands::list_forge_releases_of_change_point",
+      "kind": "function",
+      "docs": "Every time one change point was written out, most recent first.\n\nA list rather than one, because a set going out twice is two things\nthat happened and the earlier one is what a rejection was about."
     },
     {
       "path": "asterism_ui::commands::list_forge_strategies",
@@ -821,6 +831,11 @@
       "path": "asterism_ui::commands::reject_tag_suggestion",
       "kind": "function",
       "docs": "Rejects one tag suggestion (#112); this model never proposes the\npair again."
+    },
+    {
+      "path": "asterism_ui::commands::release_forge_change_point",
+      "kind": "function",
+      "docs": "Freezes what a change point carried, copies it into a directory, and\nstamps each copy on the way out.\n\nAnswers with the release as it was recorded, which is before its\nfiles exist: the run is started here and finishes afterwards, so\n`files` is empty and reading the release again once the run has\nfinished carries a stamp per file.\n\nThe ids are arguments rather than path segments, which is the one\ndifference from the HTTP surface — the command's own `line_id` and\n`change_point_id` fields exist for callers that have no path, and\nthis is one of them."
     },
     {
       "path": "asterism_ui::commands::remeasure_dims",

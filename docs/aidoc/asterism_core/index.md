@@ -69,6 +69,7 @@ the private design notes.
 - [`application::persona_service`](application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
 - [`application::query_group_invalidation`](application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [`application::query_group_service`](application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
+- [`application::release_service`](application__release_service.md): `ReleaseService` — writing out what a change point carries, and
 - [`application::series_strategy_service`](application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
 - [`application::session_service`](application__session_service.md): `SessionService` — use cases for the Session 1st-class entity.
 - [`application::snapshot_service`](application__snapshot_service.md): `SnapshotService` — application surface for the immutable `Snapshot`
@@ -98,6 +99,7 @@ the private design notes.
 - [`domain::disclosure::carried`](domain__disclosure__carried.md): What a file currently carries, and whether it still stands up.
 - [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [`domain::disclosure::record`](domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
+- [`domain::disclosure::release`](domain__disclosure__release.md): The shape of the work a released file came out of, as the file
 - [`domain::disclosure::source_type`](domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
 - [`domain::disclosure::generator_keys`](domain__disclosure__generator_keys.md): Keys that only a generator writes, one per family.
 - [`domain::dispatch`](domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
@@ -150,6 +152,7 @@ the private design notes.
 - [`domain::provenance`](domain__provenance.md): `ProvenanceRef` — how a re-ingested artefact names where it came from.
 - [`domain::provenance::source`](domain__provenance__source.md): `_trace.source` vocabulary — which channel a provenance claim
 - [`domain::query_group_eval`](domain__query_group_eval.md): Query Group evaluation — the pure pieces of the materialize pipeline.
+- [`domain::release`](domain__release.md): `Release` — the record that a change point's state was written out.
 - [`domain::render`](domain__render.md): How an asset is rendered — thumbnail eligibility, media path, and
 - [`domain::repository`](domain__repository.md): Repository ports — the persistence traits declared here and implemented
 - [`domain::series`](domain__series.md): `series` — "made the same way": a rule for reading a material's

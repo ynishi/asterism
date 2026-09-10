@@ -1173,6 +1173,16 @@
       "docs": "SQLite adapter (writer isle)."
     },
     {
+      "path": "asterism_infra::sqlite::repo::release",
+      "kind": "module",
+      "docs": "SQLite adapter for the `ReleaseRepository` port.\n\n`forge_release` holds what was released, by whom and when;\n`forge_release_file` holds what the disclosure writer reported for\neach copy that left, in the order the run wrote them. Reads join the\ntwo, on the same terms the snapshot adapter joins its membership: a\nrelease read without its stamps is a release that cannot answer the\nquestion it exists to answer.\n\n# Why this is not on `SqliteForge`\n\nThat adapter satisfies the forge's four ports and is stated in the\nforge's own words. This port is not one of them — a release names a\nsnapshot and a dispatch, which the forge may not\n([`asterism_core::domain::release`]) — so putting it there would\ngive one type two vocabularies and no reason to have both.\n\nWhat it does borrow is [`ActRow`], because an act is stored the same\nway wherever it appears: three columns, and a kind this build refuses\nto widen by guessing.\n\n# The two halves of a stamp, as columns\n\n[`Half`] is three states, and the third carries words. So each half\nis a state column and a detail column, and the table's own `CHECK`\nsays a state that is not `written` has to carry one — a skipped half\nwith no reason and a failed half with no cause are the values the\ntype exists to refuse, and a row is where they would come back."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::release::SqliteReleaseRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `ReleaseRepository`."
+    },
+    {
       "path": "asterism_infra::sqlite::repo::series",
       "kind": "module",
       "docs": "SQLite adapter for the `SeriesRepository` port — the series axis's\ntwo tables (`series_strategy` / `material_series`, V73).\n\nFollows the crate-wide adapter convention: only `rusqlite` primitives\ninside the isle closure, promotion into domain types outside it\n([`StrategyRow::into_domain`]).\n\nThe one thing worth stating beyond that convention is where the path\nlists are taken apart. `include` / `exclude` are JSON columns (the\nV73 doc comment argues why they are not a side table), so the\n`serde_json` call is the promotion step and a column this build\ncannot parse is [`DomainError::Infra`] — a rule read as though it\nselected nothing would derive keys nobody wrote."
