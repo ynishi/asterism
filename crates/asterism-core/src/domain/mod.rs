@@ -179,6 +179,7 @@ pub mod persona_theme;
 pub mod probe;
 pub mod provenance;
 pub mod query_group_eval;
+pub mod release;
 pub mod render;
 pub mod repository;
 pub mod series;

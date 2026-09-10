@@ -871,6 +871,23 @@ impl Lines for SqliteForge {
                     params![id.as_uuid()],
                 )?;
 
+                // A release of anything on this line goes with it, for
+                // the reason a thread does: it names a change point
+                // that is about to stop existing, and both of its
+                // references into this line are keys. What it named
+                // outside the line — the freeze and the run — stays
+                // where it is, because those are the raw layer's rows
+                // and a line being dropped says nothing about them.
+                tx.execute(
+                    "DELETE FROM forge_release_file WHERE release_id IN \
+                         (SELECT id FROM forge_release WHERE line_id = ?1)",
+                    params![id.as_uuid()],
+                )?;
+                tx.execute(
+                    "DELETE FROM forge_release WHERE line_id = ?1",
+                    params![id.as_uuid()],
+                )?;
+
                 tx.execute(
                     "DELETE FROM pursuit_op WHERE node_id IN \
                          (SELECT n.id FROM pursuit_node n \

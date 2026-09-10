@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use asterism_core::application::mapping::card_to_dto;
+use asterism_core::application::{OutboundFile, OutboundStamping};
 use asterism_core::application_support::DispatchRunnerService;
 use asterism_core::domain::asset::AssetCard;
 use asterism_core::domain::dispatch::DispatchState;
@@ -118,6 +119,15 @@ pub struct DispatchRunEnv {
     /// A queue handle used to re-enqueue the next poll tick without
     /// pulling in a full `JobQueue` trait object at this call site.
     pub reenqueue: Arc<dyn ReEnqueue>,
+    /// What gets asked to stamp the files a run wrote, before the run
+    /// reports done.
+    ///
+    /// A port rather than a service, because the runner has no business
+    /// knowing what a release is: it hands over the files and their
+    /// sources, and the far side decides whether this run was one. An
+    /// absent hook is a build that does not stamp on the way out, which
+    /// is what every build was until releases existed.
+    pub outbound: Option<Arc<dyn OutboundStamping>>,
 }
 
 /// Small port around "put this dispatch id back on the queue for
@@ -336,6 +346,11 @@ pub async fn run_dispatch_run(
                     match harvested {
                         Ok(derived) => {
                             let n = derived.len();
+                            // Before the reify, which is what parks the
+                            // row in `Done`: a file that leaves has to
+                            // carry its disclosure by the time anything
+                            // says the run finished.
+                            stamp_outbound(env, &dispatch_id, &inputs, &derived).await;
                             env.service.reify(&dispatch_id, derived).await?;
                             Ok(format!(
                                 "dispatch {} harvested {} derived",
@@ -410,6 +425,75 @@ pub async fn run_dispatch_run(
             ))
         }
     }
+}
+
+/// Asks the outbound hook to stamp what this run wrote.
+///
+/// # Why a failure here is not the run's failure
+///
+/// The bytes are on disk. A stamp that did not land leaves a file that
+/// exists and is not marked, and the mark is derived from stored rows so
+/// it can be made again; failing the tick instead would hand the job
+/// back to the queue, and the retry would find the row still `Running`
+/// and stamp the same files a second time. Said out loud rather than
+/// swallowed, on the same terms as the attempt record above.
+async fn stamp_outbound(
+    env: &DispatchRunEnv,
+    id: &DispatchId,
+    inputs: &[asterism_contract::dto::AssetCardDto],
+    derived: &[asterism_dispatch_sdk::Derived],
+) {
+    let Some(outbound) = &env.outbound else {
+        return;
+    };
+    let files = copies(inputs, derived);
+    if files.is_empty() {
+        return;
+    }
+    if let Err(err) = outbound.stamp(id, &files).await {
+        tracing::warn!(
+            event = "diag.dispatch.outbound_stamp_failed",
+            dispatch_id = %id,
+            error = %err,
+            "the files left and something they were owed did not land"
+        );
+    }
+}
+
+/// The files this run wrote, paired with the library rows they are
+/// copies of.
+///
+/// **One output per input, in input order.** That is what copying a
+/// frozen set is, and it is the shape the `file` exporter's own loop
+/// produces. A run whose outputs do not line up with its inputs made
+/// something that is not a copy of one member — a single instruction
+/// file, a batch of generations — and nothing here could say which
+/// member a given file came out of, so nothing is paired.
+///
+/// **An output that is its own input is not a copy**, and is excluded.
+/// A reference-mode run reports the library's own file as its output,
+/// and stamping that would rewrite the original because an export
+/// happened to walk past it — which is the distinction `stamp_after_hash`
+/// draws for the same reason on the other path.
+fn copies(
+    inputs: &[asterism_contract::dto::AssetCardDto],
+    derived: &[asterism_dispatch_sdk::Derived],
+) -> Vec<OutboundFile> {
+    if derived.len() != inputs.len() {
+        return Vec::new();
+    }
+    inputs
+        .iter()
+        .zip(derived)
+        .filter(|(input, output)| output.locator != input.source_locator)
+        .filter_map(|(input, output)| {
+            let asset = uuid::Uuid::parse_str(&input.id).ok()?;
+            Some(OutboundFile {
+                asset: asterism_core::domain::value::AssetId::from_uuid(asset),
+                path: std::path::PathBuf::from(&output.locator),
+            })
+        })
+        .collect()
 }
 
 /// The runner's [`AttemptRecorder`]: a slot the exporter writes into

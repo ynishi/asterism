@@ -356,6 +356,9 @@ async fn an_export_of_a_folded_freeze_receives_one_input() {
         dispatches: Arc::new(sqlite::repo::SqliteDispatchRepository::new(isle.clone())),
         assets: Arc::new(sqlite::repo::SqliteAssetRepository::new(isle.clone())),
         reenqueue: Arc::new(SilentReEnqueue),
+        // No release is in play here, so nothing is asked to stamp what
+        // the run wrote.
+        outbound: None,
     };
 
     let payload = serde_json::json!({ "dispatch_id": dispatch.id });

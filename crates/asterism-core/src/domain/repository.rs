@@ -38,6 +38,7 @@ use crate::domain::merge_plan::MergePlan;
 use crate::domain::modality::{ModalityDef, ModalityView};
 use crate::domain::persona::Persona;
 use crate::domain::persona_profile::PersonaProfile;
+use crate::domain::release::{FileStamp, Release};
 use crate::domain::persona_theme::PersonaTheme;
 use crate::domain::series::{SeriesKey, Strategy};
 use crate::domain::session::{Session, SessionMetadataPatch};
@@ -50,9 +51,14 @@ use crate::domain::thread::{Message, Thread, ThreadAnchor};
 use crate::domain::value::{
     AssetCommentId, AssetId, ChapterMarkId, DirId, DispatchId, DuplicateConflictId,
     ExternalSessionKey, GroupId, MaterialLayerId, MaterialMarkId, MessageId, MimeType, Modality,
-    PackId, Page, PersonaId, Progress, SessionId, SnapshotId, SourceKind, StrategyId, TagId,
-    ThreadId,
+    PackId, Page, PersonaId, Progress, ReleaseId, SessionId, SnapshotId, SourceKind, StrategyId,
+    TagId, ThreadId,
 };
+// A release names a change point, and this is the one port whose
+// subject sits on both sides of the forge boundary — the forge may not
+// name a snapshot or a dispatch, so the record that names all three
+// lives out here. `domain::release` says why.
+use crate::domain::forge::model::value::ChangePointId;
 use crate::domain::visual::{
     ModelIdentity, TagEvidence, TagHeadRef, TagSuggestionDisposition, VisualFeature,
     VisualFeatureKind,
@@ -3427,6 +3433,50 @@ pub trait SnapshotRepository: Send + Sync {
         asset_id: &AssetId,
         limit: u32,
     ) -> Result<Vec<Snapshot>, DomainError>;
+}
+
+/// Persistence port for [`Release`] — one change point's state written
+/// out.
+///
+/// Narrow in the same way [`SnapshotRepository`] is, and for a related
+/// reason: a release is a record of something that happened, so it is
+/// written once, learns what the run wrote, and is read. Nothing here
+/// edits what was released, and nothing deletes a release on its own —
+/// it goes when the line it names is discarded, which is where every
+/// other forge-side record ends.
+#[async_trait]
+pub trait ReleaseRepository: Send + Sync {
+    /// Records a release that has just been made.
+    async fn record(&self, release: &Release) -> Result<(), DomainError>;
+
+    /// Fetches one release, its file stamps included.
+    async fn find(&self, id: &ReleaseId) -> Result<Option<Release>, DomainError>;
+
+    /// The release that started one dispatch, if the dispatch was
+    /// started by one.
+    ///
+    /// `None` is the ordinary answer, not a miss: most dispatches are
+    /// not releases, and this is the question the stamping pass asks of
+    /// every run that finishes.
+    async fn by_dispatch(&self, dispatch: &DispatchId) -> Result<Option<Release>, DomainError>;
+
+    /// Every release of one change point, most recent first.
+    ///
+    /// A list rather than an option, because a set going out twice is
+    /// two records — see [`Release`].
+    async fn of_change_point(
+        &self,
+        change_point: &ChangePointId,
+    ) -> Result<Vec<Release>, DomainError>;
+
+    /// Records what the disclosure writer reported for each file the
+    /// release wrote.
+    ///
+    /// Replaces whatever was there rather than appending: the stamps of
+    /// one release are the outcome of one pass over the files it wrote,
+    /// and a second pass over the same files is a correction of the
+    /// first rather than more of it.
+    async fn note_files(&self, id: &ReleaseId, files: &[FileStamp]) -> Result<(), DomainError>;
 }
 
 /// Persistence port for [`DispatchJob`].

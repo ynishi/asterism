@@ -270,6 +270,9 @@ async fn dispatch_env(
         dispatches: Arc::new(sqlite::repo::SqliteDispatchRepository::new(isle.clone())),
         assets: Arc::new(sqlite::repo::SqliteAssetRepository::new(isle)),
         reenqueue: reenqueue.clone(),
+        // No release is in play here, so nothing is asked to stamp what
+        // the run wrote.
+        outbound: None,
     };
     (env, reenqueue)
 }

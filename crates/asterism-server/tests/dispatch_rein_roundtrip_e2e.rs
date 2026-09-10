@@ -173,6 +173,11 @@ async fn dispatch_env(
         dispatches: Arc::new(sqlite::repo::SqliteDispatchRepository::new(isle.clone())),
         assets: Arc::new(sqlite::repo::SqliteAssetRepository::new(isle)),
         reenqueue: reenqueue.clone(),
+        // This roundtrip is about what a dispatch writes and what comes
+        // back through it, and no release is involved — so nothing is
+        // asked to stamp, which is also what a build with no releases
+        // configured does.
+        outbound: None,
     };
     (env, reenqueue)
 }

@@ -510,6 +510,15 @@ pub struct CoreCtx {
     /// anchors without learning what the other layer is made of, which
     /// is why there are two — in the services, and in the tables.
     pub forge_thread_service: Arc<asterism_core::application::forge::ThreadService>,
+    /// Writing out what a change point carries, and stamping the
+    /// copies on the way out.
+    ///
+    /// Not a forge service, and it sits here beside them rather than
+    /// among them for the reason
+    /// [`release`](asterism_core::domain::release) gives: it names a
+    /// snapshot and a dispatch, which the forge may not, so it drives
+    /// the freeze from outside instead of the forge asking for one.
+    pub release_service: Arc<asterism_core::application::ReleaseService>,
     /// Query Group evaluate-and-materialize pipeline: startup refresh,
     /// the create / update-rule commands, and (W4) the refresh job.
     pub query_group_service: Arc<QueryGroupService>,
@@ -1281,6 +1290,20 @@ pub async fn init_core_with(
         asterism_core::domain::forge::boundary::StoreClient::new(Arc::new(
             sqlite::repo::SqliteStore::new(isle.clone()),
         )),
+        forge_actors.clone(),
+        forge_clock.clone(),
+    ));
+    // The release, over the same connection. Its own port is not one of
+    // the forge's four — a release names a snapshot and a dispatch — so
+    // it gets an adapter of its own rather than a fifth face on
+    // `SqliteForge`.
+    let release_service = Arc::new(asterism_core::application::ReleaseService::new(
+        forge.clone(),
+        forge.clone(),
+        Arc::new(sqlite::repo::SqliteReleaseRepository::new(isle.clone())),
+        snapshot_service.clone(),
+        dispatch_service.clone(),
+        disclosure_cell.clone(),
         forge_actors,
         forge_clock,
     ));
@@ -1367,6 +1390,10 @@ pub async fn init_core_with(
         dispatches: dispatches.clone(),
         assets: assets_arc.clone(),
         reenqueue,
+        // What stamps a release's copies before the run reports done.
+        // Every dispatch is offered to it; the ones that are not
+        // releases are handed straight back.
+        outbound: Some(release_service.clone()),
     }));
 
     // (Session snapshot drift check retired with the rkyv store —
@@ -1420,6 +1447,7 @@ pub async fn init_core_with(
         line_service,
         pursuit_service,
         forge_thread_service,
+        release_service,
         query_group_service,
         modality_service: Arc::new(ModalityService::new(Arc::new(modalities))),
         series_strategy_service: Arc::new(SeriesStrategyService::new(
