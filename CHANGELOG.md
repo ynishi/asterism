@@ -244,6 +244,30 @@ and this project adheres to
   and a fold, which is the one thing a widened equivalence would destroy rather
   than merely miss.
 
+### Changed
+
+- **The contributing document says which of its sentences bind** (#272).
+  `CONTRIBUTING.md` told a contributor to use `.worktrees/` and `workspace/` in
+  the voice it uses for rules that bind everyone, and the first repository to
+  copy it had to work out by hand whose choices those were — and concluded, for
+  both, one machine's. The boundary is now a rule the file states about itself,
+  with three sides: what the repository decides binds contributors; what the
+  published plugins decide travels with them, which is where `workspace/` turned
+  out to belong — it is a literal in `prose-shape` and `reviewer`, not one
+  machine's layout; what a setup decides binds nobody, and where a recipe here
+  fixes a local choice the file says so as a fact about the recipe, beside the
+  rule it serves. `Branches` gives the rule — one branch per issue, cut from
+  `origin/main`, one `target` per checkout — before what `worktree-new` chooses
+  for it; `Verification` says up front which of its sentences travel; the
+  commit-format bullet names the general thing and points at `.gitignore` for
+  which paths those are here. `workspace/` stays where the pull-request step
+  asks for it, because the `prose-shape` hook looks there and nowhere else — the
+  plugins' choice, now said to be one. `AGENTS.md` loses the `.worktrees/`
+  literal and points at the line. The text itself stays per repository rather
+  than moving into a template or a plugin: disclosure policies already differ
+  from one repository to the next on purpose, and the split is what makes a copy
+  a deliberate act.
+
 ### Fixed
 
 - **Audio already in a library gets the format it should have had** (#262).
