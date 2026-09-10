@@ -10,6 +10,15 @@ and this project adheres to
 
 ### Added
 
+- **An archive says what it is** (#259). A `.zip` used to land carrying no
+  format at all, which meant the browse-by-format facet could not see it: that
+  count buckets on a mime and skips a row without one, so an archive was in the
+  library and in none of the numbers describing what the library holds. It
+  answers `application/zip` now and counts under `application`, and so does a
+  `.charx`, because a `.charx` is a ZIP. Which route opens which file is a
+  separate question, answered where #269 answered it. Archives already in a
+  library keep the format they have — which for every one of them is none, and
+  repairing rows that recorded none is its own change, the one #262 is.
 - **A character card can arrive as `.charx`** (#269). Another container for the
   same card, beside the PNG with a chunk in it and the standalone JSON — and the
   one where the pictures travel with the card rather than pointing somewhere

@@ -404,9 +404,17 @@ pub const KNOWN_AUDIO_MIMES: &[&str] = &[
 /// ([`MimeType::Json`]). `.jsonl` deliberately stays behind — it is
 /// records in a container, not one value per file, and a record
 /// addressed inside it is a [`Record`](SourceLocator::Record), which
-/// answers `text/plain` before any extension is read. Unknown
-/// extensions return `None` — an unknown fact, refined later, never a
-/// fabricated one.
+/// answers `text/plain` before any extension is read.
+///
+/// An archive (`.zip`, `.charx`) answers `application/zip`. Naming it
+/// is not opening it: what an archive hands out is decided by
+/// [`ContainerRecord::holds_its_own_bytes`], which is where the one
+/// container that does is listed, and a `.zip` is deliberately not on
+/// that list. The two spellings answer alike because a `.charx` is a
+/// ZIP.
+///
+/// Unknown extensions return `None` — an unknown fact, refined later,
+/// never a fabricated one.
 pub fn guess_mime(locator: &SourceLocator) -> Option<MimeType> {
     /// The textual sniff, for the two shapes that are not paths.
     fn extension_of_text(raw: &str) -> Option<&str> {
@@ -462,6 +470,31 @@ pub fn guess_mime(locator: &SourceLocator) -> Option<MimeType> {
         "aiff" | "aif" => MimeType::Audio(AudioFormat::Aiff),
         "json" => MimeType::Json,
         "jsonl" | "md" | "txt" | "db" => MimeType::text_plain(),
+        // An archive, named so that it stops arriving formatless.
+        //
+        // What the name buys is not a rendering: an archive is neither
+        // playable nor thumbnailable, and `thumbnailable` decides that
+        // by matching `Image | Video` and nothing else. It is that the
+        // FORMAT facet can see the row. `counts_by_format` buckets on
+        // the mime's top-level type and says where it skips a null —
+        // "unknown mime (NULL or no '/') carries no format" — and the
+        // facet filter matches `<format>/%`. An archive was in the
+        // library and in no bucket of the thing that counts what is in
+        // it; it counts under `application` now.
+        //
+        // `.charx` is a ZIP and answers as one. A second mime here
+        // would state a difference the bytes do not have: which route
+        // opens which file is a fact about the routes.
+        //
+        // Not the audio rule, which is about a scanner's extension
+        // becoming a row's format. The card route mints no row for the
+        // card file — every footprint it emits is addressed inside it
+        // (`<card>#…`), and the container it files them under is a
+        // Collection, whose materials are empty by construction. What
+        // reaches this arm with a `.charx` is `asset_add` handed the
+        // archive itself, which is the same caller a `.zip` arrives
+        // through, wanting the same answer.
+        "zip" | "charx" => MimeType::Other("application/zip".into()),
         // An entry the map cannot name keeps the answer every other
         // record gets, rather than the `None` a file would take: a
         // record's default is a statement about records, and an
@@ -487,6 +520,18 @@ mod tests {
     /// names would stop compiling rather than stop meaning anything.
     fn loc(raw: &str) -> SourceLocator {
         SourceLocator::from_wire(raw).expect("locator")
+    }
+
+    /// Both spellings answer with what the bytes are, and a `.charx` is
+    /// a ZIP: which route opens which file is a fact about the routes,
+    /// not about the format. Both reach here the same way — `asset_add`
+    /// handed the archive itself — and an archive that answered nothing
+    /// sat outside the facet that counts what the library holds.
+    #[test]
+    fn an_archive_is_named_rather_than_left_formatless() {
+        let zip = MimeType::Other("application/zip".into());
+        assert_eq!(guess_mime(&loc("/inbox/pictures.zip")), Some(zip.clone()));
+        assert_eq!(guess_mime(&loc("/cards/lyra.charx")), Some(zip));
     }
 
     /// A card archive's entries are the one record shape whose bytes
