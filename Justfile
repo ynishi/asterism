@@ -557,8 +557,9 @@ check-changed: check-shared rust-clippy-changed rust-test-changed
 
 # Cut the worktree for an issue, and hand it a warm target directory.
 #
-# The two git commands are the ones the Branches section of
-# CONTRIBUTING.md already prescribes. What this adds is the copy: a
+# The Branches section of CONTRIBUTING.md states the rule; this recipe
+# chooses two things within it, the destination under `.worktrees/`
+# and a warm `target/`. What this adds is the copy: a
 # fresh worktree has no `target/`, so its first gate rebuilds the whole
 # dependency graph — 21 crates' worth of work this machine may have
 # done an hour ago, one directory away. Measured on `asterism-infra`
