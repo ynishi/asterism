@@ -1304,9 +1304,9 @@ pub async fn init_core_with(
         forge_actors,
         forge_clock,
     ));
-    // The other half, which only the runner drives and which therefore
-    // reaches no transport: it is handed to `DispatchRunEnv` below and
-    // to nothing else.
+    // The other half, which only the runner drives. Where it goes and
+    // where it deliberately does not is `application_support::
+    // outbound_stamp`.
     let release_stamping = Arc::new(asterism_core::application_support::ReleaseStamping::new(
         releases,
         forge.clone(),

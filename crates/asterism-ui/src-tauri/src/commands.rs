@@ -4776,10 +4776,12 @@ pub async fn get_forge_release(
 
 /// Every time one change point was written out, most recent first.
 ///
-/// A list, because two releases of one change point are two records
-/// ([`Release`](asterism_core::domain::release::Release)). The line is
-/// named beside the node for the reason the route is shaped that way:
-/// a node of another line answers 404 rather than being answered for.
+/// A list, for the reason
+/// [`release`](asterism_core::domain::release) gives.
+///
+/// Both ids are arguments, and both are used: a node this line does not
+/// have comes back as [`UiError::NotFound`] rather than being answered
+/// for.
 #[tauri::command]
 pub async fn list_forge_releases_of_change_point(
     state: State<'_, AppState>,

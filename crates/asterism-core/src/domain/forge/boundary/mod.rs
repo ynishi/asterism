@@ -38,7 +38,7 @@
 //! a snapshot id and a dispatch id, which are words the forge may not
 //! be stated in. `crate::domain::release` holds that argument, and the
 //! release drives the freeze from outside rather than asking for one
-//! here. Reading a round is still waiting.
+//! here.
 //!
 //! **[`Actors`] is the face that asks sideways.** The forge records
 //! who did a thing as a handle, and what that handle stands for — an

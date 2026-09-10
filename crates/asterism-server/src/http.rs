@@ -4083,10 +4083,12 @@ async fn release_forge_change_point(
 /// `GET /asterism/forge/lines/{id}/points/{point}/releases` — every
 /// time this change point was written out, most recent first.
 ///
-/// A list, because two releases of one change point are two records
-/// ([`Release`](asterism_core::domain::release::Release)). Both ids off
-/// the path are used: a point that is not on the line named answers 404
-/// here exactly as it does to the write beside it.
+/// A list, for the reason
+/// [`release`](asterism_core::domain::release) gives.
+///
+/// Both ids come off the path and both are used: a point that is not on
+/// the line named answers 404 here exactly as it does to the write
+/// beside it.
 async fn list_forge_releases_of_change_point(
     State(ctx): State<Arc<ServerCtx>>,
     Path((id, point)): Path<(String, String)>,

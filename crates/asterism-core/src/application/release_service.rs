@@ -7,8 +7,8 @@
 //! Stamping the copies is the other half and is not here. Only the
 //! runner drives it, so it sits in
 //! [`application_support::outbound_stamp`](crate::application_support::outbound_stamp)
-//! where no transport can reach it — the placement rule this module's
-//! own doc states.
+//! where no transport can reach it, under the placement rule
+//! [`application`](crate::application) states.
 //!
 //! # The freeze is driven from here, not from inside the forge
 //!
