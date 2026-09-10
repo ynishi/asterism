@@ -392,6 +392,7 @@ name = "asterism-disclosure-format"
 version = "0.1.1"
 dependencies = [
  "asterism-core",
+ "chrono",
  "crc32fast",
  "pngmeta",
  "serde",

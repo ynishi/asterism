@@ -84,6 +84,7 @@
 pub mod carried;
 pub mod outcome;
 pub mod record;
+pub mod release;
 pub mod source_type;
 
 pub use carried::{
@@ -91,6 +92,7 @@ pub use carried::{
 };
 pub use outcome::{DISCLOSURE_NOTE_SCHEMA, Half, Skipped, Stamped};
 pub use record::DisclosureRecord;
+pub use release::{Hand, ReleaseAct, ReleaseDisclosure};
 pub use source_type::DigitalSourceType;
 
 use std::collections::BTreeMap;
