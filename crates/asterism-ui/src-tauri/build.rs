@@ -97,9 +97,10 @@ use asterism_contract::forge::{
     AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeAnchorDto, ForgeChangePointDto,
     ForgeChangeRowDto, ForgeCloseDto, ForgeCollisionDto, ForgeDiscardedDto, ForgeEntryStateDto,
     ForgeLineActCommand, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto, ForgeOpDto,
-    ForgePursuitActCommand, ForgePursuitDto, ForgeResolvedDto, ForgeRevisionDto, ForgeRoundDto,
-    ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand,
-    OpenForgeThreadCommand, PushForgeRoundCommand, RenameForgeLineCommand,
+    ForgePursuitActCommand, ForgePursuitDto, ForgeReleaseDto, ForgeReleaseFileDto,
+    ForgeResolvedDto, ForgeRevisionDto, ForgeRoundDto, ForgeStampHalfDto, ForgeStrategyDto,
+    ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand, OpenForgeThreadCommand,
+    PushForgeRoundCommand, ReleaseChangePointCommand, RenameForgeLineCommand,
     RenameForgeThreadCommand, SayInForgeThreadCommand, SetForgeLineStrategyCommand,
 };
 use asterism_contract::query::{
@@ -325,6 +326,10 @@ fn main() {
         SayInForgeThreadCommand,
         AmendForgeMessageCommand,
         RenameForgeThreadCommand,
+        ForgeReleaseDto,
+        ForgeReleaseFileDto,
+        ForgeStampHalfDto,
+        ReleaseChangePointCommand,
         // Tag administration. Delete and merge answer with a result
         // shape saying what the write moved; rename answers with the
         // tag, so it has none.

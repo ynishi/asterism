@@ -30,11 +30,13 @@
 //! source a write records from: services do not read the command's own
 //! `author_kind` / `author_subject` / `operator_ai` fields.
 //!
-//! Most services here take that argument without persisting it: the
-//! attribution columns exist on `asset`, `dispatch_job`, and the
-//! pursuit family (V79 — forge events are actor-carrying by design,
-//! #29) alone, and adding another table is a design decision, not a
-//! wiring step. Receiving
+//! Most services here take that argument without persisting it — few
+//! tables have columns for it, the DDL is where they are, and adding
+//! another one is a design decision rather than a wiring step. A forge
+//! row is a third case and not a counter-example: it resolves the
+//! context to an [`Actor`](crate::domain::forge::model::act::Actor)
+//! handle and keeps that, which is a different column and a different
+//! claim from the write-side triple. Receiving
 //! it is still the point — the argument is what makes a new mutation,
 //! or a new caller of an old one, name the channel it arrived through
 //! before it compiles, so recording operations later is a wiring change
@@ -71,6 +73,7 @@ pub mod modality_service;
 pub mod persona_service;
 pub mod query_group_invalidation;
 pub mod query_group_service;
+pub mod release_service;
 pub mod series_strategy_service;
 pub mod session_service;
 pub mod snapshot_service;
@@ -87,6 +90,7 @@ pub use material_mark_service::MaterialMarkService;
 pub use modality_service::ModalityService;
 pub use persona_service::PersonaService;
 pub use query_group_service::QueryGroupService;
+pub use release_service::ReleaseService;
 pub use series_strategy_service::SeriesStrategyService;
 pub use session_service::SessionService;
 pub use snapshot_service::SnapshotService;

@@ -129,6 +129,7 @@ other.
 - `get_forge_pursuit` — The work, whole — one read rather than the line's two.
 - `get_forge_pursuit_behind` — The landings this work has not seen, oldest first.
 - `get_forge_pursuit_collisions` — What this work still asks for that the line has moved since.
+- `get_forge_release` — One release, its file stamps included.
 - `get_forge_thread` — The conversation, whole — every message and every correction to
 - `get_persona_profile` — Fetches the persona's identity signal (avatar / bio / role).
 - `get_persona_theme` — Fetches the persona's UI chrome (wallpaper reference). `None`
@@ -158,6 +159,7 @@ other.
 - `list_forge_lines` — Every line, without its history.
 - `list_forge_pursuit_children` — Work opened from this work.
 - `list_forge_pursuits_of_line` — Every piece of work against a line, open and ended alike.
+- `list_forge_releases_of_change_point` — Every time one change point was written out, most recent first.
 - `list_forge_strategies` — Every rule a line can be pointed at, built from the rules this
 - `list_forge_threads_about` — Conversations about one thing in the forge — the work as a whole,
 - `list_format_asset_counts` — Sidebar FORMAT facet counts (asset-model v4) — `(format, count)`
@@ -218,6 +220,7 @@ other.
 - `register_persona` — Registers a new persona.
 - `rehome_dropped_path` — Rehomes a dropped path into `$HOME/asterism/dropped/`
 - `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
+- `release_forge_change_point` — Freezes what a change point carried, copies it into a directory, and
 - `remeasure_dims` — Re-reads artefacts and rewrites `width_px` / `height_px` — the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
 - `remove_team_member` — Removes a member from the team.

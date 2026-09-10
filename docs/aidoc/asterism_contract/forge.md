@@ -40,15 +40,19 @@ showing how a line got where it is.
 - `ForgeOpDto` — One operation of a round.
 - `ForgePursuitActCommand` — Asks the line's rule to answer whatever this work collides with.
 - `ForgePursuitDto` — A piece of work against a line, whole: how it opened, every round
+- `ForgeReleaseDto` — What a release left behind.
+- `ForgeReleaseFileDto` — What the disclosure writer reported about one file that left.
 - `ForgeResolvedDto` — What `resolve` did.
 - `ForgeRevisionDto` — One correction to something said.
 - `ForgeRoundDto` — One round of work — what it asks the line to say, and who asked.
+- `ForgeStampHalfDto` — One half of a stamp: what happened, and what there is to say about
 - `ForgeStrategyDto` — A rule a line can be pointed at.
 - `ForgeThreadDto` — A conversation, whole.
 - `OpenForgeLineCommand` — Opens a line.
 - `OpenForgePursuitCommand` — Opens work against a line.
 - `OpenForgeThreadCommand` — Opens a conversation about something in the forge.
 - `PushForgeRoundCommand` — Writes a round.
+- `ReleaseChangePointCommand` — Writes out what a change point carries.
 - `RenameForgeLineCommand` — Renames a line. The name is the line's own description, so this is
 - `RenameForgeThreadCommand` — Renames a conversation, or takes its name off.
 - `SayInForgeThreadCommand` — Says something in a conversation.

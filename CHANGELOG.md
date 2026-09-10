@@ -10,6 +10,26 @@ and this project adheres to
 
 ### Added
 
+- **A change point can be released** (#276, part of #13, split from #254). A
+  line could be worked and closed and nothing could hand what it held to
+  anybody. Releasing a change point freezes the state that change point left the
+  line in, copies those files into a directory you name, and stamps each copy on
+  the way out — so the file a reviewer eventually holds says who chose it, out
+  of what, and when. The manifest's Asterism assertion gains the release's own
+  act, the pursuit the change point came out of, its title, how many rounds it
+  took and the close that ended it, and each act says whether a person or a rule
+  made it, which is the distinction the forge records on every node and the one
+  this feature exists to carry. Round notes, the operations and the prompt stay
+  home: they are the deliberation rather than the conclusion, and a signed
+  document cannot be corrected once it has left. A release is not a change point
+  — it moves no line, and two releases of one change point are two records,
+  because a set going out twice is two things that happened. A change point
+  whose state has nothing live on it is refused rather than exported empty.
+  **Nothing is signed yet**: with no certificate configured the manifest half is
+  skipped, per file and visibly, which is the state every install starts in and
+  the one #179 is about. **No button yet** either — the verb is reachable over
+  HTTP and the Tauri binding, and a surface is its own change.
+
 - **A vocabulary for what a file already discloses** (#18). The write side could
   say what it put into a file; nothing could say what is in one now. `Carried`
   answers that for one file, with the packet and the manifest reported

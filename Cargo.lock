@@ -392,6 +392,7 @@ name = "asterism-disclosure-format"
 version = "0.1.1"
 dependencies = [
  "asterism-core",
+ "chrono",
  "crc32fast",
  "pngmeta",
  "serde",
@@ -689,6 +690,7 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "crc32fast",
  "dotenvy",
  "http-body-util",
  "reqwest 0.12.28",

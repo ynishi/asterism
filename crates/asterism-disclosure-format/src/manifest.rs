@@ -15,10 +15,10 @@
 //! states. That is the half a validator understands.
 //!
 //! `io.github.ynishi.asterism.disclosure` carries what the database
-//! knows and the standard has no field for: the asset id, the dispatch
-//! the file left through, and the ids it was derived from. A reader that
-//! has this Asterism instance can resolve those; a reader that does not
-//! at least learns that the lineage exists and is recorded somewhere.
+//! knows and the standard has no field for — some of it references into
+//! this library, some of it statements the library holds about how the
+//! file came to be. [`definition`] is the list, and it grows there
+//! rather than here.
 //!
 //! The label is reverse-DNS under a domain that resolves to the author,
 //! which is the convention the C2PA specification asks third-party
@@ -45,7 +45,7 @@
 
 use serde_json::{Value, json};
 
-use asterism_core::domain::disclosure::DisclosureRecord;
+use asterism_core::domain::disclosure::{DisclosureRecord, ReleaseAct, ReleaseDisclosure};
 
 /// Label of the standard actions assertion.
 ///
@@ -145,6 +145,14 @@ pub fn definition(record: &DisclosureRecord) -> Value {
     if let Some(seed) = &record.seed {
         asterism.insert("seed".into(), json!(seed));
     }
+    // The work that chose this file, when it left through a release.
+    // Another optional field of shape 1, on the same terms as the two
+    // above: a reader keyed on the schema walks what is present, and a
+    // file that did not leave through a release carries no key rather
+    // than an empty one.
+    if let Some(release) = &record.release {
+        asterism.insert("release".into(), released(release));
+    }
     assertions.push(json!({ "label": ASTERISM_LABEL, "data": Value::Object(asterism) }));
 
     let mut definition = serde_json::Map::new();
@@ -172,10 +180,60 @@ pub fn definition(record: &DisclosureRecord) -> Value {
     Value::Object(definition)
 }
 
+/// The release block of the Asterism assertion.
+///
+/// Two acts and the shape of the work between them, each act rendered
+/// as `{ "at": <RFC 3339>, "by": "person" | "rule" }`. What the block
+/// says, and why it says that much and no more, is
+/// [`ReleaseDisclosure`].
+///
+/// The instant is RFC 3339 in the timezone the value carries, which is
+/// always UTC, and never an epoch integer: this is a document a person
+/// may end up reading in a dispute, and a number nobody can read
+/// without a converter is a worse record than a longer string.
+///
+/// `intent_title` is absent when the work was never given a name,
+/// rather than empty — the same distinction the fields above it keep.
+fn released(release: &ReleaseDisclosure) -> Value {
+    let mut block = serde_json::Map::new();
+    block.insert("released".into(), act(&release.released));
+    block.insert("pursuit_id".into(), json!(release.pursuit_id));
+    if let Some(title) = &release.intent_title {
+        block.insert("intent_title".into(), json!(title));
+    }
+    block.insert("rounds".into(), json!(release.rounds));
+    block.insert("closed".into(), act(&release.closed));
+    Value::Object(block)
+}
+
+/// One act, as the assertion states it.
+fn act(act: &ReleaseAct) -> Value {
+    json!({ "at": act.at.to_rfc3339(), "by": act.by.as_str() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use asterism_core::domain::disclosure::DigitalSourceType;
+    use asterism_core::domain::disclosure::{DigitalSourceType, Hand};
+
+    /// A fixed instant, so what the assertion states can be pinned
+    /// exactly rather than matched with a pattern.
+    fn at(minute: u32) -> chrono::DateTime<chrono::Utc> {
+        use chrono::TimeZone;
+        chrono::Utc
+            .with_ymd_and_hms(2026, 9, 11, 12, minute, 0)
+            .unwrap()
+    }
+
+    fn released_shape(title: Option<&str>) -> ReleaseDisclosure {
+        ReleaseDisclosure::new(
+            ReleaseAct::new(at(30), Hand::Person),
+            "pursuit-1",
+            title.map(str::to_string),
+            3,
+            ReleaseAct::new(at(10), Hand::Rule),
+        )
+    }
 
     fn assertion<'a>(definition: &'a Value, label: &str) -> Option<&'a Value> {
         definition["assertions"]
@@ -247,6 +305,61 @@ mod tests {
         assert!(!data.contains_key("ai_system"));
         assert!(!data.contains_key("model"));
         assert!(!data.contains_key("seed"));
+        assert!(!data.contains_key("release"));
+    }
+
+    #[test]
+    fn a_released_file_names_the_work_that_chose_it() {
+        let record =
+            DisclosureRecord::for_asset("asset-1").with_release(released_shape(Some("the crop")));
+        let definition = definition(&record);
+        let release = &assertion(&definition, ASTERISM_LABEL).unwrap()["data"]["release"];
+
+        assert_eq!(release["released"]["at"], at(30).to_rfc3339());
+        assert_eq!(release["released"]["by"], "person");
+        assert_eq!(release["pursuit_id"], "pursuit-1");
+        assert_eq!(release["intent_title"], "the crop");
+        assert_eq!(release["rounds"], 3);
+        assert_eq!(release["closed"]["at"], at(10).to_rfc3339());
+        assert_eq!(release["closed"]["by"], "rule");
+    }
+
+    /// Work nobody named is work with no title, not work whose title is
+    /// empty — the same reading the fields beside it get.
+    #[test]
+    fn an_unnamed_pursuit_contributes_no_title() {
+        let record = DisclosureRecord::for_asset("asset-1").with_release(released_shape(None));
+        let definition = definition(&record);
+        let release = assertion(&definition, ASTERISM_LABEL).unwrap()["data"]["release"]
+            .as_object()
+            .unwrap()
+            .clone();
+
+        assert!(!release.contains_key("intent_title"));
+        assert!(release.contains_key("pursuit_id"));
+    }
+
+    /// The deliberation stays home. A round note is free text somebody
+    /// wrote for themselves and an operation is what was tried rather
+    /// than what was chosen — neither belongs in a document that cannot
+    /// be corrected once it has left.
+    #[test]
+    fn the_deliberation_does_not_travel_with_the_release() {
+        let record = DisclosureRecord::for_asset("asset-1")
+            .with_prompt("1girl")
+            .with_release(released_shape(Some("the crop")));
+        let rendered = definition(&record).to_string();
+
+        assert!(!rendered.contains("1girl"), "the prompt is packet-only");
+        // The count is what travels; nothing names a round or what one
+        // did, so no operation vocabulary can appear.
+        for word in ["note", "add", "replace", "rename", "remove", "ops"] {
+            assert!(
+                !rendered.contains(&format!("\"{word}\"")),
+                "the assertion states {word:?}, which is deliberation"
+            );
+        }
+        assert!(rendered.contains("\"rounds\":3"));
     }
 
     #[test]

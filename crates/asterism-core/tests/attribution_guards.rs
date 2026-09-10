@@ -642,6 +642,12 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
     ("app_setting_service::get", "read — one resolved setting"),
     ("dispatch_service::get", "read — one dispatch job"),
     ("dispatch_service::list", "read — dispatch job listing"),
+    ("release_service::get", "read — one release"),
+    (
+        "release_service::of_change_point",
+        "read — the releases of one change point, refused when the node \
+         is not on the line named",
+    ),
     (
         "sort_context::build_sort_context",
         "read — assembles the keys a listing query sorts on",

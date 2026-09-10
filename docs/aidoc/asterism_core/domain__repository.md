@@ -9,6 +9,12 @@ the consuming crate).
 that adding one here does not mean opening the file that holds the
 forge's. The raw layer needs nothing of a pursuit.
 
+One port here names a forge word in a `use`, and it is
+[`ReleaseRepository`]: a release hangs off a change point and names a
+snapshot and a dispatch, so it is stated in both vocabularies and
+belongs to neither layer's set — [`release`](crate::domain::release)
+is the argument for why it sits out here rather than in the forge's.
+
 The rule the whole tree is measured against is one verb — *uses* —
 and it is stated once, in [`domain`](crate::domain). Doc links
 pointing at forge paths are prose about the boundary rather than a
@@ -73,6 +79,7 @@ projection instead of full `Asset` entities.
 - `PersonaThemeRepository` — Persistence port for [`PersonaTheme`]. The theme is a 1:1 side
 - `ProgressEmitter` — Port for pushing job progress to the UI. In Tauri, the adapter emits
 - `QueryGroupRepository` — Persistence port for the Query Group evaluation core.
+- `ReleaseRepository` — Persistence port for [`Release`] — one change point's state written
 - `SeriesRepository` — Persistence port for the series axis — the [`Strategy`] rules
 - `SessionRepository` — Persistence port for the [`Session`] entity — the Dialog-modality
 - `SnapshotRepository` — Persistence port for [`Snapshot`] — the immutable content-addressed

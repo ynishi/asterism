@@ -30,10 +30,15 @@
 //!
 //! **[`Store`] is the face that asks downward.** The model refers to
 //! content it does not own, and before that content is put on a line
-//! the forge has to know it is real. The rest of what the forge will
-//! eventually ask for (freezing a set, reading a round) waits for the
-//! work that needs it: declaring a question now would fix a shape
-//! nothing has tested.
+//! the forge has to know it is real. That is still the only question,
+//! and freezing a set is no longer among the ones waiting for a caller.
+//! This said the rest — freezing a set, reading a round — waited for
+//! the work that needed it; the work that needed the freeze arrived
+//! (#276) and decided the other way, because what a freeze produces is
+//! a snapshot id and a dispatch id, which are words the forge may not
+//! be stated in. `crate::domain::release` holds that argument, and the
+//! release drives the freeze from outside rather than asking for one
+//! here.
 //!
 //! **[`Actors`] is the face that asks sideways.** The forge records
 //! who did a thing as a handle, and what that handle stands for — an

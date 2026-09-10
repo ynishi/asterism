@@ -3275,8 +3275,10 @@ pub async fn disclosure_stamp(
         return Ok("no local file, skipped".into());
     };
 
+    // No release: this job stamps the library's own copy of a dispatch
+    // output, which left through no release and says nothing about one.
     match service
-        .apply_to(&asset.id, path, dispatch_id.as_deref())
+        .apply_to(&asset.id, path, dispatch_id.as_deref(), None)
         .await
     {
         Ok(outcome) => {

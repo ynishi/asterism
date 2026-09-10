@@ -258,6 +258,9 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
         dispatches: Arc::new(sqlite::repo::SqliteDispatchRepository::new(isle.clone())),
         assets: ports.assets.clone(),
         reenqueue: Arc::new(RecordingReEnqueue),
+        // No release is in play here, so nothing is asked to stamp what
+        // the run wrote.
+        outbound: None,
     };
 
     let snapshot = core

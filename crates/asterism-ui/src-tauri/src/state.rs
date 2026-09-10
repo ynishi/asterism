@@ -192,6 +192,10 @@ pub struct AppState {
     /// names it apart: the forge's conversations hang off a forge node,
     /// and the other ones hang off a card.
     pub forge_thread_service: Arc<asterism_core::application::forge::ThreadService>,
+    /// Writing out what a change point carries.
+    /// [`release`](asterism_core::domain::release) is what a release is
+    /// and why it is not the forge's.
+    pub release_service: Arc<asterism_core::application::ReleaseService>,
     /// Read-only handle to the apalis job DB pool. Used by the
     /// `jobs_stats` Tauri command that drives the progress banner.
     pub jobs_pool: asterism_infra::jobs::SqlitePool,
@@ -284,6 +288,7 @@ pub async fn init(app: AppHandle) -> anyhow::Result<(AppState, Arc<ServerCtx>)> 
         line_service: core.line_service,
         pursuit_service: core.pursuit_service,
         forge_thread_service: core.forge_thread_service,
+        release_service: core.release_service,
         jobs_pool: core.jobs_pool,
         telemetry: core.telemetry,
         series_strategy_service: core.series_strategy_service,

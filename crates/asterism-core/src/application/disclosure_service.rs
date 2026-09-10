@@ -22,6 +22,10 @@
 //! again — the answer never lived in the file. That is the property a
 //! manifest cannot have on its own, since any re-encode removes it.
 //!
+//! What comes back is what the rows establish, which is not everything
+//! a released file states — see
+//! [`apply_to`](DisclosureService::apply_to)'s `release` argument.
+//!
 //! # Why the ports are here and not in `repository`
 //!
 //! [`DisclosureWriter`] and [`DisclosureReader`] are outbound ports
@@ -39,7 +43,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::domain::disclosure::{Carried, DisclosureRecord, Stamped};
+use crate::domain::disclosure::{Carried, DisclosureRecord, ReleaseDisclosure, Stamped};
 use crate::domain::measurement::MeasurementStatus;
 
 use crate::domain::disclosure::{self, ParentEvidence, PromptDisclosure};
@@ -268,13 +272,26 @@ impl DisclosureService {
     /// copy, and a re-apply is pointed at whatever came back from
     /// downstream. Stamping the library's own original would be a
     /// different operation, and not one any caller has asked for.
+    ///
+    /// `release` is caller context on the same terms as `dispatch_id`,
+    /// and it is here rather than on
+    /// [`record_for`](Self::record_for) because it is a fact about
+    /// *this file leaving*, not about the asset. The same asset stamped
+    /// any other way says nothing about a release, and a record built
+    /// from stored rows alone has no way to know there was one —
+    /// nothing on the asset names it, deliberately, because the forge
+    /// writes nothing onto a core row.
     pub async fn apply_to(
         &self,
         asset_id: &AssetId,
         path: &Path,
         dispatch_id: Option<&str>,
+        release: Option<&ReleaseDisclosure>,
     ) -> Result<Stamped, DomainError> {
-        let record = self.record_for(asset_id, dispatch_id).await?;
+        let mut record = self.record_for(asset_id, dispatch_id).await?;
+        if let Some(release) = release {
+            record = record.with_release(release.clone());
+        }
         self.writer.apply(path, &record).await
     }
 }

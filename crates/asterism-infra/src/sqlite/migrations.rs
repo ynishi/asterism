@@ -7882,6 +7882,90 @@ fn v107_audio_material_mime(tx: &Transaction<'_>) -> Result<(), rusqlite::Error>
     Ok(())
 }
 
+/// V108 — a change point's state, written out.
+///
+/// What a release is, and why it is not a change point, is
+/// `asterism_core::domain::release`. Nothing here touches
+/// `change_point`, which is that statement in columns.
+///
+/// # Why the prefix
+///
+/// `RELEASE` is an SQLite keyword — it ends a savepoint — so an
+/// unquoted `release` would have to be quoted at every site that names
+/// it, and one of them would eventually not be. The forge's own nouns
+/// beside it (`line`, `pursuit`, `change_point`) need no such escape.
+///
+/// # Two tables, because a stamp is per file
+///
+/// `forge_release_file` holds what the disclosure writer reported for
+/// each copy that left, in the order the run wrote them. Two halves,
+/// each with its own state and its own detail column, because they fail
+/// independently and "no certificate configured" is a different answer
+/// from "the certificate stopped working" — the distinction
+/// `disclosure::Half` exists to keep and a boolean would collapse.
+///
+/// The rows arrive after the release does, for the reason
+/// `Release::files` gives. A file whose stamp could not be attempted is
+/// written as a failure carrying the reason rather than left out, so an
+/// empty set has two meanings and not three: the run has not finished,
+/// or this build does not stamp. The dispatch row beside it tells those
+/// apart.
+///
+/// # What has an FK and what does not
+///
+/// The line, the change point, the snapshot and the dispatch all do:
+/// each is a row this database owns, and a release that named a
+/// vanished one could not be read back into a value. `asset_id` on the
+/// file rows does not. A stamp is a record of something that happened
+/// to a file that has already left, and it stays true after the library
+/// lets its own copy go — the same reading the two logs get, where a
+/// record pointing at something removed is still a record.
+///
+/// Every reference is `RESTRICT`, so a release has to be taken with the
+/// line it belongs to; `Lines::discard` is the definition of what a drop
+/// takes and now names releases among them. Nothing else deletes a
+/// release. The file rows are replaced rather than accumulated —
+/// `ReleaseRepository::note_files` says why — so those go and come back
+/// on every pass over one release.
+const V108_FORGE_RELEASE: &str = r#"
+CREATE TABLE forge_release (
+    id           BLOB PRIMARY KEY,
+    line_id      BLOB NOT NULL REFERENCES line(id) ON DELETE RESTRICT,
+    change_point BLOB NOT NULL REFERENCES change_point(id) ON DELETE RESTRICT,
+    snapshot_id  BLOB NOT NULL REFERENCES snapshot(id) ON DELETE RESTRICT,
+    dispatch_id  BLOB NOT NULL REFERENCES dispatch_job(id) ON DELETE RESTRICT,
+    at           INTEGER NOT NULL,
+    actor_id     BLOB NOT NULL,
+    actor_kind   TEXT NOT NULL
+        CHECK (actor_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE INDEX idx_forge_release_line ON forge_release(line_id);
+CREATE INDEX idx_forge_release_change_point ON forge_release(change_point, at DESC);
+CREATE INDEX idx_forge_release_snapshot ON forge_release(snapshot_id);
+CREATE UNIQUE INDEX idx_forge_release_dispatch ON forge_release(dispatch_id);
+
+CREATE TABLE forge_release_file (
+    release_id      BLOB NOT NULL REFERENCES forge_release(id) ON DELETE RESTRICT,
+    position        INTEGER NOT NULL,
+    asset_id        BLOB NOT NULL,
+    path            TEXT NOT NULL,
+    xmp_state       TEXT NOT NULL
+        CHECK (xmp_state IN ('written', 'skipped', 'failed')),
+    xmp_detail      TEXT,
+    manifest_state  TEXT NOT NULL
+        CHECK (manifest_state IN ('written', 'skipped', 'failed')),
+    manifest_detail TEXT,
+    prompt_dropped  INTEGER NOT NULL
+        CHECK (prompt_dropped IN (0, 1)),
+    system_dropped  INTEGER NOT NULL
+        CHECK (system_dropped IN (0, 1)),
+    CHECK ((xmp_state = 'written') OR (xmp_detail IS NOT NULL)),
+    CHECK ((manifest_state = 'written') OR (manifest_detail IS NOT NULL)),
+    PRIMARY KEY (release_id, position)
+) STRICT;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7992,6 +8076,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V105_MATERIAL_PERCEPTUAL_HASH),
     Step::Sql(V106_VISUAL_FEATURE_COMPOSITION),
     Step::App(v107_audio_material_mime),
+    Step::Sql(V108_FORGE_RELEASE),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

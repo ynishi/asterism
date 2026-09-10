@@ -116,6 +116,16 @@ define_uuid_id!(
     DispatchId
 );
 define_uuid_id!(
+    /// Surrogate id for a `Release` — one change point's state written
+    /// out.
+    ///
+    /// Surrogate rather than the change point it names, because a set
+    /// can go out more than once: two releases of one change point are
+    /// two things that happened, and an id derived from what was
+    /// released could only hold one of them.
+    ReleaseId
+);
+define_uuid_id!(
     /// Surrogate id for an `AssetComment` — one entry in an Asset's
     /// comment thread. UUID v7 keeps the natural chronological
     /// ordering matching `created_at`.

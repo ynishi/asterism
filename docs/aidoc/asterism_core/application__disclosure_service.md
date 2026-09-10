@@ -24,6 +24,10 @@ conversion with its manifest stripped can be handed to
 again — the answer never lived in the file. That is the property a
 manifest cannot have on its own, since any re-encode removes it.
 
+What comes back is what the rows establish, which is not everything
+a released file states — see
+[`apply_to`](DisclosureService::apply_to)'s `release` argument.
+
 # Why the ports are here and not in `repository`
 
 [`DisclosureWriter`] and [`DisclosureReader`] are outbound ports

@@ -1018,6 +1018,16 @@
       "docs": "A piece of work against a line, whole: how it opened, every round\nit wrote, and how it ended if it has.\n\nThe log is the order. Nothing carries a sequence number, and\n`rounds` arrives in the order the chain holds them — each round\nnaming the node before it in `parent_id`.\n\nThere is no separate \"summary\" shape. A pursuit is small (an\nopening, a handful of rounds, at most one close) and a screen that\nlists work wants the intent and the outcome, which are here. The\nline's history is the read that needed splitting; this one does\nnot."
     },
     {
+      "path": "asterism_contract::forge::ForgeReleaseDto",
+      "kind": "struct",
+      "docs": "What a release left behind.\n\nIt names one change point and two rows of the raw layer: the freeze\nof what that change point carried, and the run that carried the\nbytes. What a release *is*, and why it is not on the chain, is\n`asterism_core::domain::release` — this crate names no Asterism crate\nand so cannot link at it, which is also why nothing here restates the\nargument."
+    },
+    {
+      "path": "asterism_contract::forge::ForgeReleaseFileDto",
+      "kind": "struct",
+      "docs": "What the disclosure writer reported about one file that left."
+    },
+    {
       "path": "asterism_contract::forge::ForgeResolvedDto",
       "kind": "struct",
       "docs": "What `resolve` did.\n\n**Both answers are ordinary, and both are 200.** A rule that leaves\na collision to a person writes nothing, which is an outcome rather\nthan a failure — the collision stays where somebody can see it. So\n`round` absent is the rule declining, not an error, and a caller\ndistinguishes the two by whether it is there.\n\n`collisions` is what is left either way, which is the question a\nscreen asks next in both cases: after a resolution, whether any\nremain; after a decline, what the person now has to settle."
@@ -1031,6 +1041,11 @@
       "path": "asterism_contract::forge::ForgeRoundDto",
       "kind": "struct",
       "docs": "One round of work — what it asks the line to say, and who asked.\n\nA round is a request rather than a landing. Nothing here is on the\nline: what the line says is [`ForgeEntryStateDto`], and what put it\nthere is [`ForgeChangePointDto`]."
+    },
+    {
+      "path": "asterism_contract::forge::ForgeStampHalfDto",
+      "kind": "struct",
+      "docs": "One half of a stamp: what happened, and what there is to say about\nit.\n\nThree states rather than a boolean, because \"not written\" is at\nleast three answers and they lead somewhere different: a container\nthat cannot carry this half, a build with no certificate configured,\nand a certificate that stopped working. `detail` carries the reason\na half was skipped (`\"no_signing_identity\"` and its siblings, which\nare stable tokens) or the cause of a failure (a sentence), and is\nabsent only when the half was written."
     },
     {
       "path": "asterism_contract::forge::ForgeStrategyDto",
@@ -1061,6 +1076,11 @@
       "path": "asterism_contract::forge::PushForgeRoundCommand",
       "kind": "struct",
       "docs": "Writes a round."
+    },
+    {
+      "path": "asterism_contract::forge::ReleaseChangePointCommand",
+      "kind": "struct",
+      "docs": "Writes out what a change point carries.\n\nThe state that change point left the line in is frozen and copied\ninto `output_dir`, and each copy is stamped with the disclosure and\nthe history that chose it before the run reports done.\n\nThere is no destination here beyond a path. Which exporter writes\nthe files is this verb's answer rather than the caller's, and what\nan agency's submission form asks for is a step the contributor\ntakes — a vocabulary for it would encode somebody else's policy on\nsomebody else's schedule."
     },
     {
       "path": "asterism_contract::forge::RenameForgeLineCommand",

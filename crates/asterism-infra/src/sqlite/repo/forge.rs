@@ -871,6 +871,18 @@ impl Lines for SqliteForge {
                     params![id.as_uuid()],
                 )?;
 
+                // Releases of anything on this line, which `Lines::discard`
+                // names among what a drop takes.
+                tx.execute(
+                    "DELETE FROM forge_release_file WHERE release_id IN \
+                         (SELECT id FROM forge_release WHERE line_id = ?1)",
+                    params![id.as_uuid()],
+                )?;
+                tx.execute(
+                    "DELETE FROM forge_release WHERE line_id = ?1",
+                    params![id.as_uuid()],
+                )?;
+
                 tx.execute(
                     "DELETE FROM pursuit_op WHERE node_id IN \
                          (SELECT n.id FROM pursuit_node n \

@@ -695,3 +695,121 @@ pub struct RenameForgeThreadCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
 }
+
+// -----------------------------------------------------------------
+// Releases — a change point's state, written out.
+// -----------------------------------------------------------------
+
+/// What a release left behind.
+///
+/// It names one change point and two rows of the raw layer: the freeze
+/// of what that change point carried, and the run that carried the
+/// bytes. What a release *is*, and why it is not on the chain, is
+/// `asterism_core::domain::release` — this crate names no Asterism crate
+/// and so cannot link at it, which is also why nothing here restates the
+/// argument.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeReleaseDto {
+    /// Release id (UUID hyphenated).
+    pub id: String,
+    /// The line the released change point is on (UUID hyphenated).
+    pub line_id: String,
+    /// What was released (UUID hyphenated).
+    pub change_point_id: String,
+    /// The freeze of what it carried (UUID hyphenated).
+    pub snapshot_id: String,
+    /// The run that carried the bytes out (UUID hyphenated).
+    pub dispatch_id: String,
+    /// When it was released (unix epoch ms).
+    pub at_ms: i64,
+    /// `"user"` or `"system"`.
+    pub actor_kind: String,
+    /// Who released it (UUID hyphenated).
+    pub actor_id: String,
+    /// What became of the disclosure on each file that left, in the
+    /// order the run wrote them.
+    ///
+    /// Empty until the run has written them, which is a state and not
+    /// an absence of information: a dispatch is started and runs
+    /// afterwards, so a release read a moment after it was made has
+    /// files on the way.
+    pub files: Vec<ForgeReleaseFileDto>,
+}
+
+/// What the disclosure writer reported about one file that left.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeReleaseFileDto {
+    /// The library row this file is a copy of (UUID hyphenated).
+    pub asset_id: String,
+    /// Where the copy was written.
+    pub path: String,
+    /// What became of the IPTC/XMP packet.
+    pub xmp: ForgeStampHalfDto,
+    /// What became of the signed C2PA manifest.
+    pub manifest: ForgeStampHalfDto,
+    /// The prompt was dropped to fit the packet into a JPEG segment.
+    pub prompt_dropped: bool,
+    /// The generating system's name was dropped too — the packet
+    /// carries the mark alone.
+    pub system_dropped: bool,
+}
+
+/// One half of a stamp: what happened, and what there is to say about
+/// it.
+///
+/// Three states rather than a boolean, because "not written" is at
+/// least three answers and they lead somewhere different: a container
+/// that cannot carry this half, a build with no certificate configured,
+/// and a certificate that stopped working. `detail` carries the reason
+/// a half was skipped (`"no_signing_identity"` and its siblings, which
+/// are stable tokens) or the cause of a failure (a sentence), and is
+/// absent only when the half was written.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeStampHalfDto {
+    /// `"written"`, `"skipped"` or `"failed"`.
+    pub state: String,
+    /// Why it was skipped, or what went wrong.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Writes out what a change point carries.
+///
+/// The state that change point left the line in is frozen and copied
+/// into `output_dir`, and each copy is stamped with the disclosure and
+/// the history that chose it before the run reports done.
+///
+/// There is no destination here beyond a path. Which exporter writes
+/// the files is this verb's answer rather than the caller's, and what
+/// an agency's submission form asks for is a step the contributor
+/// takes — a vocabulary for it would encode somebody else's policy on
+/// somebody else's schedule.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ReleaseChangePointCommand {
+    /// The line the change point is on (UUID hyphenated). Taken from
+    /// the path over HTTP.
+    #[serde(default)]
+    pub line_id: String,
+    /// What to release (UUID hyphenated). Taken from the path over
+    /// HTTP.
+    #[serde(default)]
+    pub change_point_id: String,
+    /// The persona the frozen members belong to (UUID hyphenated).
+    ///
+    /// Named by the caller because a line carries no owner — grouping
+    /// and access are outside the forge — while a freeze is scoped to
+    /// one persona. Every member has to belong to it, and the freeze
+    /// refuses the set otherwise.
+    pub persona_id: String,
+    /// The directory the files are written into. Absolute.
+    pub output_dir: String,
+    /// See [`OpenForgeLineCommand::author_kind`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// See [`OpenForgeLineCommand::author_subject`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_subject: Option<String>,
+    /// See [`OpenForgeLineCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}

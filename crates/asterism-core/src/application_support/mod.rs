@@ -18,6 +18,9 @@
 //!   check).
 //! - [`dispatch_runner_service`] — the runner-side half of the
 //!   outbound dispatch state machine (`DispatchRun` job).
+//! - [`outbound_stamp`] — writing the disclosure into the files a
+//!   dispatch just wrote, before the run reports done. The port the
+//!   runner calls, and the release's implementation of it.
 //! - [`chapter_intake`] — what a fresh reading of a material's chapter
 //!   list means for the rows: the imported layer's contents are
 //!   replaced wholesale, and a person's own layer is untouched.
@@ -42,6 +45,7 @@
 pub mod chapter_intake;
 pub mod dispatch_runner_service;
 pub mod duplicate_detection;
+pub mod outbound_stamp;
 pub mod query_group_refresh_service;
 pub mod retention_service;
 
@@ -53,6 +57,7 @@ pub use duplicate_detection::{
     Detection, DetectionOrigin, DetectionPorts, detect_duplicate, fold_excluded_by,
     resolve_strategy,
 };
+pub use outbound_stamp::{OutboundFile, OutboundStamping, ReleaseStamping};
 pub use query_group_refresh_service::{QueryGroupRefreshService, RefreshAllOutcome};
 pub use retention_service::{RetentionService, Sweep};
 
@@ -74,4 +79,7 @@ pub struct SupportServices {
     /// Runner-side dispatch state machine — driven by the
     /// `DispatchRun` job.
     pub dispatch_runner: Arc<DispatchRunnerService>,
+    /// Stamping a release's copies — driven by the same job, one step
+    /// before it parks the row in `Done`.
+    pub release_stamping: Arc<ReleaseStamping>,
 }

@@ -71,6 +71,7 @@
 //! evidenced rather than assumed. Deriving it from an absence would
 //! manufacture exactly the evidence it is supposed to record.
 
+use super::release::ReleaseDisclosure;
 use super::source_type::DigitalSourceType;
 
 /// What one exported artefact will disclose.
@@ -126,6 +127,16 @@ pub struct DisclosureRecord {
     /// treats it as a label, and an empty one is better than a
     /// manufactured one.
     pub title: Option<String>,
+    /// The work that chose this file, when it is leaving through a
+    /// release. Manifest-only, for the reason the identifiers are:
+    /// IPTC has no property for any of it, and an unsigned copy of a
+    /// claim about who chose something is a claim anybody can rewrite.
+    ///
+    /// Absent for every other way a file leaves. A stamp taken on the
+    /// library's own copy, or a re-apply months later, has no release
+    /// to name and says nothing about one — which is a different
+    /// statement from a release whose fields are empty.
+    pub release: Option<ReleaseDisclosure>,
 }
 
 impl DisclosureRecord {
@@ -147,6 +158,7 @@ impl DisclosureRecord {
             model: None,
             seed: None,
             title: None,
+            release: None,
         }
     }
 
@@ -209,6 +221,16 @@ impl DisclosureRecord {
         self
     }
 
+    /// Names the work this file was released out of.
+    ///
+    /// The caller's context rather than anything read off the asset:
+    /// a file is stamped on the way out of a release, and the same
+    /// asset stamped any other way says nothing about one.
+    pub fn with_release(mut self, release: ReleaseDisclosure) -> Self {
+        self.release = Some(release);
+        self
+    }
+
     /// Whether the XMP packet would carry anything at all.
     ///
     /// The identifiers do not count — they are manifest-only, so a
@@ -267,6 +289,7 @@ impl DisclosureRecord {
             model: self.model.clone(),
             seed: self.seed.clone(),
             title: self.title.clone(),
+            release: self.release.clone(),
         }
     }
 
@@ -298,6 +321,7 @@ impl DisclosureRecord {
             model: self.model.clone(),
             seed: self.seed.clone(),
             title: self.title.clone(),
+            release: self.release.clone(),
         }
     }
 }

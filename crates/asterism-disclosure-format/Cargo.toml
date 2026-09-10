@@ -64,3 +64,10 @@ crc32fast  = "1"
 # because the packet is about to be replaced wholesale either way and a
 # decompressor would only add a bomb ceiling to maintain.
 pngmeta    = "0.2.1"
+
+[dev-dependencies]
+# Only the tests name it. A release's acts are `DateTime<Utc>` values
+# this crate reads through inherent methods, so the renderer needs no
+# clock and no calendar; a test that pins what the assertion states
+# needs a fixed instant to build one from.
+chrono = { workspace = true }

@@ -378,6 +378,11 @@
       "docs": "What this work still asks for that the line has moved since.\n\nDerived from both logs on every call, so it cannot go stale. This is\nwhat a screen shows before offering [`resolve_forge_pursuit`]."
     },
     {
+      "path": "asterism_ui::commands::get_forge_release",
+      "kind": "function",
+      "docs": "One release, its file stamps included."
+    },
+    {
       "path": "asterism_ui::commands::get_forge_thread",
       "kind": "function",
       "docs": "The conversation, whole — every message and every correction to\neach.\n\nA payload carrying only what each message says now would leave a\nwithdrawn sentence attributed to the person who withdrew it."
@@ -521,6 +526,11 @@
       "path": "asterism_ui::commands::list_forge_pursuits_of_line",
       "kind": "function",
       "docs": "Every piece of work against a line, open and ended alike."
+    },
+    {
+      "path": "asterism_ui::commands::list_forge_releases_of_change_point",
+      "kind": "function",
+      "docs": "Every time one change point was written out, most recent first.\n\nA list, for the reason\n[`release`](asterism_core::domain::release) gives.\n\nBoth ids are arguments, and both are used: a node this line does not\nhave comes back as [`UiError::NotFound`] rather than being answered\nfor."
     },
     {
       "path": "asterism_ui::commands::list_forge_strategies",
@@ -821,6 +831,11 @@
       "path": "asterism_ui::commands::reject_tag_suggestion",
       "kind": "function",
       "docs": "Rejects one tag suggestion (#112); this model never proposes the\npair again."
+    },
+    {
+      "path": "asterism_ui::commands::release_forge_change_point",
+      "kind": "function",
+      "docs": "Freezes what a change point carried, copies it into a directory, and\nstamps each copy on the way out.\n\nAnswers with the release as it was recorded, which is before its\nfiles exist — see\n[`ForgeReleaseDto::files`](asterism_contract::forge::ForgeReleaseDto::files).\n\nTwo things differ from the HTTP surface, and both are what every\nforge command here does. The ids are arguments rather than path\nsegments, which is what the command's own `line_id` and\n`change_point_id` fields exist for. And the write is the owner's:\nthis surface is the owner's own, so the attribution is\n[`AttributionContext::owner_surface`] and the command's\n`author_kind` / `author_subject` / `operator_ai` are not read —\nthose carry a remote caller's assertion, which is a claim this\nprocess is in no position to receive from itself."
     },
     {
       "path": "asterism_ui::commands::remeasure_dims",

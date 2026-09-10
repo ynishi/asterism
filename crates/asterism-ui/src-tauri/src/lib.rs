@@ -481,6 +481,9 @@ pub fn run() {
             commands::amend_forge_message,
             commands::rename_forge_thread,
             commands::list_forge_threads_about,
+            commands::release_forge_change_point,
+            commands::get_forge_release,
+            commands::list_forge_releases_of_change_point,
             // Lines a team hosts. Their own block for the reason they
             // get their own panel: the source is a server, not this
             // machine (#148 decision 16).

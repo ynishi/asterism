@@ -510,6 +510,14 @@ pub struct CoreCtx {
     /// anchors without learning what the other layer is made of, which
     /// is why there are two — in the services, and in the tables.
     pub forge_thread_service: Arc<asterism_core::application::forge::ThreadService>,
+    /// Writing out what a change point carries: the record, the freeze
+    /// it names, and the run that carries the bytes.
+    ///
+    /// Beside the forge's services rather than among them —
+    /// [`release`](asterism_core::domain::release) says why a release is
+    /// not one. Stamping the copies is the runner's half and lives in
+    /// [`support`](Self::support).
+    pub release_service: Arc<asterism_core::application::ReleaseService>,
     /// Query Group evaluate-and-materialize pipeline: startup refresh,
     /// the create / update-rule commands, and (W4) the refresh job.
     pub query_group_service: Arc<QueryGroupService>,
@@ -1281,8 +1289,29 @@ pub async fn init_core_with(
         asterism_core::domain::forge::boundary::StoreClient::new(Arc::new(
             sqlite::repo::SqliteStore::new(isle.clone()),
         )),
+        forge_actors.clone(),
+        forge_clock.clone(),
+    ));
+    // The release, over the same connection. Its port is not one of the
+    // forge's — `domain::release` says why — so it gets an adapter of
+    // its own rather than a face on `SqliteForge`.
+    let releases = Arc::new(sqlite::repo::SqliteReleaseRepository::new(isle.clone()));
+    let release_service = Arc::new(asterism_core::application::ReleaseService::new(
+        forge.clone(),
+        releases.clone(),
+        snapshot_service.clone(),
+        dispatch_service.clone(),
         forge_actors,
         forge_clock,
+    ));
+    // The other half, which only the runner drives. Where it goes and
+    // where it deliberately does not is `application_support::
+    // outbound_stamp`.
+    let release_stamping = Arc::new(asterism_core::application_support::ReleaseStamping::new(
+        releases,
+        forge.clone(),
+        forge.clone(),
+        disclosure_cell.clone(),
     ));
 
     // Register the built-in exporters (`comfy` / `file` / `http`, the
@@ -1367,6 +1396,10 @@ pub async fn init_core_with(
         dispatches: dispatches.clone(),
         assets: assets_arc.clone(),
         reenqueue,
+        // What stamps a release's copies before the run reports done.
+        // Every dispatch is offered to it; the ones that are not
+        // releases are handed straight back.
+        outbound: Some(release_stamping.clone()),
     }));
 
     // (Session snapshot drift check retired with the rkyv store —
@@ -1420,6 +1453,7 @@ pub async fn init_core_with(
         line_service,
         pursuit_service,
         forge_thread_service,
+        release_service,
         query_group_service,
         modality_service: Arc::new(ModalityService::new(Arc::new(modalities))),
         series_strategy_service: Arc::new(SeriesStrategyService::new(
@@ -1458,6 +1492,7 @@ pub async fn init_core_with(
             retention: retention_service,
             query_group_refresh,
             dispatch_runner: dispatch_runner_service,
+            release_stamping: release_stamping.clone(),
         },
     })
 }

@@ -56,6 +56,7 @@ Design notes:
 - `PreviewMode` — Preview mode selected by a [`ContentKind`] for the QuickLook overlay.
 - `Progress` — Job progress payload; the `ProgressEmitter` forwards it to the UI.
 - `RegisterNote` — Short annotation about the asset's register / tone; the presentation
+- `ReleaseId` — Surrogate id for a `Release` — one change point's state written
 - `SessionId` — Session identifier attached to a dialogue asset — after the
 - `SnapshotId` — Surrogate id for a `Snapshot` — the immutable, content-addressed
 - `SourceKind` — Ingest source slug for an asset (open slug).

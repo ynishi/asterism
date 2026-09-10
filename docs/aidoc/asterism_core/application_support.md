@@ -20,6 +20,9 @@ object to call it on.
   check).
 - [`dispatch_runner_service`] — the runner-side half of the
   outbound dispatch state machine (`DispatchRun` job).
+- [`outbound_stamp`] — writing the disclosure into the files a
+  dispatch just wrote, before the run reports done. The port the
+  runner calls, and the release's implementation of it.
 - [`chapter_intake`] — what a fresh reading of a material's chapter
   list means for the rows: the imported layer's contents are
   replaced wholesale, and a person's own layer is untouched.
