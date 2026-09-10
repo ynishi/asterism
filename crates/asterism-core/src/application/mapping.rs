@@ -16,7 +16,8 @@ use asterism_contract::dto::{
 use asterism_contract::forge::{
     ForgeAnchorDto, ForgeChangePointDto, ForgeChangeRowDto, ForgeCloseDto, ForgeCollisionDto,
     ForgeDiscardedDto, ForgeEntryStateDto, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto,
-    ForgeOpDto, ForgePursuitDto, ForgeRevisionDto, ForgeRoundDto, ForgeStrategyDto, ForgeThreadDto,
+    ForgeOpDto, ForgePursuitDto, ForgeReleaseDto, ForgeReleaseFileDto, ForgeRevisionDto,
+    ForgeRoundDto, ForgeStampHalfDto, ForgeStrategyDto, ForgeThreadDto,
 };
 use asterism_contract::query::ListAssetsQuery;
 use chrono::{DateTime, Utc};
@@ -58,6 +59,8 @@ use crate::domain::modality::ModalityView;
 use crate::domain::persona::Persona;
 use crate::domain::persona_profile::PersonaProfile;
 use crate::domain::persona_theme::PersonaTheme;
+use crate::domain::release::{FileStamp, Release};
+use crate::domain::disclosure::Half;
 use crate::domain::render::render_policy;
 use crate::domain::repository::{Evidence, RegisteredStrategy, Route};
 use crate::domain::series::Path as SeriesPath;
@@ -67,8 +70,8 @@ use crate::domain::tag::{Tag, TagCount};
 use crate::domain::thread::{EntityRef, Message, Thread, ThreadAnchor};
 use crate::domain::value::{
     AssetCommentId, AssetId, ChapterMarkId, DirId, DispatchId, GroupId, Label, MaterialLayerId,
-    MaterialMarkId, MessageId, MimeType, Modality, Page, PersonaId, SnapshotId, TagId, ThreadId,
-    Viewer, Visibility,
+    MaterialMarkId, MessageId, MimeType, Modality, Page, PersonaId, ReleaseId, SnapshotId, TagId,
+    ThreadId, Viewer, Visibility,
 };
 use crate::domain::visual::{ModelIdentity, TagEvidence, TagHeadRef, TagSuggestionDisposition};
 use crate::error::DomainError;
@@ -1465,6 +1468,64 @@ pub fn forge_collisions_to_dto(found: &[Collision]) -> Vec<ForgeCollisionDto> {
             moved_in_id: collision.moved_in.to_string(),
         })
         .collect()
+}
+
+// ---- What was written out --------------------------------------
+
+/// Reads a release id off the wire.
+pub fn forge_release_id(raw: &str, field: &str) -> Result<ReleaseId, DomainError> {
+    Ok(ReleaseId::from_uuid(parse_uuid(raw, field)?))
+}
+
+/// Reads a change point id off the wire.
+pub fn forge_change_point_id(raw: &str, field: &str) -> Result<ChangePointId, DomainError> {
+    Ok(ChangePointId::from_uuid(parse_uuid(raw, field)?))
+}
+
+/// Converts a release to what a caller reads.
+pub fn forge_release_to_dto(release: &Release) -> ForgeReleaseDto {
+    let (actor_kind, actor_id) = actor_to_columns(release.act().by());
+    ForgeReleaseDto {
+        id: release.id().to_string(),
+        line_id: release.line().to_string(),
+        change_point_id: release.change_point().to_string(),
+        snapshot_id: release.snapshot().to_string(),
+        dispatch_id: release.dispatch().to_string(),
+        at_ms: release.act().at().timestamp_millis(),
+        actor_kind,
+        actor_id,
+        files: release.files().iter().map(release_file_to_dto).collect(),
+    }
+}
+
+/// Converts one file's stamp to what a caller reads.
+fn release_file_to_dto(file: &FileStamp) -> ForgeReleaseFileDto {
+    ForgeReleaseFileDto {
+        asset_id: file.asset.to_string(),
+        path: file.path.clone(),
+        xmp: stamp_half_to_dto(&file.outcome.xmp),
+        manifest: stamp_half_to_dto(&file.outcome.manifest),
+        prompt_dropped: file.outcome.prompt_dropped,
+        system_dropped: file.outcome.system_dropped,
+    }
+}
+
+/// Splits one half of a stamp into the state and what there is to say.
+///
+/// The skip reason travels as the token `Skipped::as_str` already
+/// promises rather than as a rendering of the variant: a reader branches
+/// on it, so it changes when the meaning does and not when the spelling
+/// does.
+fn stamp_half_to_dto(half: &Half) -> ForgeStampHalfDto {
+    let (state, detail) = match half {
+        Half::Written => ("written", None),
+        Half::Skipped(why) => ("skipped", Some(why.as_str().to_string())),
+        Half::Failed(cause) => ("failed", Some(cause.clone())),
+    };
+    ForgeStampHalfDto {
+        state: state.to_string(),
+        detail,
+    }
 }
 
 // ---- What was said about work ----------------------------------

@@ -141,10 +141,11 @@ use asterism_contract::dto::{
 use asterism_contract::forge::{
     AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto,
     ForgeEntryStateDto, ForgeLineActCommand, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto,
-    ForgePursuitActCommand, ForgePursuitDto, ForgeResolvedDto, ForgeRevisionDto, ForgeStrategyDto,
-    ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand, OpenForgeThreadCommand,
-    PushForgeRoundCommand, RenameForgeLineCommand, RenameForgeThreadCommand,
-    SayInForgeThreadCommand, SetForgeLineStrategyCommand,
+    ForgePursuitActCommand, ForgePursuitDto, ForgeReleaseDto, ForgeResolvedDto, ForgeRevisionDto,
+    ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand,
+    OpenForgeThreadCommand, PushForgeRoundCommand, ReleaseChangePointCommand,
+    RenameForgeLineCommand, RenameForgeThreadCommand, SayInForgeThreadCommand,
+    SetForgeLineStrategyCommand,
 };
 use asterism_contract::query::{
     DiagLevel, GetAssetDetailQuery, ListAssetsQuery, ListDiagQuery, ListEventsQuery,
@@ -153,11 +154,12 @@ use asterism_contract::query::{
 use asterism_core::DomainError;
 use asterism_core::application::forge::Anchored;
 use asterism_core::application::mapping::{
-    forge_anchored, forge_body, forge_collisions_to_dto, forge_discarded_to_dto,
-    forge_history_to_dto, forge_line_id, forge_line_to_dto, forge_message_id, forge_message_to_dto,
-    forge_name, forge_op, forge_outcome, forge_pursuit_id, forge_pursuit_to_dto,
-    forge_revision_to_dto, forge_round_to_dto, forge_states_to_dto, forge_strategy_id,
-    forge_strategy_to_dto, forge_thread_id, forge_thread_to_dto,
+    forge_anchored, forge_body, forge_change_point_id, forge_collisions_to_dto,
+    forge_discarded_to_dto, forge_history_to_dto, forge_line_id, forge_line_to_dto,
+    forge_message_id, forge_message_to_dto, forge_name, forge_op, forge_outcome, forge_pursuit_id,
+    forge_pursuit_to_dto, forge_release_id, forge_release_to_dto, forge_revision_to_dto,
+    forge_round_to_dto, forge_states_to_dto, forge_strategy_id, forge_strategy_to_dto,
+    forge_thread_id, forge_thread_to_dto, parse_persona_id,
 };
 use asterism_core::domain::forge::model::pursuit::Intent;
 use asterism_core::domain::forge::model::value::{LineId, PursuitId, ThreadId};
@@ -646,6 +648,16 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
             "/asterism/forge/lines/{id}/points/{point}/threads",
             get(threads_about_change),
         )
+        // Writing out what a change point carries. Under the change
+        // point rather than under the line, because that is what a
+        // release names — anchoring it at the line would make "which
+        // state left" a body field on a path that already had a place
+        // for it.
+        .route(
+            "/asterism/forge/lines/{id}/points/{point}/releases",
+            post(release_change_point).get(releases_of_change_point),
+        )
+        .route("/asterism/forge/releases/{id}", get(get_forge_release))
         .with_state(ctx)
 }
 
@@ -4027,4 +4039,73 @@ async fn threads_about_change(
 ) -> ApiResult<Vec<ForgeThreadDto>> {
     let about = forge_anchored("change", None, Some(&id), None, None, Some(&point))?;
     threads_about(&ctx, about).await
+}
+
+// -----------------------------------------------------------------
+// Forge — writing out what a change point carries.
+// -----------------------------------------------------------------
+
+/// `POST /asterism/forge/lines/{id}/points/{point}/releases` — freeze
+/// what this change point carried, copy it into a directory, and stamp
+/// each copy on the way out.
+///
+/// Answers with the release as it was recorded, which is before its
+/// files exist: the dispatch is started here and runs afterwards, so
+/// `files` is empty and the same release read again once the run has
+/// finished carries a stamp per file. That is the honest shape for a
+/// verb that hands work to a queue, and the alternative — waiting here
+/// — would hold a request open for as long as copying a set takes.
+///
+/// The ids come off the path; the command's own fields for them exist
+/// for the transports that have no path.
+async fn release_change_point(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path((id, point)): Path<(String, String)>,
+    Json(command): Json<ReleaseChangePointCommand>,
+) -> ApiResult<ForgeReleaseDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let released = ctx
+        .release_service
+        .release(
+            &line_id(&id)?,
+            &forge_change_point_id(&point, "change point id")?,
+            &parse_persona_id(&command.persona_id)?,
+            &command.output_dir,
+            &attribution,
+        )
+        .await?;
+    Ok(Json(forge_release_to_dto(&released)))
+}
+
+/// `GET /asterism/forge/lines/{id}/points/{point}/releases` — every
+/// time this change point was written out, most recent first.
+///
+/// A list rather than one, because a set going out twice is two things
+/// that happened and the earlier one is what a rejection was about.
+async fn releases_of_change_point(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path((_id, point)): Path<(String, String)>,
+) -> ApiResult<Vec<ForgeReleaseDto>> {
+    let found = ctx
+        .release_service
+        .of_change_point(&forge_change_point_id(&point, "change point id")?)
+        .await?;
+    Ok(Json(found.iter().map(forge_release_to_dto).collect()))
+}
+
+/// `GET /asterism/forge/releases/{id}` — one release, its file stamps
+/// included.
+async fn get_forge_release(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<ForgeReleaseDto> {
+    let found = ctx
+        .release_service
+        .get(&forge_release_id(&id, "release id")?)
+        .await?;
+    Ok(Json(forge_release_to_dto(&found)))
 }

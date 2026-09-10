@@ -94,10 +94,10 @@ use asterism_contract::dto::{
 use asterism_contract::forge::{
     AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto,
     ForgeEntryStateDto, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto, ForgeOpDto,
-    ForgePursuitDto, ForgeResolvedDto, ForgeRevisionDto, ForgeStrategyDto, ForgeThreadDto,
-    OpenForgeLineCommand, OpenForgePursuitCommand, OpenForgeThreadCommand, PushForgeRoundCommand,
-    RenameForgeLineCommand, RenameForgeThreadCommand, SayInForgeThreadCommand,
-    SetForgeLineStrategyCommand,
+    ForgePursuitDto, ForgeReleaseDto, ForgeResolvedDto, ForgeRevisionDto, ForgeStrategyDto,
+    ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand, OpenForgeThreadCommand,
+    PushForgeRoundCommand, ReleaseChangePointCommand, RenameForgeLineCommand,
+    RenameForgeThreadCommand, SayInForgeThreadCommand, SetForgeLineStrategyCommand,
 };
 use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
@@ -110,11 +110,12 @@ use asterism_contract::teams::{
 };
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
-    asset_to_dto, forge_anchored, forge_body, forge_collisions_to_dto, forge_discarded_to_dto,
-    forge_history_to_dto, forge_line_id, forge_line_to_dto, forge_message_id, forge_message_to_dto,
-    forge_name, forge_op, forge_outcome, forge_pursuit_id, forge_pursuit_to_dto,
-    forge_revision_to_dto, forge_round_to_dto, forge_states_to_dto, forge_strategy_id,
-    forge_strategy_to_dto, forge_thread_id, forge_thread_to_dto, parse_asset_id, parse_persona_id,
+    asset_to_dto, forge_anchored, forge_body, forge_change_point_id, forge_collisions_to_dto,
+    forge_discarded_to_dto, forge_history_to_dto, forge_line_id, forge_line_to_dto,
+    forge_message_id, forge_message_to_dto, forge_name, forge_op, forge_outcome, forge_pursuit_id,
+    forge_pursuit_to_dto, forge_release_id, forge_release_to_dto, forge_revision_to_dto,
+    forge_round_to_dto, forge_states_to_dto, forge_strategy_id, forge_strategy_to_dto,
+    forge_thread_id, forge_thread_to_dto, parse_asset_id, parse_persona_id,
 };
 use asterism_core::domain::attribution::AttributionContext;
 use asterism_core::domain::forge::model::pursuit::Intent;
@@ -4720,4 +4721,67 @@ mod teams_error_tests {
         let mapped = teams_error(refused(404, "no such pursuit", None));
         assert!(matches!(mapped, UiError::NotFound { .. }), "{mapped:?}");
     }
+}
+
+// -----------------------------------------------------------------
+// Forge — writing out what a change point carries.
+// -----------------------------------------------------------------
+
+/// Freezes what a change point carried, copies it into a directory, and
+/// stamps each copy on the way out.
+///
+/// Answers with the release as it was recorded, which is before its
+/// files exist: the run is started here and finishes afterwards, so
+/// `files` is empty and reading the release again once the run has
+/// finished carries a stamp per file.
+///
+/// The ids are arguments rather than path segments, which is the one
+/// difference from the HTTP surface — the command's own `line_id` and
+/// `change_point_id` fields exist for callers that have no path, and
+/// this is one of them.
+#[tauri::command]
+pub async fn release_forge_change_point(
+    state: State<'_, AppState>,
+    command: ReleaseChangePointCommand,
+) -> Result<ForgeReleaseDto, UiError> {
+    let released = state
+        .release_service
+        .release(
+            &forge_line_id(&command.line_id, "line id")?,
+            &forge_change_point_id(&command.change_point_id, "change point id")?,
+            &parse_persona_id(&command.persona_id)?,
+            &command.output_dir,
+            &AttributionContext::owner_surface(),
+        )
+        .await?;
+    Ok(forge_release_to_dto(&released))
+}
+
+/// One release, its file stamps included.
+#[tauri::command]
+pub async fn get_forge_release(
+    state: State<'_, AppState>,
+    release_id: String,
+) -> Result<ForgeReleaseDto, UiError> {
+    let found = state
+        .release_service
+        .get(&forge_release_id(&release_id, "release id")?)
+        .await?;
+    Ok(forge_release_to_dto(&found))
+}
+
+/// Every time one change point was written out, most recent first.
+///
+/// A list rather than one, because a set going out twice is two things
+/// that happened and the earlier one is what a rejection was about.
+#[tauri::command]
+pub async fn list_forge_releases_of_change_point(
+    state: State<'_, AppState>,
+    change_point_id: String,
+) -> Result<Vec<ForgeReleaseDto>, UiError> {
+    let found = state
+        .release_service
+        .of_change_point(&forge_change_point_id(&change_point_id, "change point id")?)
+        .await?;
+    Ok(found.iter().map(forge_release_to_dto).collect())
 }

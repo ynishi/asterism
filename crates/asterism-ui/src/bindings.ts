@@ -384,6 +384,14 @@ export type AmendForgeMessageCommand = { thread_id: string; message_id: string; 
 
 export type RenameForgeThreadCommand = { thread_id: string; title: string | null; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
 
+export type ForgeReleaseDto = { id: string; line_id: string; change_point_id: string; snapshot_id: string; dispatch_id: string; at_ms: number; actor_kind: string; actor_id: string; files: { asset_id: string; path: string; xmp: { state: string; detail: string | null; }; manifest: { state: string; detail: string | null; }; prompt_dropped: boolean; system_dropped: boolean; }[]; };
+
+export type ForgeReleaseFileDto = { asset_id: string; path: string; xmp: { state: string; detail: string | null; }; manifest: { state: string; detail: string | null; }; prompt_dropped: boolean; system_dropped: boolean; };
+
+export type ForgeStampHalfDto = { state: string; detail: string | null; };
+
+export type ReleaseChangePointCommand = { line_id: string; change_point_id: string; persona_id: string; output_dir: string; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
 export type RenameTagCommand = { tag_id: string; name: string; };
 
 export type DeleteTagCommand = { tag_id: string; };
