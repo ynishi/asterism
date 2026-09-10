@@ -430,17 +430,22 @@ pub async fn run_dispatch_run(
 ///
 /// # Why a failure here does not fail the tick
 ///
-/// This is the state machine's rule rather than the port's. Returning
-/// `Err` from the handler hands the job back to the queue, and the retry
-/// would find the row still `Running` and stamp the same files a second
-/// time — a duplicate rewrite of files that have already left, in
-/// exchange for a note about the first attempt. What a failure *means*
-/// is the port's own doc; what happens to it here is that it is said out
-/// loud, on the same terms as the attempt record above.
+/// This is the state machine's rule rather than the port's. Nothing
+/// re-queues a failed handler and v1 has no retry policy — the
+/// dispatcher in [`crate::jobs`] is where that is decided — so returning
+/// `Err` from this tick would leave the dispatch row in `Running` with
+/// nothing coming to move it, over a mark that can be applied again from
+/// stored rows. What a failure *means* is the port's own doc; what
+/// happens to it here is that it is said out loud, on the same terms as
+/// the attempt record above.
 ///
-/// A run whose outputs this cannot pair with its inputs is said out loud
-/// too. Nothing is offered for stamping in that case, so a release would
-/// otherwise end with no file rows and no line anywhere saying why.
+/// A run whose outputs cannot be paired with its inputs at all is said
+/// out loud too ([`paired`]). Nothing is offered for stamping in that
+/// case, so a release would otherwise end with no file rows and no line
+/// anywhere saying why. A run whose outputs paired and copied nothing is
+/// not that case and says nothing: a `reference`-mode export reports the
+/// library's own files as its outputs, and there is no copy for a stamp
+/// to go into.
 async fn stamp_outbound(
     env: &DispatchRunEnv,
     id: &DispatchId,
@@ -452,7 +457,7 @@ async fn stamp_outbound(
     };
     let files = copies(inputs, derived);
     if files.is_empty() {
-        if !derived.is_empty() {
+        if !derived.is_empty() && !paired(inputs, derived) {
             tracing::warn!(
                 event = "diag.dispatch.outbound_unpaired",
                 dispatch_id = %id,
@@ -474,15 +479,32 @@ async fn stamp_outbound(
     }
 }
 
-/// The files this run wrote, paired with the library rows they are
-/// copies of.
+/// Whether this run's outputs line up with its inputs at all.
 ///
 /// **One output per input, in input order.** That is what copying a
 /// frozen set is, and it is the shape the `file` exporter's own loop
-/// produces. A run whose outputs do not line up with its inputs made
+/// produces. A run that produced a different number of outputs made
 /// something that is not a copy of one member — a single instruction
 /// file, a batch of generations — and nothing here could say which
-/// member a given file came out of, so nothing is paired.
+/// member a given file came out of.
+///
+/// Separate from [`copies`] because the two answer different questions,
+/// and one of them was being read as the other: a run can pair perfectly
+/// and yield no copies, which is every `reference`-mode export, and
+/// reporting that as an unpaired run said something false about the
+/// commonest export there is.
+fn paired(
+    inputs: &[asterism_contract::dto::AssetCardDto],
+    derived: &[asterism_dispatch_sdk::Derived],
+) -> bool {
+    derived.len() == inputs.len()
+}
+
+/// The files this run wrote, paired with the library rows they are
+/// copies of.
+///
+/// Empty for a run [`paired`] refuses, and empty for one that paired and
+/// copied nothing.
 ///
 /// **An output that is its own input is not a copy**, and is excluded.
 /// A reference-mode run reports the library's own file as its output,
@@ -493,7 +515,7 @@ fn copies(
     inputs: &[asterism_contract::dto::AssetCardDto],
     derived: &[asterism_dispatch_sdk::Derived],
 ) -> Vec<OutboundFile> {
-    if derived.len() != inputs.len() {
+    if !paired(inputs, derived) {
         return Vec::new();
     }
     inputs
@@ -581,4 +603,116 @@ fn build_handle(job: &asterism_core::domain::dispatch::DispatchJob) -> Option<Ha
 
 fn describe(err: &ExporterError) -> String {
     err.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use asterism_contract::dto::{AssetCardDto, DerivedDto};
+
+    fn input(id: &str, source: &str) -> AssetCardDto {
+        AssetCardDto {
+            id: id.into(),
+            persona_id: "p1".into(),
+            modality: Some("image".into()),
+            mime: Some("image/png".into()),
+            media: "image".into(),
+            occurred_at_ms: 0,
+            cover: None,
+            labels: vec![],
+            file_size_bytes: None,
+            duration_ms: None,
+            pixel_count: None,
+            source_locator: source.into(),
+            group_ids: vec![],
+            primary_group_position: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            rating: None,
+            palette: None,
+            has_note: false,
+            has_thread: false,
+            role: "item".into(),
+            title: None,
+            member_count: 0,
+            score: None,
+            snippet: None,
+            found_by: None,
+            author_kind: None,
+            author_subject: None,
+            operator_ai: None,
+        }
+    }
+
+    fn output(locator: &str) -> DerivedDto {
+        DerivedDto {
+            modality: "image".into(),
+            locator: locator.into(),
+            occurred_at: chrono::Utc::now(),
+            cover_hint: None,
+            register_note: None,
+            labels: vec![],
+            file_size_bytes: None,
+            duration_ms: None,
+            extra: serde_json::Value::Null,
+            batch_hint: None,
+        }
+    }
+
+    const ONE: &str = "0198c1c2-0000-7000-8000-000000000001";
+    const TWO: &str = "0198c1c2-0000-7000-8000-000000000002";
+
+    #[test]
+    fn a_copy_is_paired_with_the_row_it_was_made_from() {
+        let inputs = [input(ONE, "/lib/a.png"), input(TWO, "/lib/b.png")];
+        let derived = [output("/out/a.png"), output("/out/b.png")];
+
+        assert!(paired(&inputs, &derived));
+        let files = copies(&inputs, &derived);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].path, std::path::PathBuf::from("/out/a.png"));
+        assert_eq!(files[1].asset.to_string(), TWO);
+    }
+
+    /// A `reference`-mode export reports the library's own files as its
+    /// outputs. Those outputs paired; there is simply no copy for a
+    /// stamp to go into — and calling that an unpaired run said
+    /// something false about the commonest export there is.
+    #[test]
+    fn a_reference_export_pairs_and_yields_no_copy() {
+        let inputs = [input(ONE, "/lib/a.png"), input(TWO, "/lib/b.png")];
+        let derived = [output("/lib/a.png"), output("/lib/b.png")];
+
+        assert!(
+            paired(&inputs, &derived),
+            "the outputs line up with the inputs one for one"
+        );
+        assert!(
+            copies(&inputs, &derived).is_empty(),
+            "and none of them is a copy the library does not already hold"
+        );
+    }
+
+    /// A run that produced a different number of outputs made something
+    /// that is not a copy of one member, and nothing here can say which
+    /// member any of it came out of.
+    #[test]
+    fn a_run_whose_outputs_do_not_line_up_is_unpaired() {
+        let inputs = [input(ONE, "/lib/a.png"), input(TWO, "/lib/b.png")];
+        let instruction = [output("/out/dispatch.json")];
+
+        assert!(!paired(&inputs, &instruction));
+        assert!(copies(&inputs, &instruction).is_empty());
+    }
+
+    /// An id the library could not have written is skipped rather than
+    /// guessed at: a stamp needs the row the copy was made from.
+    #[test]
+    fn an_output_whose_input_carries_no_readable_id_is_left_out() {
+        let inputs = [input("not-a-uuid", "/lib/a.png")];
+        let derived = [output("/out/a.png")];
+
+        assert!(paired(&inputs, &derived));
+        assert!(copies(&inputs, &derived).is_empty());
+    }
 }
