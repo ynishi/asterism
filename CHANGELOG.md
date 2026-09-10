@@ -10,6 +10,22 @@ and this project adheres to
 
 ### Added
 
+- **A vocabulary for what a file already discloses** (#18). The write side could
+  say what it put into a file; nothing could say what is in one now. `Carried`
+  answers that for one file, with the packet and the manifest reported
+  separately and the signer on an axis of its own — because "the mark no longer
+  matches these bytes" and "the signer is not on a trust list" lead somewhere
+  completely different, and a build with no trust anchors configured reports
+  every signer as untrusted, a correctly issued certificate included. Folding
+  the two would show such a file as broken. The judgement that reads a
+  validator's failure codes moves out of a test helper into the domain, where
+  the code that ships can reach it, and it gains the state the codes on their
+  own cannot supply: one of them is emitted both for a forged signature and for
+  a signing certificate missing an attribute the specification never asked for
+  (#179), so when nothing distinguishes the two the answer is that the question
+  cannot be settled — not that the file is fine. **This is the vocabulary and
+  the port only.** Nothing reads a file yet: the adapter, the trust
+  configuration and the tests that sign and read back are the rest of #18.
 - **An archive says what it is** (#259). A `.zip` used to land carrying no
   format at all, which meant the browse-by-format facet could not see it: that
   count buckets on a mime and skips a row without one, so an archive was in the

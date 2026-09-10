@@ -13,20 +13,23 @@
 //!
 //! # Why this makes the database the source of truth
 //!
-//! Nothing here reads the target file's metadata. The record is derived
+//! Neither of this service's verbs reads the target file's metadata —
+//! [`DisclosureReader`] is declared here and this service does not call
+//! it. The record is derived
 //! entirely from rows, so a file that came back from a downstream
 //! conversion with its manifest stripped can be handed to
 //! [`apply_to`](DisclosureService::apply_to) and get the same disclosure
 //! again — the answer never lived in the file. That is the property a
 //! manifest cannot have on its own, since any re-encode removes it.
 //!
-//! # Why the port is here and not in `repository`
+//! # Why the ports are here and not in `repository`
 //!
-//! [`DisclosureWriter`] is an outbound port like the repositories, and
-//! it lives in the core for the same reason they do — adapters
-//! implement traits, they do not define them (`asterism-infra`'s crate
-//! doc). It is declared beside its only caller rather than in
-//! [`repository`](crate::domain::repository) because it is not one: a
+//! [`DisclosureWriter`] and [`DisclosureReader`] are outbound ports
+//! like the repositories, and they live in the core for the same reason
+//! they do — adapters implement traits, they do not define them
+//! (`asterism-infra`'s crate doc). They are declared beside the service
+//! that owns the concept rather than in
+//! [`repository`](crate::domain::repository) because neither is one: a
 //! repository owns the storage of an entity, and this one owns no
 //! entity at all — it takes a value and a path and modifies a file
 //! neither it nor this service owns.
@@ -36,7 +39,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::domain::disclosure::{DisclosureRecord, Stamped};
+use crate::domain::disclosure::{Carried, DisclosureRecord, Stamped};
 use crate::domain::measurement::MeasurementStatus;
 
 use crate::domain::disclosure::{self, ParentEvidence, PromptDisclosure};
@@ -60,7 +63,7 @@ const MAX_PARENTS: u32 = 8;
 
 /// Writes a disclosure into a file that already exists.
 ///
-/// The one outbound port of this service. Implemented by
+/// The port this service calls. Implemented by
 /// `asterism-infra::disclosure`, which owns the containers, the XMP
 /// packet and the C2PA signer; nothing about any of those reaches this
 /// side of the boundary.
@@ -89,6 +92,42 @@ pub trait DisclosureWriter: Send + Sync {
     /// outcomes and letting the caller decide which of them is a fault
     /// keeps that decision where the context is.
     async fn apply(&self, path: &Path, record: &DisclosureRecord) -> Result<Stamped, DomainError>;
+}
+
+/// Reads what a file currently discloses.
+///
+/// The other direction of [`DisclosureWriter`] — outbound in the same
+/// sense, since an adapter implements it — declared here for the same
+/// reason: a port belongs to the core, and the implementation that
+/// knows about JUMBF boxes and XMP packets belongs on the other side of
+/// it. No container and no SDK type appears in this signature; what
+/// crosses it is
+/// [`Carried`](crate::domain::disclosure::Carried), whose vocabulary is
+/// the validator's rather than any container's.
+///
+/// # What `Err` means here
+///
+/// The same thing it means on the write side, and the symmetry is the
+/// point: only that **nothing could be read** — the file is not there,
+/// or its container is one this build cannot open. A file that opened
+/// and carries no mark is not an error; it is
+/// [`Carried::nothing`](crate::domain::disclosure::Carried::nothing),
+/// which is the answer that tells a caller to re-apply from the
+/// database.
+///
+/// A mark that is present and does not stand is not an error either.
+/// That is the verdict itself, and an implementation that raised it
+/// through `Err` would leave the caller unable to tell a tampered file
+/// from an unreadable one — the distinction the whole type exists to
+/// draw.
+#[async_trait]
+pub trait DisclosureReader: Send + Sync {
+    /// Reads the marks the file at `path` carries.
+    ///
+    /// The two kinds of mark are reported independently, and the trust
+    /// axis separately from either: see
+    /// [`Carried`](crate::domain::disclosure::Carried).
+    async fn read(&self, path: &Path) -> Result<Carried, DomainError>;
 }
 
 /// Assembles and applies AI-disclosure provenance.

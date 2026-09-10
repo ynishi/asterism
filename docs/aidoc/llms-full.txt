@@ -725,6 +725,7 @@ the private design notes.
 - [`domain::derived_text`](domain__derived_text.md): Derived text — the one string an asset offers a full-text index,
 - [`domain::dir`](domain__dir.md): `Dir` — a persona-scoped folder tree for organising the sidebar.
 - [`domain::disclosure`](domain__disclosure.md): What an artefact discloses about how it was made, and the rule that
+- [`domain::disclosure::carried`](domain__disclosure__carried.md): What a file currently carries, and whether it still stands up.
 - [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [`domain::disclosure::record`](domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
 - [`domain::disclosure::source_type`](domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
@@ -994,20 +995,23 @@ really about:
 
 # Why this makes the database the source of truth
 
-Nothing here reads the target file's metadata. The record is derived
+Neither of this service's verbs reads the target file's metadata —
+[`DisclosureReader`] is declared here and this service does not call
+it. The record is derived
 entirely from rows, so a file that came back from a downstream
 conversion with its manifest stripped can be handed to
 [`apply_to`](DisclosureService::apply_to) and get the same disclosure
 again — the answer never lived in the file. That is the property a
 manifest cannot have on its own, since any re-encode removes it.
 
-# Why the port is here and not in `repository`
+# Why the ports are here and not in `repository`
 
-[`DisclosureWriter`] is an outbound port like the repositories, and
-it lives in the core for the same reason they do — adapters
-implement traits, they do not define them (`asterism-infra`'s crate
-doc). It is declared beside its only caller rather than in
-[`repository`](crate::domain::repository) because it is not one: a
+[`DisclosureWriter`] and [`DisclosureReader`] are outbound ports
+like the repositories, and they live in the core for the same reason
+they do — adapters implement traits, they do not define them
+(`asterism-infra`'s crate doc). They are declared beside the service
+that owns the concept rather than in
+[`repository`](crate::domain::repository) because neither is one: a
 repository owns the storage of an entity, and this one owns no
 entity at all — it takes a value and a path and modifies a file
 neither it nor this service owns.
@@ -1018,6 +1022,7 @@ neither it nor this service owns.
 
 ## Traits
 
+- `DisclosureReader` — Reads what a file currently discloses.
 - `DisclosureWriter` — Writes a disclosure into a file that already exists.
 
 
@@ -3069,10 +3074,12 @@ the domain name and the table name coincide.
 What an artefact discloses about how it was made, and the rule that
 decides it.
 
-Three things live here, and they are one concept: the vocabulary
+Four things live here, and they are one concept: the vocabulary
 ([`DigitalSourceType`], [`DisclosureRecord`], [`Stamped`]), the rule
-that turns stored metadata into a statement ([`record_for`]), and the
-policy the rule takes ([`PromptDisclosure`]). Rendering a record into
+that turns stored metadata into a statement ([`record_for`]), the
+policy the rule takes ([`PromptDisclosure`]), and the reading of a
+file that already carries something ([`Carried`], [`Mark`],
+[`Signer`]). Rendering a record into
 an XMP packet or a C2PA manifest definition is not here — that is
 `asterism-disclosure-format`, and putting a packet's bytes beside the
 term it carries would be the container formats leaking into the
@@ -3168,6 +3175,65 @@ unknown.
 
 - `DISCLOSURE_NOTE_KEY` — Key under which what became of an artefact's disclosure is recorded,
 - `SOURCE_TYPE_KEY` — Key under which a person's source-type assertion is recorded, inside
+
+
+<!-- asterism_core/domain__disclosure__carried.md -->
+# asterism-core::domain::disclosure::carried
+
+What a file currently carries, and whether it still stands up.
+
+The read side of what [`outcome`](super::outcome) says for the write
+side. `Stamped` says what an application put into a file; this says
+what is in one now, which is a different question with a different
+set of answers — a file nobody here ever stamped has an answer, and
+a file stamped last week may have stopped matching its own bytes
+since.
+
+# Two axes, and folding them is the trap
+
+*Does the mark still describe these bytes* and *is the signer
+somebody we trust* are separate questions, and the second one is not
+about the file at all. C2PA says so itself: a manifest whose only
+failure is `signingCredential.untrusted` stays in the `Valid`
+validation state, and the reference implementation filters that
+status out of the summary a person reads.
+
+The reason to keep them apart here is sharper than tidiness. In the
+reference implementation trust checking is on by default while the
+anchor set is empty outside its own test configuration, so a release
+build reports **every** signer as untrusted — a genuine
+conformance-program certificate included — until anchors are
+configured. A verdict that folded trust into integrity would show a
+correctly signed file as broken in production and fine under `cargo
+test`, which is the shape of bug that survives a test suite.
+
+So [`Mark`] answers only for the bytes, [`Signer`] answers only for
+the certificate, and [`Carried`] holds both without mixing them.
+
+# Why an absent mark is a value and not a `None`
+
+"This file carries nothing" is an answer somebody acts on — it is
+the row that says *re-apply from the database* — and it is not the
+same as "nobody looked". The series key already records that
+distinction for a different question, and the reasoning carries: an
+`Option` would spend the one shape that means "unasked" on a state
+the reader deliberately reached.
+
+## Functions
+
+- `integrity_of` — The integrity verdict for a manifest, from the failure codes a
+
+## Types
+
+- `Carried` — What one file carries, on both axes, for both kinds of mark.
+- `Mark` — What one kind of mark says about the bytes it sits in.
+- `Signer` — What the deployment can say about who signed.
+
+## Constants
+
+- `BINDING_FAILURES` — Validation status codes that say the bytes changed after signing.
+- `SIGNATURE_MISMATCH` — The code two different things produce, and the reason this mapping
+- `TRUST_FAILURES` — The validation status code that belongs to the trust axis rather
 
 
 <!-- asterism_core/domain__disclosure__outcome.md -->
