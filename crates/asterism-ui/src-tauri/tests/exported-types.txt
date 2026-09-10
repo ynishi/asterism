@@ -8,8 +8,8 @@
 # `withheld` means the type reaches no TypeScript caller on purpose;
 # NOT_PROJECTED in that test carries the reason for each.
 #
-# derived: 238
-# exported: 231
+# derived: 242
+# exported: 235
 # withheld: 7
 
 exported  AddAssetBatchCommand
@@ -101,9 +101,12 @@ exported  ForgeMessageDto
 exported  ForgeOpDto
 exported  ForgePursuitActCommand
 exported  ForgePursuitDto
+exported  ForgeReleaseDto
+exported  ForgeReleaseFileDto
 exported  ForgeResolvedDto
 exported  ForgeRevisionDto
 exported  ForgeRoundDto
+exported  ForgeStampHalfDto
 exported  ForgeStrategyDto
 exported  ForgeThreadDto
 exported  FoundBy
@@ -179,6 +182,7 @@ exported  RecordDiagCommand
 exported  RecordEventCommand
 exported  RedispatchCommand
 exported  RegisterPersonaCommand
+exported  ReleaseChangePointCommand
 exported  RemoveAssetFromGroupCommand
 exported  RenameDirCommand
 exported  RenameForgeLineCommand

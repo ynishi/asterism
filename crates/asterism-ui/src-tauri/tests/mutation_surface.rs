@@ -29,7 +29,11 @@ use std::path::Path;
 /// team's server, where the author is the authenticated member and the
 /// team stamps it, so none of them names this surface — and the count
 /// says so.
-const TAURI_MUTATION_COMMANDS: usize = 104;
+///
+/// 104 → 105 in #276: `release_forge_change_point` records a release
+/// against a change point on this machine, the owner's own write. The
+/// two reads beside it list and fetch releases and name no surface.
+const TAURI_MUTATION_COMMANDS: usize = 105;
 
 #[test]
 fn the_tauri_mutation_surface_is_the_size_it_records() {
