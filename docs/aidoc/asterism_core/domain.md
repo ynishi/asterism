@@ -23,7 +23,8 @@ together, and the one dependency that decides where a new one goes.
 
 **The raw layer.** [`persona`] is the primary aggregate root; [`asset`]
 is one recorded footprint, with [`material`] as its physical-original
-layer and [`value`] holding the shared newtypes. [`modality`], [`tag`],
+layer, [`asset_zone`] resolving which of its stamps is its time and in
+which zone, and [`value`] holding the shared newtypes. [`modality`], [`tag`],
 [`dir`] and [`group`] are the organisation axes over it; [`instance`]
 names the single owner that `Author::Owner` refers to.
 

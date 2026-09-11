@@ -67,6 +67,7 @@ convert them into domain types and surface any validation failures as
 - `MergeTagsResult` — Result of a [`MergeTagsCommand`].
 - `MoveDirCommand` — Re-parents a Dir (`None` = to the root). Rejected when the target
 - `MoveGroupToDirCommand` — Files a Group under a Dir (`None` = back to the root level).
+- `OccurredSource` — Where the caller got [`AddAssetCommand::occurred_at_ms`] from — the
 - `OnDuplicate` — What the caller wants done if the asset being registered turns out
 - `OrganizeByLocationCommand` — Auto-organises existing assets under a Dir tree derived from
 - `OrganizeByLocationResult` — Result summary of an `organize-by-location` run.

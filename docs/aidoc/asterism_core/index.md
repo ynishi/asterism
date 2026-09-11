@@ -89,6 +89,7 @@ the private design notes.
 - [`domain::app_setting`](domain__app_setting.md): Application settings — the closed key registry and its stored
 - [`domain::asset`](domain__asset.md): `Asset` — an aggregate root for a single footprint, plus the read
 - [`domain::asset_comment`](domain__asset_comment.md): `AssetComment` — a thread of short notes attached to an Asset.
+- [`domain::asset_zone`](domain__asset_zone.md): Which stamp is an asset's time, and which zone reads it — resolved
 - [`domain::attribution`](domain__attribution.md): Attribution — *who* a record is by, *what* operated on their behalf,
 - [`domain::chapter_mark`](domain__chapter_mark.md): `ChapterMark` — one entry in a chapter list: a named section of an
 - [`domain::color`](domain__color.md): `ColorBucket` — the closed set of colours the palette facet filters

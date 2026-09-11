@@ -170,6 +170,7 @@ convert them into domain types and surface any validation failures as
 - `MergeTagsResult` — Result of a [`MergeTagsCommand`].
 - `MoveDirCommand` — Re-parents a Dir (`None` = to the root). Rejected when the target
 - `MoveGroupToDirCommand` — Files a Group under a Dir (`None` = back to the root level).
+- `OccurredSource` — Where the caller got [`AddAssetCommand::occurred_at_ms`] from — the
 - `OnDuplicate` — What the caller wants done if the asset being registered turns out
 - `OrganizeByLocationCommand` — Auto-organises existing assets under a Dir tree derived from
 - `OrganizeByLocationResult` — Result summary of an `organize-by-location` run.
@@ -448,6 +449,7 @@ means a restricted subject view (persona view, and so on).
 
 ## Types
 
+- `DayOfYear` — A month and a day with no year — the shape of "this day, every
 - `DiagLevel` — Severity of a persisted diagnostic — the closed set `tracing` can
 - `GetAssetDetailQuery` — Detail view (asset + tags + constellation edges).
 - `GetJobStatusQuery` — Job status lookup (for progress polling; push updates travel over the
@@ -727,6 +729,7 @@ the private design notes.
 - [`domain::app_setting`](domain__app_setting.md): Application settings — the closed key registry and its stored
 - [`domain::asset`](domain__asset.md): `Asset` — an aggregate root for a single footprint, plus the read
 - [`domain::asset_comment`](domain__asset_comment.md): `AssetComment` — a thread of short notes attached to an Asset.
+- [`domain::asset_zone`](domain__asset_zone.md): Which stamp is an asset's time, and which zone reads it — resolved
 - [`domain::attribution`](domain__attribution.md): Attribution — *who* a record is by, *what* operated on their behalf,
 - [`domain::chapter_mark`](domain__chapter_mark.md): `ChapterMark` — one entry in a chapter list: a named section of an
 - [`domain::color`](domain__color.md): `ColorBucket` — the closed set of colours the palette facet filters
@@ -2410,7 +2413,8 @@ together, and the one dependency that decides where a new one goes.
 
 **The raw layer.** [`persona`] is the primary aggregate root; [`asset`]
 is one recorded footprint, with [`material`] as its physical-original
-layer and [`value`] holding the shared newtypes. [`modality`], [`tag`],
+layer, [`asset_zone`] resolving which of its stamps is its time and in
+which zone, and [`value`] holding the shared newtypes. [`modality`], [`tag`],
 [`dir`] and [`group`] are the organisation axes over it; [`instance`]
 names the single owner that `Author::Owner` refers to.
 
@@ -2737,6 +2741,73 @@ Design notes:
 - `AssetComment` — A single comment on an Asset.
 - `CommentAuthor` — Who wrote a comment.
 - `SelectionGesture` — The selection-shaped verb a comment was said alongside.
+
+
+<!-- asterism_core/domain__asset_zone.md -->
+# asterism-core::domain::asset_zone
+
+Which stamp is an asset's time, and which zone reads it — resolved
+once, in one place, so nothing downstream branches on either.
+
+An asset row carries two instants and neither is "the time" on its
+own. `occurred_at` is when the thing it records happened, and it is
+the right answer for a photograph or a message. It is the wrong
+answer for a row whose importer had no occurrence to record and
+wrote the import moment in its place — a generated image, a
+transcript export, a database dump — where the moment the row
+*arrived* (`created_at`) is the only time it has. Which of the two
+a row means is not a guess made at read time: the importer that
+wrote the row knew, and [`OccurredSource`] is where it says so.
+
+The instant is then a point on the UTC line, and a calendar day is a
+zone's reading of that line. Two layers supply the zone, on the
+shape [`app_setting`](crate::domain::app_setting) uses for a
+setting's value:
+
+- **Local** — a zone the asset itself carries
+  ([`AssetTime::time_zone`]), when a supplier recorded where the
+  thing happened. The higher layer: a row that knows its own zone is
+  not re-read in somebody else's.
+- **Global** — the zone the viewer is asking from
+  ([`GlobalZone`]), carried on the query the way a collation is
+  (`SortSpec::collation`) rather than held as process state. The
+  fallback, and the only zone most rows have.
+
+[`resolve`] applies both rules and hands back one [`ResolvedTime`]:
+the stamp, the instant it names, the zone, and which layer supplied
+the zone. A consumer reads the result and never the inputs — the
+service that maps a query, the repository that writes a derived
+column, and the mapper that puts the answer on the wire all call
+the same two lines instead of each carrying a copy of the rule.
+
+[`day_window`] and [`local_date`] are the two directions between an
+instant and a calendar day under a zone. A day is **the 24 hours
+from that day's first instant** — its local midnight, or the end of
+the gap where a zone's rule skipped that midnight — and where that
+falls is the zone's rule for that year: a daylight-saving transition
+moves it without a line of code here noticing. What is deliberately
+not handled, and stated once so nobody looks for it: a day a zone
+repeats or shortens is still 24 hours from its start, and a date a
+zone skipped whole at the date line is a date its calendar does not
+have; nothing here corrects for either.
+
+## Functions
+
+- `day_window` — The 24 hours from the first instant of `(year, month, day)` in
+- `local_date` — The calendar day `instant` falls on in `zone` — the inverse of
+- `resolve` — Resolves an asset's time against the viewer's zone.
+
+## Types
+
+- `AssetTime` — The four facts on an asset row that its time is resolved from. Each
+- `DayAsk` — The calendar cut a listing asks for, on the resolved time.
+- `DayFilter` — The day filter as the repository receives it: the ask, and the
+- `DayWindow` — One calendar day as a half-open UTC window, in the unit the
+- `GlobalZone` — The viewer's zone — the global layer, carried on the query.
+- `OccurredSource` — Where a row's `occurred_at` came from — written by the importer that
+- `ResolvedTime` — One asset's time, resolved: what a consumer acts on.
+- `TimeStamp` — Which of an asset's two instants is its time.
+- `ZoneSource` — Which layer supplied the zone a [`ResolvedTime`] is read in.
 
 
 <!-- asterism_core/domain__attribution.md -->
@@ -11232,6 +11303,19 @@ the moment the file was last flushed, which erases the
 within-session ordering the domain relies on for edge / grid
 placement.
 
+**Say which rung won.** Every footprint carries an
+[`OccurredSource`] beside its `occurred_at`, and the server reads
+it to decide whether the stamp is the thing's time at all: a row
+that landed on rung 3 has no occurrence, and its time is the moment
+it arrived. Rung 1 is [`Exif`](OccurredSource::Exif) for a capture
+time read out of an image and [`Record`](OccurredSource::Record)
+for a timestamp the record states; rung 2 is
+[`Mtime`](OccurredSource::Mtime), named for the common case and
+covering whatever the scanner derived from the container; rung 3 is
+[`Import`](OccurredSource::Import). [`resolve_occurrence`] applies
+the ladder and answers both at once, so a parser cannot report a
+rung it did not take.
+
 # Partial success on multi-footprint items
 
 One `RawItem` may yield many footprints (JSONL: one file → many
@@ -11266,6 +11350,10 @@ unreadable in the other direction — the readers in
 no record has the id `L3`, so the body never resolves.
 
 [`RecordAddresses`] is the shared implementation of this rule.
+
+## Functions
+
+- `resolve_occurrence` — The `occurred_at` fallback ladder, applied: the first rung that has
 
 ## Types
 
