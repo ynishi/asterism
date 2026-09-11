@@ -319,10 +319,15 @@ color-thief  = "0.2"
 argon2 = "0.5"
 # OIDC sign-in (#163): the ID token a provider issues is a JWS, and its
 # signature is checked against the provider's published keys — never
-# hand-rolled, for the reason argon2 is not. `rust_crypto` is the
-# pure-Rust backend (RustCrypto's `rsa` / `p256` / `p384`, the same
-# family argon2 comes from); the crate ships no backend by default and
-# the alternative is a C build of AWS-LC, which nothing here wants.
+# hand-rolled, for the reason argon2 is not. The crate ships no backend
+# by default, so one has to be named: `rust_crypto` is RustCrypto's
+# `rsa` / `p256` / `p384`, the same family argon2 comes from, and that
+# family is the whole of why it is this one. The alternative is
+# `aws_lc_rs`, and the native-code rule at the `c2pa` pin below does not
+# rule it out — `aws-lc-sys` vendors what it builds, and this workspace
+# already resolves it through `rustls`. Until 2026-09-11 this comment
+# said it was "a C build of AWS-LC, which nothing here wants", which
+# read as a prohibition and was wrong on both halves.
 # Discovery, PKCE and the code exchange are plain HTTP and JSON and
 # stay on `reqwest`; only the signature check needed a crate.
 jsonwebtoken = { version = "11", default-features = false, features = ["use_pem", "rust_crypto"] }
@@ -356,9 +361,38 @@ rand_chacha = "0.9"
 #
 # `default-features = false` drops two defaults that are wrong here:
 #
-# - `openssl` — a vendored C build, replaced by `rust_native_crypto` so
-#   this workspace keeps one toolchain and no system library to locate.
-#   Exactly one of the two must be on.
+# - `openssl` — replaced by `rust_native_crypto`. Exactly one of the two
+#   must be on.
+#
+#   **The rule this workspace holds about native code**, written here
+#   because this is where it first cost a decision and referred to from
+#   everywhere else it applies: a dependency may not locate a library on
+#   the machine it is built on; a dependency that vendors its own C or
+#   assembly may. What that refuses is `openssl-sys` probing for a
+#   system OpenSSL, `libssh2-sys`, and native-tls reaching for the
+#   platform's own TLS — each makes what a build produces a property of
+#   the machine that ran it, and a user's failure a question about their
+#   machine. What it permits is `ring` and `aws-lc-sys`, which carry
+#   what they need and locate nothing. Both are in this graph: `rustls`
+#   and `rustls-webpki` resolve both providers once their features are
+#   unified across everything here that speaks TLS, and `ring` arrives a
+#   second way through `russh`. That is permitted and not merely
+#   tolerated — nothing here undertakes to get it down to one.
+#
+#   Which is why the rule does not decide this bullet, and saying so is
+#   the point of writing it down: c2pa takes `openssl` with its own
+#   `vendored` feature, so that backend locates nothing either and the
+#   rule allows it. What decides it is that `rust_native_crypto` is the
+#   RustCrypto family the rest of this manifest already reaches for —
+#   the same family `argon2` and `jsonwebtoken`'s backend come from —
+#   and it needs no C build at all.
+#
+#   Until 2026-09-11 this comment said the swap kept the workspace to
+#   "one toolchain". That was never true: `sqlx` has brought
+#   `aws-lc-sys` alongside `ring` since it arrived. The sentence is
+#   recorded here so the next reader does not reinstate a rule this
+#   workspace does not hold, and does not refuse a vendored dependency
+#   on the strength of it.
 # - `default_http` — four HTTP client backends, pulled in for fetching
 #   remote manifests and timestamps. This workspace already pins one
 #   `reqwest` line deliberately (see above), and a local-first exporter

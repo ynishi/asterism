@@ -35,21 +35,16 @@ webpki-roots = "1"
 # channels. Two crates because SFTP is a protocol carried over SSH
 # rather than a part of it, and the split is the upstream authors'.
 #
-# What the choice is actually about is the build, not the language:
-# nothing here may need a library found on the machine it is built on.
-# The alternative in this space is `libssh2-sys`, which locates a system
-# libssh2, and this workspace already refuses that trade for the same
-# reason it builds `c2pa` with `rust_native_crypto`.
+# `russh` rather than `libssh2-sys` because that one locates a system
+# libssh2, which the native-code rule in the root manifest refuses —
+# it is stated at the `c2pa` pin there.
 #
-# Which is why the default features are off. russh's default crypto
-# backend is `aws-lc-rs`, whose `aws-lc-sys` drives a cmake build of
-# AWS-LC; `ring` is the backend russh offers instead and the one the
-# rest of this workspace already resolves. Neither is pure Rust — ring
-# vendors C and assembly from BoringSSL — so the gain is one vendored
-# toolchain instead of two, not an absence of C. `flate2` and `rsa` are
-# the other two defaults, kept because dropping them would drop wire
-# compression and RSA host and client keys, which is a narrower SSH than
-# an agency's host may offer.
+# `ring` rather than russh's default `aws-lc-rs` because it is the
+# provider this crate's own TLS client already resolves, so the transfer
+# crate brings in no backend of its own. `flate2` and `rsa` are russh's
+# other two defaults, kept: dropping them would drop wire compression
+# and RSA host and client keys, which is a narrower SSH than an agency's
+# host may offer.
 russh      = { version = "0.63", default-features = false, features = [
     "ring",
     "flate2",
@@ -60,11 +55,10 @@ russh-sftp = "3"
 # FTP and FTPS. `tokio` selects the async client — the crate ships a
 # blocking one by default, and a blocking socket inside an exporter
 # would hold a runtime thread for the length of an upload.
-# `tokio-rustls-ring` is the TLS backend, and it is rustls over ring so
-# the workspace keeps the one it already pins for `reqwest`; the
-# alternatives on offer are native-tls, which locates the platform's own
-# TLS, and aws-lc-rs, which is the second vendored toolchain the russh
-# paragraph above declines for the same reason.
+# `tokio-rustls-ring` is the TLS backend: rustls over the same `ring`
+# the russh line above names, for the same reason. The other offer is
+# native-tls, which locates the platform's own TLS — refused by the
+# native-code rule in the root manifest.
 suppaftp = { version = "12", default-features = false, features = ["tokio", "tokio-rustls-ring"] }
 
 [dev-dependencies]
