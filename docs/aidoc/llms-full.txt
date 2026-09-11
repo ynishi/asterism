@@ -2786,10 +2786,13 @@ from that day's first instant** — its local midnight, or the end of
 the gap where a zone's rule skipped that midnight — and where that
 falls is the zone's rule for that year: a daylight-saving transition
 moves it without a line of code here noticing. What is deliberately
-not handled, and stated once so nobody looks for it: a day a zone
-repeats or shortens is still 24 hours from its start, and a date a
-zone skipped whole at the date line is a date its calendar does not
-have; nothing here corrects for either.
+not handled, and stated once so nobody looks for it: the window
+[`day_window`] opens for a day a zone repeats or shortens is still
+24 hours from its start (a range cut takes midnight to midnight
+instead, and a zoned row is matched on its calendar day — neither
+reads this window's length), and a date a zone skipped whole at the
+date line is a date its calendar does not have; nothing here
+corrects for either.
 
 ## Functions
 
