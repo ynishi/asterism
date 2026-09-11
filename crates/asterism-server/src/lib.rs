@@ -15,3 +15,4 @@ pub mod mcp;
 pub mod mcp_proxy;
 pub mod release_dirs;
 pub mod state;
+pub mod transfer_profiles;

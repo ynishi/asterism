@@ -879,3 +879,62 @@ pub struct SendReleaseCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
 }
+
+// -----------------------------------------------------------------
+// Destination profiles — the files a send is aimed with.
+// -----------------------------------------------------------------
+
+/// One destination profile, as the transport's own parser reads it.
+///
+/// A profile is a JSON file in a directory, not a row in a table: the
+/// app lists, validates and selects one, and never edits it. An
+/// agency's intake requirements move on that agency's schedule, so the
+/// columns a sidecar carries live in the file and nothing in the tree
+/// knows any of them.
+///
+/// Either the endpoint fields are present or [`error`](Self::error) is
+/// — never both, never neither. A file that does not parse is still
+/// listed, because a file whose error nobody can see is one somebody
+/// edits blind; it simply cannot be picked.
+///
+/// The account and the environment variables its credential is named in
+/// are **not** here, and that is the point rather than an omission.
+/// Nothing resolved from the environment reaches a screen, and a
+/// summary built to be rendered is the last place a secret should pass
+/// through.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TransferProfileDto {
+    /// The file's own name, without the `.json`. What a person picks by.
+    pub name: String,
+    /// Where the file is, so somebody can go and edit it.
+    pub path: String,
+    /// The endpoint's scheme — `sftp`, `ftps`, `ftp` or `file`. Absent
+    /// when the profile did not parse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheme: Option<String>,
+    /// The host the bytes go to. Empty for `file://`, which names none,
+    /// and absent when the profile did not parse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// The directory they land in. Absent when the profile did not
+    /// parse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
+    /// Why this file cannot be sent with, as the parser said it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Every destination profile this machine holds, and where they live.
+///
+/// The directory travels with the list because it is the answer to the
+/// question an empty list raises. It is resolved from a registered
+/// setting against the profile home, which is a thing no frontend can
+/// work out for itself.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TransferProfileListDto {
+    /// The directory that was read.
+    pub directory: String,
+    /// What was in it, by name.
+    pub profiles: Vec<TransferProfileDto>,
+}

@@ -37,6 +37,7 @@
 
 use std::path::{Path, PathBuf};
 
+use asterism_core::application::AppSettingService;
 use asterism_core::error::DomainError;
 
 /// The registry key naming where a release writes its copies.
@@ -44,6 +45,34 @@ pub const OUTPUT_DIR_KEY: &str = "release.output_dir";
 
 /// The registry key naming where destination profiles are read from.
 pub const PROFILE_DIR_KEY: &str = "send.profile_dir";
+
+/// Where the next release writes its copies, read from the registry.
+///
+/// The whole resolution — which key, its JSON string taken apart, and
+/// the empty case — in one call, so a transport asks a question rather
+/// than assembling the answer. Both transports call this; neither
+/// spells the key.
+pub async fn resolved_output_dir(settings: &AppSettingService) -> Result<PathBuf, DomainError> {
+    output_dir(&setting_text(settings, OUTPUT_DIR_KEY).await?)
+}
+
+/// Where destination profiles are read from, read from the registry.
+pub async fn resolved_profile_dir(settings: &AppSettingService) -> Result<PathBuf, DomainError> {
+    profile_dir(&setting_text(settings, PROFILE_DIR_KEY).await?)
+}
+
+/// One `Text` key's resolved value, with the JSON quoting taken off.
+///
+/// A value that is not a JSON string reads as empty rather than as an
+/// error, which puts it on the profile home. The registry already
+/// guarantees the shape — a stored row that stops matching its key's
+/// kind falls back to the default before it gets here — so this is the
+/// arm that never runs, written so that it cannot be the arm that
+/// panics.
+async fn setting_text(settings: &AppSettingService, key: &str) -> Result<String, DomainError> {
+    let row = settings.get(key).await?;
+    Ok(serde_json::from_str::<String>(&row.value_json).unwrap_or_default())
+}
 
 /// What `release.output_dir` falls back to, under the profile home.
 const OUTPUT_DIR_LEAF: &str = "releases";

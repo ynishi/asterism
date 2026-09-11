@@ -98,7 +98,7 @@ use asterism_contract::forge::{
     ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand,
     OpenForgeThreadCommand, PushForgeRoundCommand, ReleaseChangePointCommand,
     RenameForgeLineCommand, RenameForgeThreadCommand, SayInForgeThreadCommand, SendReleaseCommand,
-    SetForgeLineStrategyCommand,
+    SetForgeLineStrategyCommand, TransferProfileListDto,
 };
 use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
@@ -4840,4 +4840,38 @@ pub async fn list_forge_release_sends(
         .of_release(&forge_release_id(&release_id, "release id")?)
         .await?;
     Ok(found.iter().map(forge_send_to_dto).collect())
+}
+
+/// Every destination profile this machine holds, and where they were
+/// read from.
+///
+/// Profiles are JSON files in a directory a registered setting names,
+/// and each is validated with the transport's own parser — a list that
+/// blessed one the send then refused is the failure the listing exists
+/// to prevent. `asterism_server::transfer_profiles` is the whole of it;
+/// this command resolves the directory and hands it over.
+///
+/// A read, so it names no surface. The write it feeds is
+/// [`send_forge_release`], which does.
+#[tauri::command]
+pub async fn list_transfer_profiles(
+    state: State<'_, AppState>,
+) -> Result<TransferProfileListDto, UiError> {
+    let dir =
+        asterism_server::release_dirs::resolved_profile_dir(&state.app_setting_service).await?;
+    Ok(asterism_server::transfer_profiles::list(&dir))
+}
+
+/// Where the next release writes its copies.
+///
+/// [`release_forge_change_point`] takes the directory as an argument,
+/// and the screen calling it cannot work one out: the setting behind it
+/// is empty by default, and empty means the profile home — which is
+/// resolved from the environment and checked against a marker, neither
+/// of which a webview can do. So it asks.
+#[tauri::command]
+pub async fn release_output_dir(state: State<'_, AppState>) -> Result<String, UiError> {
+    let dir =
+        asterism_server::release_dirs::resolved_output_dir(&state.app_setting_service).await?;
+    Ok(dir.display().to_string())
 }
