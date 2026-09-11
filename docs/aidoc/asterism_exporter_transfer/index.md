@@ -114,7 +114,7 @@ absence of anyone to make it.
 Both are recorded on the attempt before the error is returned, so a
 reader of the dispatch sees which refusal it was rather than a
 message alone — and so is every other answer given between reading
-the params and the first successful put, down to a blob that did not
+the params and the first put attempted, down to a blob that did not
 parse. [`refuse`] is the one arm those leave through. On either side
 of that span the shape is different and deliberately so: an action
 this adapter does not take is the SDK's own variant and is answered
