@@ -113,9 +113,13 @@ absence of anyone to make it.
 
 Both are recorded on the attempt before the error is returned, so a
 reader of the dispatch sees which refusal it was rather than a
-message alone — and so is every other answer this adapter gives
-without a handle, down to a params blob that did not parse. [`refuse`]
-is the one arm they all leave through.
+message alone — and so is every other answer given between reading
+the params and the first successful put, down to a blob that did not
+parse. [`refuse`] is the one arm those leave through. On either side
+of that span the shape is different and deliberately so: an action
+this adapter does not take is the SDK's own variant and is answered
+before anything is read, and a put that failed is one row among the
+per-file ones below.
 
 ## The call is recorded per file
 
@@ -127,12 +131,10 @@ through leaves a record of every file either way: the run failed with
 the first error, and what actually landed is a question only the
 record can answer.
 
-The redaction is applied once per exit rather than per message, at
-the two places a record or an error leaves this crate, and it looks
-for everything [`Credentials::secrets`] names. That matters most on
-the arms nothing here composed: a server that refuses a login
-commonly echoes what it was sent, and that text is what the dispatch
-row would otherwise keep.
+The redaction is applied once per exit rather than per message,
+wherever a record or an error leaves this crate, and it looks for
+everything [`Credentials::secrets`] names —
+[`Redaction`](asterism_exporter_common::Redaction) is what it is for.
 
 ## Lifecycle
 
