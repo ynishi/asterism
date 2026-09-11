@@ -25,10 +25,10 @@
 use std::collections::BTreeMap;
 
 use asterism_dispatch_sdk::ExporterError;
-use asterism_exporter_common::{CommonExportAdapter, ResponsePath, TemplateAdapter, TemplateEnv};
+use asterism_exporter_common::{
+    CommonExportAdapter, REDACTED, Redaction, ResponsePath, TemplateAdapter, TemplateEnv,
+};
 use serde_json::Value;
-
-use crate::REDACTED;
 
 /// The placeholder that resolves to the profile's credential.
 const SECRET_PLACEHOLDER: &str = "{{secret}}";
@@ -37,6 +37,7 @@ const SECRET_PLACEHOLDER: &str = "{{secret}}";
 #[derive(Debug, Clone, Default)]
 pub struct SecretGrammar {
     secret: Option<String>,
+    scrub: Redaction,
 }
 
 impl SecretGrammar {
@@ -47,6 +48,7 @@ impl SecretGrammar {
     /// with the old credential and another with the new.
     pub fn new(secret: String) -> Self {
         Self {
+            scrub: Redaction::of([secret.clone()]),
             secret: Some(secret),
         }
     }
@@ -57,7 +59,10 @@ impl SecretGrammar {
     /// `{{secret}}` is refused, and the scrubs become the identity —
     /// there is no value to look for.
     pub fn unauthenticated() -> Self {
-        Self { secret: None }
+        Self {
+            secret: None,
+            scrub: Redaction::none(),
+        }
     }
 
     /// Replaces the auth header's value, and scrubs the credential from
@@ -109,53 +114,23 @@ impl SecretGrammar {
 
     /// Rewrites an error so its message cannot carry the credential.
     ///
-    /// The runner persists an `ExporterError`'s `to_string()` verbatim
-    /// as the dispatch's failure message
-    /// (`asterism_infra::dispatch::runtime`), and that message is handed
-    /// back on every read of the dispatch. A URL with the key in its
-    /// query and a backend that echoes the request both arrive here.
+    /// Reached from three call sites in this adapter, which is why it is
+    /// here rather than at any of them: the runner persists an
+    /// `ExporterError`'s `to_string()` verbatim as the dispatch's
+    /// failure message (`asterism_infra::dispatch::runtime`), and that
+    /// message is handed back on every read of the dispatch.
     pub fn scrub_error(&self, err: ExporterError) -> ExporterError {
-        match err {
-            ExporterError::BackendRejected(message) => {
-                ExporterError::BackendRejected(self.scrub_str(&message))
-            }
-            ExporterError::Other(err) => {
-                ExporterError::Other(anyhow::anyhow!("{}", self.scrub_str(&err.to_string())))
-            }
-            // Neither carries adapter-composed text: both are built from
-            // slugs the core owns.
-            other => other,
-        }
+        self.scrub.error(err)
     }
 
     /// Removes the credential from every string in a JSON document.
     pub fn scrub(&self, value: Value) -> Value {
-        match value {
-            Value::String(s) => Value::String(self.scrub_str(&s)),
-            Value::Array(items) => Value::Array(items.into_iter().map(|v| self.scrub(v)).collect()),
-            Value::Object(fields) => Value::Object(
-                fields
-                    .into_iter()
-                    .map(|(k, v)| (k, self.scrub(v)))
-                    .collect(),
-            ),
-            other => other,
-        }
+        self.scrub.json(value)
     }
 
     /// Scrubs one string.
-    ///
-    /// An empty credential would make this replace every empty
-    /// substring, so it is left alone — an unset variable never gets
-    /// this far (the exporter fails at resolution), and a variable set
-    /// to the empty string is a profile pointing at nothing rather than
-    /// a secret to hide. No credential at all is the same identity, for
-    /// the same reason: there is nothing to look for.
     fn scrub_str(&self, s: &str) -> String {
-        match self.secret.as_deref() {
-            Some(secret) if !secret.is_empty() => s.replace(secret, REDACTED),
-            _ => s.to_string(),
-        }
+        self.scrub.text(s)
     }
 }
 

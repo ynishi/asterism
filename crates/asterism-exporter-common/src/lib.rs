@@ -7,6 +7,12 @@
 //! configured the same way will, and a grammar with two spellings is
 //! worse than either spelling on its own.
 //!
+//! [`redact`] is here on the same terms without being part of a
+//! grammar: an adapter that resolves a credential has to take it back
+//! out of what it wrote down, the rule for doing so is one rule, and a
+//! reader of an attempt record should meet one token for it whichever
+//! adapter wrote the record.
+//!
 //! ## Why not in the SDK
 //!
 //! `asterism-dispatch-sdk` is the port. It publishes the `Exporter`
@@ -55,6 +61,7 @@
 //! ```
 
 pub mod jsonpath;
+pub mod redact;
 pub mod template;
 
 use std::collections::BTreeMap;
@@ -62,6 +69,7 @@ use std::collections::BTreeMap;
 use asterism_dispatch_sdk::ExporterError;
 use serde_json::Value;
 
+pub use redact::{REDACTED, Redaction};
 pub use template::TemplateEnv;
 
 /// The `{{...}}` half of a profile's grammar.
