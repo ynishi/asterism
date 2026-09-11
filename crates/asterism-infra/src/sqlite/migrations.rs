@@ -8015,6 +8015,54 @@ CREATE INDEX idx_forge_send_release ON forge_send(release_id, at DESC);
 CREATE UNIQUE INDEX idx_forge_send_dispatch ON forge_send(dispatch_id);
 "#;
 
+/// V110 — where an asset's `occurred_at` came from, the zone it
+/// happened in, and the calendar day that pair makes.
+///
+/// What the three columns are, and the two rules that read them, is
+/// `asterism_core::domain::asset_zone`; this is the shape they take on
+/// the row.
+///
+/// # `occurred_source`, `NOT NULL DEFAULT 'unknown'`
+///
+/// The one column an existing row cannot be backfilled for: the
+/// importer that wrote it knew whether it had an occurrence or wrote
+/// the import moment, and that knowledge was dropped at the time. So
+/// every row that predates this step reads `'unknown'`, which
+/// `asset_zone` resolves to the occurrence stamp — the reading every
+/// consumer gave those rows before the source was recorded, so nothing
+/// moves. No CHECK, because `ALTER TABLE ADD COLUMN` cannot carry one;
+/// the closed set is enforced where the row is read back, the way
+/// `role` and `fold_policy` are.
+///
+/// # `time_zone`, `NULL`
+///
+/// An IANA name (`Asia/Tokyo`), when a supplier recorded the zone the
+/// thing happened in. `NULL` is the ordinary state and means "read it
+/// in the viewer's zone" — an absence, not a zone. Nothing writes it
+/// yet; the column is here so the local layer of the resolution can
+/// be exercised against real rows before a supplier exists.
+///
+/// # `occurred_local_date`, `NULL`, derived
+///
+/// `YYYY-MM-DD`: the calendar day the row's resolved instant falls on
+/// **in its own zone**. Kept as a column because the day filter cannot
+/// otherwise reach a zoned row — the viewer's window is one pair of
+/// instants, and a row read in a different zone needs a different
+/// pair, one per row. Text rather than an integer because the
+/// predicate that reads it is a string comparison and a `LIKE`
+/// (`'%-MM-DD'` for the day-of-year filter), and ISO dates order
+/// lexically.
+///
+/// Written together with `time_zone` and by the same path, and `NULL`
+/// exactly when `time_zone` is: the entity derives it and never stores
+/// it, so the column cannot disagree with the pair it is computed from
+/// except by hand. No CHECK ties the two for the reason above.
+const V110_ASSET_ZONE: &str = r#"
+ALTER TABLE asset ADD COLUMN occurred_source TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE asset ADD COLUMN time_zone TEXT;
+ALTER TABLE asset ADD COLUMN occurred_local_date TEXT;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -8127,6 +8175,7 @@ const MIGRATIONS: &[Step] = &[
     Step::App(v107_audio_material_mime),
     Step::Sql(V108_FORGE_RELEASE),
     Step::Sql(V109_FORGE_SEND),
+    Step::Sql(V110_ASSET_ZONE),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -12019,6 +12068,82 @@ mod tests {
             )
             .unwrap();
         assert_eq!(nulls, 1, "and the whole table is in that state");
+    }
+
+    /// Seeded at V109, upgraded, then read: the row that predates the
+    /// step must come out saying nobody recorded its source and that it
+    /// carries no zone, because that is what is true of it. A default of
+    /// anything but `'unknown'` — `'record'`, say — would claim a
+    /// provenance the importer never stated, and a stand-in zone would
+    /// put the row on somebody's calendar day for no reason.
+    ///
+    /// Same shape as the V69 test above it, for the same reason: the
+    /// assertions are about the upgrade, so the row is seeded before it.
+    #[test]
+    fn v110_adds_the_source_with_unknown_and_the_zone_pair_as_null() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 109).unwrap();
+        let persona = seed_persona(&conn);
+        let existing = seed_asset(&conn, persona);
+
+        let before: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('asset')")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        for column in ["occurred_source", "time_zone", "occurred_local_date"] {
+            assert!(
+                !before.iter().any(|c| c == column),
+                "V109 has no {column}, so the step below is what adds it: {before:?}"
+            );
+        }
+
+        migrate(&mut conn).unwrap();
+
+        let mut stmt = conn
+            .prepare("SELECT name, type, \"notnull\", dflt_value FROM pragma_table_info('asset')")
+            .unwrap();
+        let described: Vec<(String, String, i64, Option<String>)> = stmt
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let describe = |column: &str| {
+            described
+                .iter()
+                .find(|(name, ..)| name == column)
+                .unwrap_or_else(|| panic!("V110 did not add {column}: {described:?}"))
+        };
+        let (_, kind, notnull, default) = describe("occurred_source");
+        assert_eq!(kind, "TEXT");
+        assert_eq!(
+            *notnull, 1,
+            "the source is always stated, if only as unknown"
+        );
+        assert_eq!(default.as_deref(), Some("'unknown'"));
+        for column in ["time_zone", "occurred_local_date"] {
+            let (_, kind, notnull, default) = describe(column);
+            assert_eq!(kind, "TEXT", "{column}");
+            assert_eq!(
+                *notnull, 0,
+                "{column} is nullable — absence is the ordinary state"
+            );
+            assert_eq!(default.as_deref(), None, "{column} has no default");
+        }
+
+        let (source, zone, local_date): (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT occurred_source, time_zone, occurred_local_date FROM asset WHERE id = ?1",
+                params![existing],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(source, "unknown");
+        assert_eq!((zone, local_date), (None, None));
     }
 
     /// The marker a pre-probe import left on the content axis of a JPEG,

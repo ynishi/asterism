@@ -603,6 +603,16 @@ const KEPT_COLUMNS: &[&str] = &[
     // changing the note's shape, not this list.
     "width_px",
     "height_px",
+    // The time triple (V110), on the rule `occurred_at` follows four
+    // lines up: the keeper's reading of its own time stands, and the
+    // headstone's is recorded. The three travel together — the source
+    // says which stamp the row means, the zone says where, and the
+    // local date is derived from the pair — so absorbing one of them
+    // alone would leave the keeper describing its time in two
+    // different rows' terms.
+    "occurred_source",
+    "time_zone",
+    "occurred_local_date",
 ];
 
 /// The columns a fold neither combines nor compares. See the port doc
