@@ -159,6 +159,19 @@
     }
   }
 
+  /// Whether a profile can be sent with.
+  ///
+  /// `== null` rather than `=== null`, so an absent field and a null
+  /// one are the same answer. The contract says the wire always carries
+  /// one — `TransferProfileDto` explains why it stopped leaving them
+  /// out — and this is the belt: a strict comparison against `null` is
+  /// what made every profile in this picker unpickable the first time,
+  /// and the check is in one place now rather than at each of the three
+  /// sites that ask.
+  function usable(profile: { error: string | null }): boolean {
+    return profile.error == null;
+  }
+
   /// The profile text the send goes out with.
   ///
   /// A picked profile is read from the file by name, and the raw box is
@@ -172,7 +185,7 @@
   const canSend = $derived(
     !sending &&
       destination.trim().length > 0 &&
-      ((chosen !== null && chosen.error === null) ||
+      ((chosen !== null && usable(chosen)) ||
         (chosen === null && rawProfile.trim().length > 0)),
   );
 
@@ -184,17 +197,33 @@
       // the list: the list carries a summary built to be rendered, and
       // the send needs the profile whole — including the auth block the
       // summary deliberately leaves out.
-      const body =
-        chosen !== null
-          ? await api<string>("read_transfer_profile", { name: chosen.name })
-          : rawProfile.trim();
+      //
+      // **Its own arm, because it is not a `mutate`.** This read goes
+      // through `api`, which hands a failure back and says nothing —
+      // right for a read a `Resource` normalises, wrong here, where the
+      // failure means the send did not happen. The first version of
+      // this caught the whole body and left the comment "`mutate` has
+      // already put the refusal on screen", which is true of the send
+      // and false of this: a profile that could not be read produced a
+      // button press with no send, no row and nothing said, which is
+      // exactly the defect `lib/mutate.ts` exists to prevent.
+      let body: string;
+      try {
+        body =
+          chosen !== null
+            ? await api<string>("read_transfer_profile", { name: chosen.name })
+            : rawProfile.trim();
+      } catch (err) {
+        onFlash(`Could not read the profile “${chosen?.name}”: ${String(err)}`, 8000);
+        return;
+      }
       await releaseCatalog.send(release.id, destination.trim(), body);
       destination = "";
       rawProfile = "";
       sendFormOpen = false;
     } catch {
-      // `mutate` has already put the refusal on screen; the form stays
-      // open with what was typed still in it.
+      // The send itself. `mutate` has already put the refusal on
+      // screen; the form stays open with what was typed still in it.
     } finally {
       sending = false;
     }
@@ -264,9 +293,23 @@
           <h3>Files</h3>
           {#if release.files.length === 0}
             {#if releaseCatalog.releaseSettled}
-              <p class="rel-empty">
-                The run finished and wrote no files.
-              </p>
+              <!-- A parked run that wrote nothing is two answers, and
+                   the run says which. "Finished and wrote no files" for
+                   a run that reached the end, the state and its own
+                   message for one that did not — because a release with
+                   no rows after a failure is explained by the failure,
+                   and a screen that called that "finished" would be
+                   hiding the only sentence worth reading. -->
+              {#if releaseCatalog.releaseRun?.state === "done"}
+                <p class="rel-empty">The run finished and wrote no files.</p>
+              {:else}
+                <p class="rel-empty rel-error">
+                  The run {releaseCatalog.releaseRun?.state ?? "stopped"} and wrote
+                  no files{releaseCatalog.releaseRun?.state_message
+                    ? ` — ${releaseCatalog.releaseRun.state_message}`
+                    : ""}.
+                </p>
+              {/if}
             {:else}
               <p class="rel-empty">
                 The copies are being written
@@ -320,7 +363,7 @@
 
           <button
             type="button"
-            class="rel-btn"
+            class="rel-btn rel-send-toggle"
             onclick={toggleSendForm}
           >{sendFormOpen ? "▾" : "▸"} Send…</button>
 
@@ -417,18 +460,18 @@
       {:else}
         <ul class="rel-profiles" role="list">
           {#each profiles.profiles as profile (profile.name)}
-            <li class:unusable={profile.error !== null}>
+            <li class:unusable={!usable(profile)}>
               <label>
                 <input
                   type="radio"
                   name="transfer-profile"
                   value={profile.name}
                   bind:group={pickedProfile}
-                  disabled={profile.error !== null}
+                  disabled={!usable(profile)}
                 />
                 <span class="rel-profile-name">{profile.name}</span>
               </label>
-              {#if profile.error === null}
+              {#if usable(profile)}
                 <span class="quiet">
                   {profile.scheme}{profile.host ? `://${profile.host}` : "://"}{profile.directory}
                 </span>

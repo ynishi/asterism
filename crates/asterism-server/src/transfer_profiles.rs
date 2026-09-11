@@ -250,6 +250,44 @@ mod tests {
         assert_eq!(names, vec!["agency"]);
     }
 
+    /// The shape `e2e/forge-release.spec.ts` writes before it drives
+    /// the app: a `file://` destination, one sidecar column, and no
+    /// `auth` or `host_key` at all.
+    ///
+    /// Pinned here because that spec cannot say why a profile was
+    /// refused any faster than a whole `ui-e2e` run, and a profile it
+    /// writes that this listing will not bless is a failure two layers
+    /// away from its cause.
+    #[test]
+    fn the_shape_the_release_e2e_writes_is_usable() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let destination = tmp.path().join("e2e-sent/1789");
+        write(
+            tmp.path(),
+            "e2e-file-destination.json",
+            &serde_json::json!({
+                "endpoint": format!("file://{}", destination.display()),
+                "sidecar": {
+                    "filename": "metadata.csv",
+                    "columns": [
+                        { "header": "Filename", "template": "{{item.remote_name}}" }
+                    ]
+                }
+            })
+            .to_string(),
+        );
+
+        let listed = list(tmp.path());
+        let profile = &listed.profiles[0];
+        assert_eq!(profile.error, None, "{:?}", profile.error);
+        assert_eq!(profile.scheme.as_deref(), Some("file"));
+        assert_eq!(profile.host.as_deref(), Some(""));
+        assert_eq!(
+            profile.directory.as_deref(),
+            Some(destination.display().to_string().as_str())
+        );
+    }
+
     /// The whole file comes back, because a send needs the `auth`
     /// block the summary leaves out.
     #[test]

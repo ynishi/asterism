@@ -299,6 +299,15 @@ class ReleaseCatalog {
   #watching = new Set<string>();
 
   /// Follows one run until it parks, re-reading the records it writes.
+  ///
+  /// **A run found already parked still costs one re-read.** A release
+  /// is recorded before its files exist and the run that writes them is
+  /// started immediately after, so a fast copy can finish in the gap
+  /// between reading the release and reading its dispatch — leaving a
+  /// record on screen with no file rows and nothing left to fetch them,
+  /// because the poll that would have is never started. The drawer then
+  /// says the copies are on their way forever. One read closes it, and
+  /// it is the read the poll's own tick would have made.
   async watch(dispatchId: string): Promise<void> {
     if (this.#watching.has(dispatchId)) return;
     let dto: DispatchDto;
@@ -309,22 +318,31 @@ class ReleaseCatalog {
       return;
     }
     this.noteDispatch(dto);
-    if (TERMINAL.has(dto.state)) return;
+    if (TERMINAL.has(dto.state)) {
+      await this.reread();
+      return;
+    }
     this.#watching.add(dispatchId);
     try {
       await dispatchCatalog.pollDispatch(dispatchId, async (tick) => {
         this.noteDispatch(tick);
-        // The record, not a copy of it. The runner writes the file
-        // stamps onto the release and the host's answers onto the send's
-        // own row, and re-reading is what makes a reload show the same
-        // thing this does.
-        const open = this.openId;
-        if (open === null) return;
-        await this.release.load({ releaseId: open });
+        await this.reread();
       });
     } finally {
       this.#watching.delete(dispatchId);
     }
+  }
+
+  /// Reads the release again, if one is open.
+  ///
+  /// The record, not a copy of it. The runner writes the file stamps
+  /// onto the release and the host's answers onto the send's own
+  /// dispatch row; nothing pushes either anywhere, so reading again is
+  /// the only thing that makes this drawer and a reload agree.
+  async reread(): Promise<void> {
+    const open = this.openId;
+    if (open === null) return;
+    await this.release.load({ releaseId: open });
   }
 
   /// Keeps one dispatch row.

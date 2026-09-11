@@ -134,6 +134,38 @@ describe("opening a release", () => {
     expect(releaseCatalog.releaseSettled).toBe(true);
   });
 
+  /// **The run can finish in the gap between the two reads.** A release
+  /// is recorded before its files exist and its run starts immediately
+  /// after, so a fast copy parks between the read of the record and the
+  /// read of the dispatch. The poll that would have re-read the record
+  /// is then never started, and the first version of this store left
+  /// the drawer saying the copies were on their way forever — which is
+  /// what `forge-release.spec.ts` failed on. Finding a run parked costs
+  /// one re-read, which is the read the poll's own tick would have
+  /// made.
+  it("re-reads the record when it finds the run already parked", async () => {
+    vi.spyOn(dispatchCatalog, "pollDispatch").mockResolvedValue(undefined);
+    // The first read is the record as it was written: no files yet.
+    // The second is what the run left behind.
+    let reads = 0;
+    apiMock.mockImplementation((async (cmd: string) => {
+      if (cmd === "get_forge_release") {
+        reads += 1;
+        return reads === 1
+          ? release("r1")
+          : release("r1", [stampedFile("/out/a.png")]);
+      }
+      if (cmd === "list_forge_release_sends") return [];
+      if (cmd === "get_dispatch") return dispatch("r1-run", "done");
+      throw new Error(`unexpected read: ${cmd}`);
+    }) as unknown as typeof api);
+
+    await releaseCatalog.open("r1");
+
+    expect(reads).toBe(2);
+    expect(releaseCatalog.release.data?.files).toHaveLength(1);
+  });
+
   /// The other half of the same rule, and the one that matters on the
   /// first frame: a release is recorded before its files exist, so the
   /// run is still going and the drawer has to be told when to look

@@ -902,26 +902,38 @@ pub struct SendReleaseCommand {
 /// Nothing resolved from the environment reaches a screen, and a
 /// summary built to be rendered is the last place a secret should pass
 /// through.
+/// # Absent is written as `null`, not left out
+///
+/// None of the four optional fields carries `skip_serializing_if`, and
+/// that is deliberate rather than an omission. `schema-bridge` projects
+/// an `Option<String>` as `string | null`, so a field dropped from the
+/// payload arrives in TypeScript as `undefined` while the binding says
+/// it cannot be — and `error !== null` is then true for a profile that
+/// has no error at all. That is not hypothetical: it shipped, and every
+/// profile in the picker came up refused and unpickable because of it.
+/// The wire says `null` so that the type the frontend is compiled
+/// against is the type it receives.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct TransferProfileDto {
     /// The file's own name, without the `.json`. What a person picks by.
     pub name: String,
     /// Where the file is, so somebody can go and edit it.
     pub path: String,
-    /// The endpoint's scheme — `sftp`, `ftps`, `ftp` or `file`. Absent
+    /// The endpoint's scheme — `sftp`, `ftps`, `ftp` or `file`. Null
     /// when the profile did not parse.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub scheme: Option<String>,
     /// The host the bytes go to. Empty for `file://`, which names none,
-    /// and absent when the profile did not parse.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// and null when the profile did not parse.
+    #[serde(default)]
     pub host: Option<String>,
-    /// The directory they land in. Absent when the profile did not
+    /// The directory they land in. Null when the profile did not
     /// parse.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub directory: Option<String>,
-    /// Why this file cannot be sent with, as the parser said it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Why this file cannot be sent with, as the parser said it. Null
+    /// when it can.
+    #[serde(default)]
     pub error: Option<String>,
 }
 
