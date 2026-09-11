@@ -40,7 +40,7 @@ the number of packages.
 - 692 entries under MIT License
 - 25 entries under Apache License 2.0
 - 23 entries under Unicode License v3
-- 21 entries under ISC License
+- 20 entries under ISC License
 - 18 entries under BSD 3-Clause "New" or "Revised" License
 - 9 entries under BSD 2-Clause "Simplified" License
 - 6 entries under Mozilla Public License 2.0
@@ -3207,7 +3207,6 @@ pub fn eddsa_digest(signature_r: &[u8], public_key: &[u8], msg: &[u8]) -> digest
 
 Used by:
 
-- [untrusted 0.7.1](https://github.com/briansmith/untrusted)
 - [untrusted 0.9.0](https://github.com/briansmith/untrusted)
 
 ```

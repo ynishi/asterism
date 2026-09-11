@@ -25,7 +25,8 @@ tokio       = { workspace = true }
 
 # The root certificates an FTPS send trusts. The Mozilla set rather than
 # the platform's store, so what a send trusts is not a property of the
-# machine it ran on — the same choice `reqwest` is pinned with above.
+# machine it ran on — the same choice the root manifest's `reqwest` pin
+# makes, for the reason recorded there.
 webpki-roots = "1"
 
 # SSH and its SFTP subsystem, pure Rust. `russh` speaks the transport
@@ -37,7 +38,19 @@ webpki-roots = "1"
 # in this space is `libssh2-sys`, a C build with a system library to
 # locate, and this workspace already refuses that trade for the same
 # reason it builds `c2pa` with `rust_native_crypto`.
-russh      = "0.63"
+#
+# Which is why the default features are off. russh's default crypto
+# backend is `aws-lc-rs`, whose `aws-lc-sys` is exactly the C build the
+# paragraph above declines; `ring` is the backend russh offers instead
+# and the one this workspace already resolves elsewhere. `flate2` and
+# `rsa` are the other two defaults, kept because dropping them would
+# drop wire compression and RSA host and client keys, which is a
+# narrower SSH than an agency's host may offer.
+russh      = { version = "0.63", default-features = false, features = [
+    "ring",
+    "flate2",
+    "rsa",
+] }
 russh-sftp = "3"
 
 # FTP and FTPS, pure Rust. `tokio` selects the async client — the crate
