@@ -115,7 +115,7 @@
     {
       "path": "asterism_exporter_transfer::transport::Credentials",
       "kind": "struct",
-      "docs": "What the far side is asked to accept as proof of who is calling.\n\nValues, resolved per call from the environment variables the profile\nnamed. Nothing here is ever written to a row: the profile carries the\nnames and the attempt record repeats the names, and\n[`Redaction`](asterism_exporter_common::Redaction) takes the values\nback out of anything an implementation composed from them."
+      "docs": "What the far side is asked to accept as proof of who is calling.\n\nValues, resolved per call from the environment variables the profile\nnamed. What reaches a row is the *names*: the profile carries them\nand the attempt record repeats them, so a reader can tell which\nprofile was in play without the value being anywhere.\n\n[`user`](Self::user) is the exception and is on the attempt record on\npurpose — an account name is what a reader needs to know which login\nwas refused, and it is not a secret. Everything\n[`secrets`](Self::secrets) returns is taken back out by\n[`Redaction`](asterism_exporter_common::Redaction) before any record\nor error text is written down."
     },
     {
       "path": "asterism_exporter_transfer::transport::HostKey",

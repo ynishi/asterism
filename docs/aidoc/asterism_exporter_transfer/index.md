@@ -5,10 +5,10 @@
 One adapter for the one channel every stock agency sanctions for a
 batch: the files on the agency's host over SFTP, FTPS or FTP, with a
 CSV sidecar beside them. The scheme in the profile's endpoint chooses
-which — one crate for three protocols, the way
+which — one crate for all of them, the way
 [`asterism_exporter_http`] is one crate for hosted and self-hosted
 job APIs, because a host, a credential and a directory layout are the
-whole of what differs.
+whole of what differs. [`Scheme`] is the list.
 
 ## What it sends, and what it does not
 
@@ -52,14 +52,19 @@ the library's own unstamped originals.
 ```
 
 - `endpoint` — `<scheme>://<host>[:<port>][/<dir>]`. The scheme
-  chooses the protocol; see [`transport::read_endpoint`] for the
-  grammar and for why an endpoint carries no account.
+  chooses the protocol, and the schemes are `sftp`, `ftps`, `ftp` and
+  `file`; [`Scheme`] is where each says what it costs, and
+  [`transport::read_endpoint`] has the grammar and the reason an
+  endpoint carries no account.
 - `auth` — the account, and the *names* of the environment variables
   the credential is read from. Absent means the server takes an
   anonymous login, which is the FTP shape and not much else.
 - `host_key` — what the far side's key has to be. Required for
-  `sftp://` and meaningless for the rest, which authenticate their
-  host through TLS or not at all.
+  `sftp://`. The other schemes authenticate their host through TLS or
+  not at all, so a well-formed `host_key` beside one of them is
+  ignored — but a malformed one is refused whichever scheme it sits
+  with, because it is read before the scheme is consulted and naming
+  neither or both of its two forms is a profile that has not decided.
 - `allow_insecure` — permission to speak `ftp://`, where the
   credential and the bytes cross the network in the clear.
 - `remote_name_template` — what each file is called on the far side.
@@ -89,7 +94,9 @@ length: params are persisted unedited and handed back on every read
 of the dispatch, so a value reachable by `{{params.…}}` is readable
 by anything that can list dispatches. `key_ref` is the same rule one
 step along — it names a variable holding the key's *location*, so
-neither the key nor the path to it is on a row.
+neither the key nor the path to it is on a row. The path is scrubbed
+alongside the password and the passphrase rather than trusted to stay
+out of a message: [`Credentials::secrets`] is that list.
 
 ## Two refusals that happen before anything is sent
 
@@ -106,7 +113,9 @@ absence of anyone to make it.
 
 Both are recorded on the attempt before the error is returned, so a
 reader of the dispatch sees which refusal it was rather than a
-message alone.
+message alone — and so is every other answer this adapter gives
+without a handle, down to a params blob that did not parse. [`refuse`]
+is the one arm they all leave through.
 
 ## The call is recorded per file
 
@@ -117,6 +126,13 @@ reader can tell which profile was in play. A put that failed part way
 through leaves a record of every file either way: the run failed with
 the first error, and what actually landed is a question only the
 record can answer.
+
+The redaction is applied once per exit rather than per message, at
+the two places a record or an error leaves this crate, and it looks
+for everything [`Credentials::secrets`] names. That matters most on
+the arms nothing here composed: a server that refuses a login
+commonly echoes what it was sent, and that text is what the dispatch
+row would otherwise keep.
 
 ## Lifecycle
 
