@@ -10,6 +10,36 @@ and this project adheres to
 
 ### Added
 
+- **A release and its sends have a screen** (#280, part of #13, split from
+  #254). The two verbs above landed with no surface, and the two records that
+  answer after the fact — which half of the disclosure landed on each copy, and
+  what the host said about each file — had no reader at all. Each change point
+  in the forge's history tab now carries **write out…**, and a point that has
+  been written out carries a count that opens the newest of its releases. The
+  **Release view** is where everything after that verb lives: the files section
+  gives one row per copy with both halves of its stamp, the sends section one
+  row per send that expands to one line per file with the host's own answer, and
+  the send fold-out picks a destination. **A partial send is labelled by its
+  refusals** — "9 put · 1 refused", never rounded to done — because which file a
+  reader has to go and look at is the question a single verdict for the batch
+  destroys. **The absence of a signature is stated as absence**: with no
+  certificate configured every row reads "not signed — no certificate
+  configured", which is a different thing from a stamp that failed and is worded
+  so that it cannot be read as one. **Destinations are files**: a profile is one
+  JSON file in a directory, listed and validated with the transport's own parser
+  — so a profile the picker offers is not one the send can refuse on its shape —
+  and the app never edits one, because an agency's intake moves on that agency's
+  schedule and a form over it would put somebody else's policy in this tree. A
+  profile that does not parse is listed with its reason and cannot be picked.
+  **Nothing resolved from the environment reaches the screen**: a profile names
+  environment variables and the list shows the names. Two settings join the
+  preferences screen, `release.output_dir` and `send.profile_dir`, both empty by
+  default, which means the profile home's own directory. Progress is read back
+  off the records rather than held beside them, so a reload shows what a run
+  actually did. **The generative-AI declaration is still the contributor's
+  step** and the screen says so under the send button; no uploader anywhere
+  ticks that box, and this one names no agency.
+
 - **A release can be sent to an agency's host** (#278, part of #13, split from
   #254). A release left a stamped set on a disk and stopped there. Sending one
   puts exactly those files — the copies the release stamped, by the paths it
@@ -33,10 +63,10 @@ and this project adheres to
   dispatch with nothing sent — there is no prompt, because a dispatch runs with
   nobody in front of it. Nothing is minted for what left: a copy on somebody
   else's host is the same content, and an asset per remote copy would double the
-  library. **No button yet** — the verb is reachable over HTTP and the Tauri
-  binding, and a surface is its own change. **Nothing reads a submission back**,
-  either: no agency offers it, and a rejection is something somebody types into
-  a thread.
+  library. The verb was reachable over HTTP and the Tauri binding and had no
+  surface; #280 above is the change that gave it one. **Nothing reads a
+  submission back**, either: no agency offers it, and a rejection is something
+  somebody types into a thread.
 
 - **A change point can be released** (#276, part of #13, split from #254). A
   line could be worked and closed and nothing could hand what it held to
@@ -55,8 +85,8 @@ and this project adheres to
   whose state has nothing live on it is refused rather than exported empty.
   **Nothing is signed yet**: with no certificate configured the manifest half is
   skipped, per file and visibly, which is the state every install starts in and
-  the one #179 is about. **No button yet** either — the verb is reachable over
-  HTTP and the Tauri binding, and a surface is its own change.
+  the one #179 is about. This verb had no surface either, and #280 above is
+  where it got one.
 
 - **A vocabulary for what a file already discloses** (#18). The write side could
   say what it put into a file; nothing could say what is in one now. `Carried`
