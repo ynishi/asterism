@@ -2,8 +2,10 @@
 
 use std::path::Path;
 
-use asterism_importer_sdk::{Footprint, FootprintSource, ParseError, RawItem, SourceParser, Tape};
-use chrono::Utc;
+use asterism_importer_sdk::{
+    Footprint, FootprintSource, OccurredSource, ParseError, RawItem, SourceParser, Tape,
+    resolve_occurrence,
+};
 
 pub struct TapeParser {
     platform: Option<String>,
@@ -48,6 +50,10 @@ impl SourceParser for TapeParser {
             .and_then(serde_json::Value::as_u64)
             .or(Some(item.payload.len() as u64));
 
+        // A tape states no timestamp of its own, so the ladder starts
+        // at the file's mtime and falls to the import moment.
+        let (occurred_at, occurred_source) =
+            resolve_occurrence(None, OccurredSource::Record, item.occurred_at);
         Ok(vec![Footprint::Tape(Tape {
             source: FootprintSource {
                 kind: item.source_kind,
@@ -55,8 +61,8 @@ impl SourceParser for TapeParser {
                 platform: self.platform.clone(),
                 external_id: None,
             },
-            occurred_at: item.occurred_at.unwrap_or_else(Utc::now),
-            occurred_source: Default::default(),
+            occurred_at,
+            occurred_source,
             title: Some(title),
             excerpt,
             // Tape is a non-Dialog modality — the file stem drives
@@ -101,5 +107,14 @@ mod tests {
         assert_eq!(spec.register_note.as_deref(), Some("rin-202607-00080"));
         assert_eq!(spec.cover_hint.as_deref(), Some("❯ hello"));
         assert!(spec.labels.contains(&"tape".to_string()));
+        // A tape states no stamp and this item came with no mtime, so
+        // the parser wrote the import moment and the spec says so —
+        // the fact the server reads to treat the row's time as its
+        // arrival. `time_zone` is `None` from every parser today.
+        assert_eq!(
+            spec.occurred_source,
+            asterism_importer_sdk::OccurredSource::Import
+        );
+        assert_eq!(spec.time_zone, None);
     }
 }

@@ -27,10 +27,10 @@
 use std::path::PathBuf;
 
 use asterism_importer_sdk::{
-    Footprint, FootprintSource, Image, ParseError, RawItem, SIDECAR_SUFFIX, SourceParser,
+    Footprint, FootprintSource, Image, OccurredSource, ParseError, RawItem, SIDECAR_SUFFIX,
+    SourceParser, resolve_occurrence,
 };
 use asterism_media_probe::{coded_dims_with_exif, exif_fields};
-use chrono::Utc;
 use serde_json::json;
 
 /// What the parser declares when it finds a sidecar. The server
@@ -72,11 +72,13 @@ impl SourceParser for ImageParser {
         // fall back to file mtime".
         let exif_fields = exif_fields(&item.payload);
 
-        let occurred_at = exif_fields
-            .as_ref()
-            .and_then(|f| f.datetime_original)
-            .or(item.occurred_at)
-            .unwrap_or_else(Utc::now);
+        // The ladder, with its rung recorded: the capture time out of
+        // EXIF, then the file's mtime, then the import moment.
+        let (occurred_at, occurred_source) = resolve_occurrence(
+            exif_fields.as_ref().and_then(|f| f.datetime_original),
+            OccurredSource::Exif,
+            item.occurred_at,
+        );
         // EXIF is present on camera-origin files (JPEG / HEIC / TIFF)
         // but absent on most PNG screenshots, GIF, BMP, AI-generated
         // AVIF, etc. The probe falls back to a cheap header-only decode
@@ -130,7 +132,7 @@ impl SourceParser for ImageParser {
                 external_id: None,
             },
             occurred_at,
-            occurred_source: Default::default(),
+            occurred_source,
             // Standalone image import — no conversation container.
             external_session_key: None,
             alt,
@@ -346,6 +348,42 @@ mod tests {
     // `asterism-media-probe` with the function they exercise. What stays
     // in this file is the wiring: that `parse` reaches for the probe at
     // all, and which evidence it prefers when both are available.
+
+    /// The rung the stamp came from travels with it. A PNG carries no
+    /// EXIF, so the file's mtime is the best rung available and is
+    /// named; without an mtime the parser writes the import moment and
+    /// says so — which is the fact the server reads to treat that
+    /// row's time as its arrival rather than as an occurrence.
+    #[test]
+    fn the_rung_the_stamp_came_from_is_recorded() {
+        use asterism_importer_sdk::OccurredSource;
+        let parser = ImageParser::new(None);
+        let mtime = chrono::DateTime::from_timestamp_millis(1_700_000_000_000).unwrap();
+        let with_mtime = RawItem {
+            source_kind: "fs".into(),
+            locator: "/tmp/screenshot.png".into(),
+            payload: encode(4, 4, ImageFormat::Png),
+            occurred_at: Some(mtime),
+            extra: json!({}),
+        };
+        let Footprint::Image(img) = &parser.parse(with_mtime).unwrap()[0] else {
+            panic!("first footprint should be Image")
+        };
+        assert_eq!(img.occurred_at, mtime);
+        assert_eq!(img.occurred_source, OccurredSource::Mtime);
+
+        let without = RawItem {
+            source_kind: "fs".into(),
+            locator: "/tmp/screenshot.png".into(),
+            payload: encode(4, 4, ImageFormat::Png),
+            occurred_at: None,
+            extra: json!({}),
+        };
+        let Footprint::Image(img) = &parser.parse(without).unwrap()[0] else {
+            panic!("first footprint should be Image")
+        };
+        assert_eq!(img.occurred_source, OccurredSource::Import);
+    }
 
     #[test]
     fn parser_emits_dims_for_exif_less_png() {

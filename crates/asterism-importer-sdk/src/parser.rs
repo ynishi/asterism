@@ -290,4 +290,30 @@ mod tests {
             Some("records dropped: 2 of 3 carried no id of their own (/logs/s.jsonl)"),
         );
     }
+
+    /// Top rung wins and names itself; the container rung is always
+    /// `Mtime`; and nothing on either rung is the import moment, which
+    /// is the only way a parser can land on `Import` — so the stamp and
+    /// the rung cannot disagree.
+    #[test]
+    fn the_ladder_answers_the_stamp_and_its_rung_together() {
+        let record = DateTime::from_timestamp_millis(1_000).unwrap();
+        let container = DateTime::from_timestamp_millis(2_000).unwrap();
+        assert_eq!(
+            resolve_occurrence(Some(record), OccurredSource::Exif, Some(container)),
+            (record, OccurredSource::Exif)
+        );
+        assert_eq!(
+            resolve_occurrence(Some(record), OccurredSource::Record, None),
+            (record, OccurredSource::Record)
+        );
+        assert_eq!(
+            resolve_occurrence(None, OccurredSource::Record, Some(container)),
+            (container, OccurredSource::Mtime)
+        );
+        let before = Utc::now();
+        let (at, source) = resolve_occurrence(None, OccurredSource::Record, None);
+        assert_eq!(source, OccurredSource::Import);
+        assert!(at >= before && at <= Utc::now());
+    }
 }

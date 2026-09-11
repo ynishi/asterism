@@ -702,7 +702,10 @@ pub async fn paste_image_import(
         // extension — not a semantic classification.
         modality: None,
         occurred_at_ms: now.timestamp_millis(),
-        occurred_source: Default::default(),
+        // A paste has no occurrence: the stamp above is the moment of
+        // the paste, which is the import rung, and the server reads the
+        // row's time as its arrival accordingly.
+        occurred_source: asterism_contract::command::OccurredSource::Import,
         time_zone: None,
         session_id: None,
         // `external_session_key` was added alongside `session_id`;
@@ -4508,7 +4511,9 @@ impl asterism_teams_client::clone::Imports for LocalLibrary<'_> {
                     // from the file.
                     modality: None,
                     occurred_at_ms: arrival.occurred_at.timestamp_millis(),
-                    occurred_source: Default::default(),
+                    // `Arrival::occurred_at` is when the copy was
+                    // taken, by its own doc — the import rung.
+                    occurred_source: asterism_contract::command::OccurredSource::Import,
                     time_zone: None,
                     session_id: None,
                     external_session_key: None,

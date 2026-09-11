@@ -23,9 +23,9 @@
 use std::path::PathBuf;
 
 use asterism_importer_sdk::{
-    Doc, DocFormat, Footprint, FootprintSource, ParseError, RawItem, SourceParser,
+    Doc, DocFormat, Footprint, FootprintSource, OccurredSource, ParseError, RawItem, SourceParser,
+    resolve_occurrence,
 };
-use chrono::Utc;
 use serde_json::json;
 
 /// How much of the document to carry as the excerpt.
@@ -116,6 +116,11 @@ impl SourceParser for TextParser {
             "word_count": word_count,
         });
 
+        // Nothing in the text states when it was written, so the
+        // ladder starts at the file's mtime and falls to the import
+        // moment.
+        let (occurred_at, occurred_source) =
+            resolve_occurrence(None, OccurredSource::Record, item.occurred_at);
         Ok(vec![Footprint::Doc(Doc {
             source: FootprintSource {
                 kind: item.source_kind,
@@ -127,8 +132,8 @@ impl SourceParser for TextParser {
             // here as an ordinary document: `Doc` carries no
             // `derived_from`, which the SDK places on the three media
             // variants and says why beside them.
-            occurred_at: item.occurred_at.unwrap_or_else(Utc::now),
-            occurred_source: Default::default(),
+            occurred_at,
+            occurred_source,
             title: Some(title),
             excerpt,
             format,
@@ -287,6 +292,13 @@ mod tests {
         assert_eq!(d.excerpt, "First we look, then we decide.");
         assert!(d.labels.iter().any(|l| l == "document"));
         assert!(d.labels.iter().any(|l| l == "md"));
+        // Nothing in the text states when it was written and the
+        // fixture item carries no mtime, so the stamp is the import
+        // moment and the rung says so.
+        assert_eq!(
+            d.occurred_source,
+            asterism_importer_sdk::OccurredSource::Import
+        );
     }
 
     #[test]
