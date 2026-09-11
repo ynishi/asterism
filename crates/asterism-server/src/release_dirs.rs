@@ -15,7 +15,8 @@
 //! `$ASTERISM_HOME` and `$ASTERISM_PROFILE`, differs between two
 //! processes of the same build, and is verified against a marker on the
 //! way out. There is nothing to write into the registry, so the empty
-//! string is what it writes, and it means "the profile home's own".
+//! string is what it writes, and it means the leaf this module gives
+//! that key under the profile home — `releases/` or `transfer/`.
 //!
 //! That convention needs exactly one reader, or it becomes two
 //! resolvers that disagree the first time somebody changes the leaf
@@ -49,8 +50,7 @@ pub const PROFILE_DIR_KEY: &str = "send.profile_dir";
 ///
 /// The whole resolution — which key, its JSON string taken apart, and
 /// the empty case — in one call, so a transport asks a question rather
-/// than assembling the answer. Both transports call this; neither
-/// spells the key.
+/// than assembling the answer, and none of them spells the key.
 pub async fn resolved_output_dir(settings: &AppSettingService) -> Result<PathBuf, DomainError> {
     output_dir(&setting_text(settings, OUTPUT_DIR_KEY).await?)
 }
@@ -104,7 +104,8 @@ fn resolve(setting: &str, leaf: &str) -> Result<PathBuf, DomainError> {
     }
 }
 
-/// The path the setting names, or `None` for "the profile home's own".
+/// The path the setting names, or `None` for this key's leaf under the
+/// profile home.
 ///
 /// Split out from [`resolve`] because it is the half worth testing: the
 /// other half reads the environment, and a test that drove it would be

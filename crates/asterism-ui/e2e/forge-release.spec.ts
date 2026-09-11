@@ -28,12 +28,12 @@
 //
 // # What this proves that no assertion below the webview can
 //
-// That the stamp rows reach a screen and say what the record says. The
-// composition root builds the disclosure writer `unsigned()`, so every
-// copy reports the manifest half skipped for `no_signing_identity` —
-// and the whole point of the wording work in `ReleaseView` is that this
-// reads as "not signed — no certificate configured" rather than as a
-// failure. Nothing but a rendered row can check that.
+// That the stamp rows reach a screen and say what the record says. A
+// build with no certificate configured reports the manifest half
+// skipped for `no_signing_identity` on every copy — and the whole point
+// of the wording work in `ReleaseView` is that this reads as "not
+// signed — no certificate configured" rather than as a failure. Nothing
+// but a rendered row can check that.
 //
 // # Why the destination is `file://`
 //
@@ -89,6 +89,7 @@
 import { browser } from "@wdio/globals";
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 
 const DRIVER_MS = 15_000;
@@ -133,25 +134,82 @@ const PACK_ID = "e2e-forge-release";
 const PERSONA_NAME = "Forge releases";
 const COVER = "e2e-forge-release-fixture";
 
-/// A real 1×1 PNG: one fully transparent RGBA pixel.
+/// CRC-32 as PNG spells it, over a chunk's type and body.
 ///
-/// **Where these bytes came from.** They are a PNG encoder's minimal
-/// output for a 1×1 RGBA image with every channel zero — signature,
-/// `IHDR`, a single-pixel `IDAT` and `IEND`, generated for this fixture
-/// and not taken from any test corpus or sample set. Nothing here is
-/// third-party material, so there is no licence or notice travelling
-/// with it; PUBLIC_DEVELOPMENT.md asks that a file which did not
-/// originate here say where it came from, and this one says that it
-/// originated here.
+/// Written out rather than taken from a crate, for the reason
+/// `asterism-exporter-transfer` writes its own CSV quoting: the whole
+/// of what this file needs from CRC-32 is one table and one loop, and
+/// nothing here reads a checksum back.
+const CRC_TABLE = (() => {
+  const table = new Int32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) {
+      c = (c & 1) !== 0 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c;
+  }
+  return table;
+})();
+
+function crc32(bytes: Buffer): number {
+  let c = -1;
+  for (const byte of bytes) {
+    c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
+  }
+  return (c ^ -1) >>> 0;
+}
+
+/// One PNG chunk: length, type, body, CRC over type and body.
+function pngChunk(type: string, body: Buffer): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(body.length);
+  const typed = Buffer.concat([Buffer.from(type, "ascii"), body]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(typed));
+  return Buffer.concat([length, typed, crc]);
+}
+
+/// A 1×1 8-bit RGBA PNG whose one pixel is fully transparent.
 ///
-/// A real container rather than a placeholder with a `.png` on it,
-/// because the whole point of the rows this spec reads is what the
-/// disclosure writer did to the copy — and it has to open the file to
-/// do anything at all. Held as base64 so the fixture is one constant
-/// rather than a binary the repository would be redistributing.
-const ONE_PIXEL_PNG =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAE" +
-  "hQGAhKmMIQAAAABJRU5ErkJggg==";
+/// **Built here rather than held as a literal, and that is the point.**
+/// It was a base64 constant, described in this comment as one fully
+/// transparent pixel. It was not: the IDAT inflated to
+/// `01 ff 00 00 7f` — a Sub filter and a half-opaque red pixel — so the
+/// statement about where the bytes came from rested on a description
+/// they contradicted, which is the one thing a provenance note may not
+/// do. Bytes nobody in this repository can read are bytes nobody can
+/// check.
+///
+/// Constructed, there is nothing to be wrong about: signature, `IHDR`
+/// (1×1, 8-bit, colour type 6), one `IDAT` holding a single scanline of
+/// filter type 0 followed by four zero channels, and `IEND`. Every byte
+/// originates here, so no licence, notice or attribution travels with
+/// it and PUBLIC_DEVELOPMENT.md's question about third-party material
+/// has no subject.
+///
+/// A real container rather than a placeholder named `.png`, because
+/// what the rows this spec reads are *about* is what the disclosure
+/// writer did to the copy, and it has to open the file to do anything
+/// at all.
+function onePixelPng(): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(1, 0); // width
+  ihdr.writeUInt32BE(1, 4); // height
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // colour type 6 — truecolour with alpha
+  ihdr[10] = 0; // compression: deflate, the only one PNG defines
+  ihdr[11] = 0; // filter method: adaptive, the only one PNG defines
+  ihdr[12] = 0; // not interlaced
+  // The scanline: one filter byte (0 = None) and R, G, B, A all zero.
+  const idat = zlib.deflateSync(Buffer.from([0, 0, 0, 0, 0]));
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", idat),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
 
 async function http<T>(method: string, route: string, body?: unknown): Promise<T> {
   const response = await fetch(`${BASE_URL}${route}`, {
@@ -189,7 +247,7 @@ function writeFixtureFile(): string {
   // spec that reads the bytes, and a zero-length or truncated leftover
   // from an interrupted run would fail the stamp rather than the copy —
   // a slower failure to read than simply writing 70 bytes again.
-  fs.writeFileSync(file, Buffer.from(ONE_PIXEL_PNG, "base64"));
+  fs.writeFileSync(file, onePixelPng());
   return file;
 }
 

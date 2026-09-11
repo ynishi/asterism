@@ -242,8 +242,13 @@
     try {
       await releaseCatalog.writeOut(current.id, point.id, persona);
     } catch {
-      // `mutate` has put the refusal on screen already. The chain stays
-      // where it was.
+      // Swallowed because the refusal is already on screen, by
+      // whichever of the two routes raised it: `mutate` puts a
+      // backend's refusal there, and the store puts its own there
+      // before it ever invokes anything when the output directory
+      // could not be read. Neither leaves this to the caller, which is
+      // why there is nothing to do here but keep the chain where it
+      // was.
     }
   }
 

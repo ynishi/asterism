@@ -222,32 +222,42 @@ pub struct ProfileFacts {
 /// struct. A profile this accepts and the send then refuses on its
 /// shape is therefore not a state these two can be in.
 ///
-/// It mirrors the send up to and including the scheme check and the
-/// sidecar's filename: the endpoint is read, the host key is checked
-/// for naming one thing rather than neither or both, `ftp://` without
-/// the opt-in and `sftp://` without a host key are refused, and
-/// [`check_remote_name`] answers for `sidecar.filename` — a name with a
-/// separator in it is a profile that would be refused the moment it was
-/// chosen, and that check needs no file list to run.
+/// What it runs is **the send's profile-only checks, in the send's
+/// order**: the endpoint is read, the host key is checked for naming
+/// one thing rather than neither or both, `ftp://` without the opt-in
+/// and `sftp://` without a host key are refused, and
+/// [`check_remote_name`] answers for `sidecar.filename`.
 ///
-/// Two things past that are the dispatch's and are **not** checked
-/// here, each for its own reason.
+/// Not a prefix of the send, which is worth saying because it reads
+/// like one. `dispatch` resolves credentials straight after the scheme
+/// check, and `plan_send` refuses an empty file list before it reaches
+/// the sidecar's name — so this skips over both and picks up the next
+/// check a profile can answer for on its own. What is left out is what
+/// a profile's own text cannot decide.
 ///
-/// **Credentials.** `auth` names environment variables rather than
-/// holding values, and reading them here would put a resolved secret
-/// one step away from a list that exists to be rendered; a variable
-/// that is not set is the dispatch's refusal to make, at the moment
-/// somebody asked for the send.
+/// **Credentials**, which are bound to the environment. `auth` names
+/// variables rather than holding values, and reading them here would
+/// put a resolved secret one step away from a list that exists to be
+/// rendered; a variable that is not set is the dispatch's refusal to
+/// make, at the moment somebody asked for the send.
 ///
-/// **The template plan.** `remote_name_template` and every sidecar
-/// column render against a bound item — a file of the release, and the
-/// card it was copied from — so whether they resolve is a question
-/// about a release rather than about a profile, and there is no release
-/// in hand when a directory is listed. A profile whose templates do not
-/// render is therefore listed as usable and refused by the send, which
-/// is the one gap left between this and `dispatch` and is left open
-/// deliberately rather than answered with a guess against an empty
-/// item.
+/// **The template plan**, which is bound to an item.
+/// `remote_name_template` and every sidecar column render against a
+/// file of the release and the card it was copied from, so whether they
+/// resolve is a question about a release, and there is no release in
+/// hand when a directory is listed.
+///
+/// Those two are the gaps, and both are on the profile's own text only
+/// in the sense that the text is where the mistake is written: a
+/// profile naming an unset variable, or a template that does not
+/// resolve, is listed as usable here and refused by the send.
+///
+/// The template gap could in principle be narrowed — an unterminated
+/// `{{` is a syntax error no item could fix — but
+/// [`asterism_exporter_common::render`] is the only way in and it
+/// resolves keys as it scans, so there is no syntax-only entry point to
+/// call. Adding one would widen that crate's surface for a check this
+/// one caller wants; the gap is stated instead.
 ///
 /// The error is the sentence to show beside the file. A profile that
 /// does not parse is still listed — a file whose error nobody can see

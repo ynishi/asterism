@@ -4846,10 +4846,11 @@ pub async fn list_forge_release_sends(
 /// read from.
 ///
 /// Profiles are JSON files in a directory a registered setting names,
-/// each validated with the transport's own parser.
-/// `asterism_server::transfer_profiles` is the whole of it, and says
-/// how far that validation goes; this command resolves the directory
-/// and hands it over.
+/// each validated with the transport's own parser —
+/// `asterism_exporter_transfer::read_profile` says how far that goes
+/// and what it leaves to the dispatch.
+/// `asterism_server::transfer_profiles` does the listing; this command
+/// resolves the directory and hands it over.
 ///
 /// A read, so it names no surface. The write it feeds is
 /// [`send_forge_release`], which does.
@@ -4879,11 +4880,11 @@ pub async fn read_transfer_profile(
 
 /// Where the next release writes its copies.
 ///
-/// [`release_forge_change_point`] takes the directory as an argument,
-/// and the screen calling it cannot work one out: the setting behind it
-/// is empty by default, and empty means the profile home — which is
-/// resolved from the environment and checked against a marker, neither
-/// of which a webview can do. So it asks.
+/// [`release_forge_change_point`] takes the directory as an argument
+/// and the screen calling it cannot work one out, because resolving it
+/// reads the environment and checks a marker — neither of which a
+/// webview can do. `asterism_server::release_dirs` is what resolves it.
+/// So the screen asks.
 #[tauri::command]
 pub async fn release_output_dir(state: State<'_, AppState>) -> Result<String, UiError> {
     let dir =

@@ -115,11 +115,10 @@ class ReleaseCatalog {
 
   /// Where the next release writes its copies, resolved by the backend.
   ///
-  /// Not derived from the setting here. The setting is empty by
-  /// default and empty means the profile home, which is resolved from
-  /// the environment and checked against a marker — none of which a
-  /// webview can do, and a second copy of the rule in TypeScript is
-  /// the copy nobody would edit.
+  /// Not derived from the setting here. Resolving it reads the
+  /// environment and checks a marker, which a webview cannot do, and a
+  /// second copy of the rule in TypeScript is the copy nobody would
+  /// edit.
   outputDir = new Resource<void, string>(
     async () => api<string>("release_output_dir", {}),
     "",

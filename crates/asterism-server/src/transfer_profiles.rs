@@ -328,9 +328,9 @@ mod tests {
         );
     }
 
-    /// Nothing creates this directory, so its absence is the ordinary
-    /// state before the first profile is written — an empty list that
-    /// still says where one would go.
+    /// The answer still carries the directory, which is what makes an
+    /// empty list say where a profile would go rather than only that
+    /// there is none.
     #[test]
     fn a_directory_that_is_not_there_is_an_empty_list_that_says_where() {
         let tmp = tempfile::tempdir().expect("tempdir");
