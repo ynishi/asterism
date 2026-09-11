@@ -7,8 +7,10 @@
 //! representation) without changing the port signature.
 
 use asterism_contract::query::TagMatch;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
+use chrono_tz::Tz;
 
+use crate::domain::asset_zone::{self, AssetTime, OccurredSource};
 use crate::domain::attribution::{
     AttributionChannel, AttributionContext, Author, OperatorRef, PersistedAttribution,
 };
@@ -65,7 +67,30 @@ pub struct Asset {
     /// When the asset occurred in the outside world. Distinct from
     /// `created_at` (which records the moment Asterism ingested it) and is
     /// the primary axis of the time-proximity constellation edge.
+    ///
+    /// Not always the asset's *time*, though: an importer with no
+    /// occurrence to record writes the import moment here, and for
+    /// such a row the time is `created_at`. Which one it is comes from
+    /// [`occurred_source`](Self::occurred_source), resolved by
+    /// [`asset_zone`](crate::domain::asset_zone); read the answer
+    /// through [`Self::asset_time`] rather than this field alone.
     pub occurred_at: DateTime<Utc>,
+    /// Where [`occurred_at`](Self::occurred_at) came from — the fact
+    /// that decides whether this row's time is its occurrence or its
+    /// arrival. Written by the importer that produced the row;
+    /// [`OccurredSource::Unknown`] on every row written before it was
+    /// recorded, and on any row whose writer has not said.
+    pub occurred_source: OccurredSource,
+    /// The zone the recorded thing happened in, when a supplier stated
+    /// one. `None` is the ordinary state and means "read in the
+    /// viewer's zone", not a zone of its own — the two layers are
+    /// [`asset_zone`](crate::domain::asset_zone)'s.
+    ///
+    /// Typed as the zone rather than its IANA name, the way `modality`
+    /// is a `Modality` and not a slug: an entity holding a name the tz
+    /// database does not know would be an entity with a field nothing
+    /// can read, and the read boundary is where that is refused.
+    pub time_zone: Option<Tz>,
     /// Constellation-edge grouping key for **non-Dialog** modalities
     /// (tape / journal / image / future slot). Set by importers that
     /// used to write `session_id` for the same purpose — Session is
@@ -288,6 +313,11 @@ impl Asset {
             modality,
             labels: Vec::new(),
             occurred_at,
+            // Nobody has said yet. `add` overwrites this from the command
+            // once a source travels on it; until then the row reads as
+            // every row did before the source was recorded.
+            occurred_source: OccurredSource::Unknown,
+            time_zone: None,
             bundle_id: None,
             container_id: None,
             title: None,
@@ -350,6 +380,11 @@ impl Asset {
             modality,
             labels: Vec::new(),
             occurred_at,
+            // Nobody has said yet. `add` overwrites this from the command
+            // once a source travels on it; until then the row reads as
+            // every row did before the source was recorded.
+            occurred_source: OccurredSource::Unknown,
+            time_zone: None,
             bundle_id: None,
             container_id: None,
             title: None,
@@ -437,6 +472,36 @@ impl Asset {
             .find(|material| material.ord == 0)?
             .meta_fields()
     }
+
+    /// The four facts this asset's time is resolved from, in the shape
+    /// [`asset_zone::resolve`] takes. Nothing here is decided; a
+    /// consumer that wants the answer hands this to `resolve` with the
+    /// viewer's zone.
+    pub fn asset_time(&self) -> AssetTime {
+        AssetTime {
+            occurred_at: self.occurred_at,
+            created_at: self.created_at,
+            occurred_source: self.occurred_source,
+            time_zone: self.time_zone,
+        }
+    }
+
+    /// The calendar day this asset's time falls on **in its own zone**
+    /// — `None` when it carries no zone, because there is no day to
+    /// state without one.
+    ///
+    /// Derived on read and never stored on the entity, for the reason
+    /// [`material_meta`](Self::material_meta) gives: the value is a
+    /// function of three fields already here, and a fourth holding a
+    /// copy is the one that goes stale. The repository writes the
+    /// derived value into `occurred_local_date` beside the pair it
+    /// comes from, which is what keeps the column's invariant —
+    /// `NULL` exactly when `time_zone` is — true by construction rather
+    /// than by a check.
+    pub fn occurred_local_date(&self) -> Option<NaiveDate> {
+        let zone = self.time_zone?;
+        Some(asset_zone::local_date(zone, self.asset_time().instant()))
+    }
 }
 
 /// Which side of the trash a query wants to see.
@@ -475,6 +540,17 @@ pub struct AssetCard {
     pub modality: Option<Modality>,
     /// Occurrence time — the grid's time-order sort key.
     pub occurred_at: DateTime<Utc>,
+    /// Where `occurred_at` came from, denormalised from
+    /// [`Asset::occurred_source`] so a card can say which of its two
+    /// stamps is its time without hydrating the entity — the label a
+    /// grid puts beside a date is wrong for an import-stamped row
+    /// unless it knows this.
+    pub occurred_source: OccurredSource,
+    /// The asset's own zone, when it has one — see
+    /// [`Asset::time_zone`]. On the card for the same reason as the
+    /// source: a date rendered in the viewer's zone for a row that
+    /// carries its own is the wrong date.
+    pub time_zone: Option<Tz>,
     /// Cover text (`None` while the `cover_gen` job is still pending).
     pub cover: Option<CoverText>,
     /// Hand-given name. Carried on the card because a container's name

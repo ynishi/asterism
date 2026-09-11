@@ -368,6 +368,11 @@ pub fn card_to_dto(card: &AssetCard) -> AssetCardDto {
         persona_id: card.persona_id.to_string(),
         modality: card.modality.as_ref().map(|m| m.as_str().to_string()),
         occurred_at_ms: card.occurred_at.timestamp_millis(),
+        // The stored slug and the IANA name, verbatim: the wire carries
+        // the facts and the viewer's zone is not known here, so the
+        // resolution (`asset_zone::resolve`) is the reader's to run.
+        occurred_source: card.occurred_source.as_str().to_string(),
+        time_zone: card.time_zone.map(|z| z.name().to_string()),
         cover: card.cover.as_ref().map(|c| c.as_str().to_string()),
         labels: card.labels.iter().map(|l| l.as_str().to_string()).collect(),
         file_size_bytes: card.file_size_bytes,
@@ -606,6 +611,9 @@ pub fn asset_to_dto(asset: &Asset) -> AssetDto {
             .map(|l| l.as_str().to_string())
             .collect(),
         occurred_at_ms: asset.occurred_at.timestamp_millis(),
+        // Same two facts the card carries, on the same terms.
+        occurred_source: asset.occurred_source.as_str().to_string(),
+        time_zone: asset.time_zone.map(|z| z.name().to_string()),
         // session-model v2: composition membership + composite title
         // replace the old `session_id` field on the wire.
         container_id: asset.container_id.as_ref().map(|c| c.to_string()),
@@ -2020,6 +2028,7 @@ mod head_status_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::asset_zone::OccurredSource;
     use crate::domain::attribution::AttributionContext;
     use crate::domain::content_hash::of_bytes;
     use crate::domain::material::Material;
@@ -2036,6 +2045,8 @@ mod tests {
             persona_id: PersonaId::new(),
             modality: None,
             occurred_at: Utc::now(),
+            occurred_source: OccurredSource::Unknown,
+            time_zone: None,
             cover: None,
             labels: Vec::new(),
             file_size_bytes: None,

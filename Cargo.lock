@@ -668,6 +668,7 @@ dependencies = [
  "bytecheck 0.6.12",
  "c2pa",
  "chrono",
+ "chrono-tz",
  "color-thief",
  "crc32fast",
  "image",

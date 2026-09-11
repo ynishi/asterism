@@ -31,6 +31,10 @@ thiserror   = { workspace = true }
 async-trait = { workspace = true }
 uuid        = { workspace = true }
 chrono      = { workspace = true }
+# The tz database, for the two things this crate does with a stored
+# zone name: refuse one the database does not carry at the read
+# boundary, and open a calendar day under it for the day predicate.
+chrono-tz   = { workspace = true }
 
 # Filesystem + media pipeline (declared for the imminent thumbnail /
 # EXIF work; not yet used in code).

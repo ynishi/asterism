@@ -12,6 +12,7 @@ use asterism_contract::query::TagMatch;
 use asterism_core::domain::asset::{
     Asset, AssetCard, AssetQuery, ContentFlags, TrashFilter, UNCLASSIFIED_MODALITY,
 };
+use asterism_core::domain::asset_zone::OccurredSource;
 use asterism_core::domain::attribution::{Author, OperatorRef, PersistedAttribution};
 use asterism_core::domain::color::{ColorBucket, buckets_of};
 use asterism_core::domain::duplicate_conflict::DuplicateAxis;
@@ -46,6 +47,17 @@ use crate::fault::StoreFault;
 use crate::sqlite::map::{
     datetime_to_ms, infra_err, json_to_strings, ms_to_datetime, opt_u32, opt_u64, strings_to_json,
 };
+
+/// Resolves a stored `time_zone` name against the tz database.
+///
+/// A `Validation` so it can go through [`StoreFault::parsed`] like the
+/// closed-set columns do; the read paths turn it into the corrupt-row
+/// fault, because a name the database does not carry is not something
+/// a request can avoid.
+fn parse_zone(name: &str) -> Result<chrono_tz::Tz, DomainError> {
+    name.parse::<chrono_tz::Tz>()
+        .map_err(|_| DomainError::Validation(format!("unknown time zone: {name:?}")))
+}
 
 /// Hard upper bound on page size (guards against absurd limits).
 ///
@@ -1545,6 +1557,16 @@ struct AssetRow {
     // out-of-range row can be reported instead of cast.
     width_px: Option<i64>,
     height_px: Option<i64>,
+    // The time pair (V110). Appended last, same positional-index reason
+    // as everything above. The third column the step added,
+    // `occurred_local_date`, is deliberately not read: the entity
+    // derives it from these two and `occurred_at` / `created_at`
+    // (`Asset::occurred_local_date`), and the column exists for the day
+    // predicate in `QueryParts::build`, which is the only reader it
+    // has. Reading it back would give the entity a second copy of a
+    // value it already computes.
+    occurred_source: String,
+    time_zone: Option<String>,
 }
 
 impl AssetRow {
@@ -1553,7 +1575,8 @@ impl AssetRow {
          keywords, register_note, vis_restricted, vis_sharing, duration_ms, rating, \
          palette, extra, created_at, updated_at, container_id, title, trashed_at, role, \
          author_kind, author_subject, operator_ai, attributed_via, folded_into, \
-         fold_policy, on_duplicate, external_key, width_px, height_px";
+         fold_policy, on_duplicate, external_key, width_px, height_px, \
+         occurred_source, time_zone";
 
     fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
         Ok(Self {
@@ -1592,6 +1615,8 @@ impl AssetRow {
             external_key: row.get(32)?,
             width_px: row.get(33)?,
             height_px: row.get(34)?,
+            occurred_source: row.get(35)?,
+            time_zone: row.get(36)?,
         })
     }
 
@@ -1713,6 +1738,21 @@ impl AssetRow {
         // source called this row, and the library does not get to have
         // an opinion about a name it did not choose.
         asset.external_key = self.external_key;
+        // Both through the closed-set / known-name guard, like `role`: a
+        // source slug outside the set, or a zone name the tz database
+        // does not carry, can only come from a hand-edited row, and
+        // reading either as "unknown" / "no zone" would move the row's
+        // time in silence. V110 carries no CHECK for the reason V47
+        // gives, so this is where the two sets are enforced.
+        asset.occurred_source = StoreFault::parsed(
+            "occurred_source",
+            OccurredSource::parse(&self.occurred_source),
+        )?;
+        asset.time_zone = self
+            .time_zone
+            .as_deref()
+            .map(|name| StoreFault::parsed("time_zone", parse_zone(name)))
+            .transpose()?;
         // `materials` stays empty here — hydrated separately by the read
         // paths that need a truthful entity (`find` / `find_by_source`);
         // see `MaterialRow`.
@@ -1964,6 +2004,10 @@ struct CardRow {
     author_kind: Option<String>,
     author_subject: Option<String>,
     operator_ai: Option<String>,
+    // The time pair (V110), appended after `pixel_count` for the
+    // positional reason that field states.
+    occurred_source: String,
+    time_zone: Option<String>,
 }
 
 impl CardRow {
@@ -1993,7 +2037,8 @@ impl CardRow {
              (SELECT COUNT(*) FROM asset m \
                WHERE m.container_id = asset.id AND {MEMBER_POPULATION}) AS member_count, \
              author_kind, author_subject, operator_ai, \
-             (width_px * height_px) AS pixel_count"
+             (width_px * height_px) AS pixel_count, \
+             occurred_source, time_zone"
         )
     }
 
@@ -2022,6 +2067,8 @@ impl CardRow {
             author_subject: row.get(20)?,
             operator_ai: row.get(21)?,
             pixel_count: row.get(22)?,
+            occurred_source: row.get(23)?,
+            time_zone: row.get(24)?,
         })
     }
 
@@ -2031,6 +2078,18 @@ impl CardRow {
             persona_id: PersonaId::from_uuid(self.persona_id),
             modality: self.modality.map(Modality::new).transpose()?,
             occurred_at: ms_to_datetime(self.occurred_at)?,
+            // Same two guards the entity path applies
+            // (`AssetRow::into_domain`), so a hand-edited row fails
+            // identically on both projections.
+            occurred_source: StoreFault::parsed(
+                "occurred_source",
+                OccurredSource::parse(&self.occurred_source),
+            )?,
+            time_zone: self
+                .time_zone
+                .as_deref()
+                .map(|name| StoreFault::parsed("time_zone", parse_zone(name)))
+                .transpose()?,
             cover: self.cover.map(CoverText::new).transpose()?,
             // Same read-side guard as `AssetRow::into_domain`, on the
             // projection the grid actually renders its chips from.
@@ -3323,6 +3382,15 @@ impl AssetRepository for SqliteAssetRepository {
         // `SessionRepository::create`, which is not this path — safe
         // from a metadata round-trip that hydrated it as `None`.
         let external_key = asset.external_key.clone();
+        // The time triple (V110). The source and the zone are the
+        // entity's two facts; the local date is derived from them here,
+        // at the one place the pair is written, which is what keeps
+        // `occurred_local_date` NULL exactly when `time_zone` is.
+        let occurred_source = asset.occurred_source.as_str().to_string();
+        let time_zone = asset.time_zone.map(|z| z.name().to_string());
+        let occurred_local_date = asset
+            .occurred_local_date()
+            .map(|d| d.format("%Y-%m-%d").to_string());
         // `folded_into` / `fold_policy` are read off the row by
         // `AssetRow` and written by nothing here — see the column lists
         // in the statement below.
@@ -3390,10 +3458,11 @@ impl AssetRepository for SqliteAssetRepository {
                           duration_ms, rating, palette, extra, created_at, updated_at,
                           container_id, title, trashed_at, role,
                           author_kind, author_subject, operator_ai, attributed_via,
-                          on_duplicate, external_key, width_px, height_px)
+                          on_duplicate, external_key, width_px, height_px,
+                          occurred_source, time_zone, occurred_local_date)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
                              ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
-                             ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)
+                             ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36)
                      ON CONFLICT(id) DO UPDATE SET
                          persona_id = excluded.persona_id,
                          source_kind = excluded.source_kind,
@@ -3446,7 +3515,16 @@ impl AssetRepository for SqliteAssetRepository {
                          -- measured by decoding loses to the next
                          -- re-ingest that measured by header.
                          width_px = excluded.width_px,
-                         height_px = excluded.height_px",
+                         height_px = excluded.height_px,
+                         -- The three travel with `occurred_at`, which is
+                         -- in this list: a re-ingest that moves the
+                         -- occurrence moves its source and zone with
+                         -- it, and the local date is derived from the
+                         -- three above so it cannot be left describing
+                         -- the old pair.
+                         occurred_source = excluded.occurred_source,
+                         time_zone = excluded.time_zone,
+                         occurred_local_date = excluded.occurred_local_date",
                     params![
                         id,
                         persona_id,
@@ -3480,7 +3558,10 @@ impl AssetRepository for SqliteAssetRepository {
                         on_duplicate,
                         external_key,
                         width_px,
-                        height_px
+                        height_px,
+                        occurred_source,
+                        time_zone,
+                        occurred_local_date
                     ],
                 )?;
                 for (ord, locator, size, mime, created, updated) in &materials {
@@ -12227,6 +12308,138 @@ mod tests {
 
     // ---- the declared duplicate strategy -------------------------
 
+    // ---- the time source and zone (V110) --------------------------
+
+    /// The two facts round-trip through the entity and the card, and
+    /// the derived column is written from them: a zoned row stores the
+    /// day its resolved instant falls on *in its zone*, and an unzoned
+    /// row stores nothing — the invariant the predicate relies on,
+    /// asserted on the column rather than through the entity that
+    /// derives it.
+    ///
+    /// The zoned fixture is an `import`-sourced row on purpose: its
+    /// time is `created_at`, so the stored day is the arrival's local
+    /// day and not the occurrence's — 15:30Z on 1 June is still 1 June
+    /// in Tokyo when read as the occurrence, but the row arrived at
+    /// 15:30Z on 2 June, which is 00:30 on 3 June there.
+    #[tokio::test]
+    async fn the_source_and_zone_round_trip_and_the_local_day_is_derived_from_them() {
+        use asterism_core::domain::asset_zone::OccurredSource;
+        use chrono::TimeZone;
+
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteAssetRepository::new(isle.clone());
+        let persona = seed_persona(&isle).await;
+
+        let mut zoned = item(persona, "/gen/tokyo.png");
+        zoned.occurred_at = Utc.with_ymd_and_hms(2026, 6, 1, 15, 30, 0).unwrap();
+        zoned.created_at = Utc.with_ymd_and_hms(2026, 6, 2, 15, 30, 0).unwrap();
+        zoned.occurred_source = OccurredSource::Import;
+        zoned.time_zone = Some(chrono_tz::Asia::Tokyo);
+        repo.save(&zoned).await.unwrap();
+
+        let plain = item(persona, "/pics/plain.png");
+        repo.save(&plain).await.unwrap();
+
+        let stored = repo.find(&zoned.id).await.unwrap().unwrap();
+        assert_eq!(stored.occurred_source, OccurredSource::Import);
+        assert_eq!(stored.time_zone, Some(chrono_tz::Asia::Tokyo));
+        let card = repo
+            .cards_by_ids(&[zoned.id, plain.id], &Viewer::Owner)
+            .await
+            .unwrap();
+        let zoned_card = card.iter().find(|c| c.id == zoned.id).unwrap();
+        assert_eq!(zoned_card.occurred_source, OccurredSource::Import);
+        assert_eq!(zoned_card.time_zone, Some(chrono_tz::Asia::Tokyo));
+        let plain_card = card.iter().find(|c| c.id == plain.id).unwrap();
+        assert_eq!(plain_card.occurred_source, OccurredSource::Unknown);
+        assert_eq!(plain_card.time_zone, None);
+
+        let read_columns = |id: AssetId| {
+            let isle = isle.clone();
+            async move {
+                isle.call(move |conn| {
+                    conn.query_row(
+                        "SELECT occurred_source, time_zone, occurred_local_date \
+                         FROM asset WHERE id = ?1",
+                        params![id.as_uuid()],
+                        |r| {
+                            Ok((
+                                r.get::<_, String>(0)?,
+                                r.get::<_, Option<String>>(1)?,
+                                r.get::<_, Option<String>>(2)?,
+                            ))
+                        },
+                    )
+                })
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            read_columns(zoned.id).await,
+            (
+                "import".to_string(),
+                Some("Asia/Tokyo".to_string()),
+                Some("2026-06-03".to_string())
+            ),
+            "the day of the arrival in Tokyo, not of the occurrence and not in UTC"
+        );
+        assert_eq!(
+            read_columns(plain.id).await,
+            ("unknown".to_string(), None, None),
+            "no zone, no day"
+        );
+
+        // A re-save that drops the zone drops the derived day with it.
+        let mut stored = stored;
+        stored.time_zone = None;
+        repo.save(&stored).await.unwrap();
+        assert_eq!(
+            read_columns(zoned.id).await,
+            ("import".to_string(), None, None)
+        );
+    }
+
+    /// A hand-edited row is refused, not read as something else: a
+    /// slug outside the closed source set, and a zone name the tz
+    /// database does not carry, both fail the read the way a bad
+    /// `role` does.
+    #[tokio::test]
+    async fn a_source_or_zone_the_code_cannot_read_is_refused_on_read() {
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteAssetRepository::new(isle.clone());
+        let persona = seed_persona(&isle).await;
+        let bad_source = item(persona, "/pics/bad-source.png");
+        let bad_zone = item(persona, "/pics/bad-zone.png");
+        repo.save(&bad_source).await.unwrap();
+        repo.save(&bad_zone).await.unwrap();
+        let (source_id, zone_id) = (bad_source.id, bad_zone.id);
+        isle.call(move |conn| {
+            conn.execute(
+                "UPDATE asset SET occurred_source = 'guess' WHERE id = ?1",
+                params![source_id.as_uuid()],
+            )?;
+            conn.execute(
+                "UPDATE asset SET time_zone = 'Mars/Olympus' WHERE id = ?1",
+                params![zone_id.as_uuid()],
+            )
+        })
+        .await
+        .unwrap();
+
+        let err = repo.find(&bad_source.id).await.unwrap_err();
+        assert!(
+            matches!(err, DomainError::Infra(_)) && err.to_string().contains("guess"),
+            "{err}"
+        );
+        let err = repo.find(&bad_zone.id).await.unwrap_err();
+        assert!(
+            matches!(err, DomainError::Infra(_)) && err.to_string().contains("Mars/Olympus"),
+            "{err}"
+        );
+    }
+
     /// The declaration made at registration has to still be there when
     /// the fingerprint lands, which is minutes or hours later and in
     /// another process's worker. That is the whole of this subtask, so
@@ -12776,12 +12989,19 @@ mod tests {
             // that walk's own predicate, and no entity read wants it. A
             // column the reader does not select is exactly the kind the
             // fold rules have to name for themselves.
+            //
+            // `occurred_local_date` is the same kind one step further:
+            // written by `save` from the entity's own derivation and read
+            // by the day predicate alone, so no entity read selects it
+            // (`AssetRow` says why reading it back would be a second
+            // copy).
             vec![
                 "dims_probed_at",
                 "has_code",
                 "has_link",
                 "has_mermaid",
-                "has_table"
+                "has_table",
+                "occurred_local_date"
             ],
             "these are the columns a fold rule has to name explicitly, \
              because no reader's SELECT list mentions them"
