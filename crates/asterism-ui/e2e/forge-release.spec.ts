@@ -246,7 +246,7 @@ function writeFixtureFile(): string {
   // Rewritten every run rather than only when missing. This is the one
   // spec that reads the bytes, and a zero-length or truncated leftover
   // from an interrupted run would fail the stamp rather than the copy —
-  // a slower failure to read than simply writing 70 bytes again.
+  // a slower failure to read than simply writing the fixture again.
   fs.writeFileSync(file, onePixelPng());
   return file;
 }
