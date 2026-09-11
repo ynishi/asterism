@@ -17,7 +17,7 @@ use asterism_contract::forge::{
     ForgeAnchorDto, ForgeChangePointDto, ForgeChangeRowDto, ForgeCloseDto, ForgeCollisionDto,
     ForgeDiscardedDto, ForgeEntryStateDto, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto,
     ForgeOpDto, ForgePursuitDto, ForgeReleaseDto, ForgeReleaseFileDto, ForgeRevisionDto,
-    ForgeRoundDto, ForgeStampHalfDto, ForgeStrategyDto, ForgeThreadDto,
+    ForgeRoundDto, ForgeSendDto, ForgeStampHalfDto, ForgeStrategyDto, ForgeThreadDto,
 };
 use asterism_contract::query::ListAssetsQuery;
 use chrono::{DateTime, Utc};
@@ -63,6 +63,7 @@ use crate::domain::persona_theme::PersonaTheme;
 use crate::domain::release::{FileStamp, Release};
 use crate::domain::render::render_policy;
 use crate::domain::repository::{Evidence, RegisteredStrategy, Route};
+use crate::domain::send::ReleaseSend;
 use crate::domain::series::Path as SeriesPath;
 use crate::domain::session::Session;
 use crate::domain::snapshot::Snapshot;
@@ -70,8 +71,8 @@ use crate::domain::tag::{Tag, TagCount};
 use crate::domain::thread::{EntityRef, Message, Thread, ThreadAnchor};
 use crate::domain::value::{
     AssetCommentId, AssetId, ChapterMarkId, DirId, DispatchId, GroupId, Label, MaterialLayerId,
-    MaterialMarkId, MessageId, MimeType, Modality, Page, PersonaId, ReleaseId, SnapshotId, TagId,
-    ThreadId, Viewer, Visibility,
+    MaterialMarkId, MessageId, MimeType, Modality, Page, PersonaId, ReleaseId, SendId, SnapshotId,
+    TagId, ThreadId, Viewer, Visibility,
 };
 use crate::domain::visual::{ModelIdentity, TagEvidence, TagHeadRef, TagSuggestionDisposition};
 use crate::error::DomainError;
@@ -1525,6 +1526,27 @@ fn stamp_half_to_dto(half: &Half) -> ForgeStampHalfDto {
     ForgeStampHalfDto {
         state: state.to_string(),
         detail,
+    }
+}
+
+// ---- Where it went ---------------------------------------------
+
+/// Reads a send id off the wire.
+pub fn forge_send_id(raw: &str, field: &str) -> Result<SendId, DomainError> {
+    Ok(SendId::from_uuid(parse_uuid(raw, field)?))
+}
+
+/// Converts a send to what a caller reads.
+pub fn forge_send_to_dto(send: &ReleaseSend) -> ForgeSendDto {
+    let (actor_kind, actor_id) = actor_to_columns(send.act().by());
+    ForgeSendDto {
+        id: send.id().to_string(),
+        release_id: send.release().to_string(),
+        destination: send.destination().to_string(),
+        dispatch_id: send.dispatch().to_string(),
+        at_ms: send.act().at().timestamp_millis(),
+        actor_kind,
+        actor_id,
     }
 }
 

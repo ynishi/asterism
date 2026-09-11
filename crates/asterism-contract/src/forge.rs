@@ -813,3 +813,69 @@ pub struct ReleaseChangePointCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
 }
+
+// -----------------------------------------------------------------
+// Sends — a release put on a destination's host.
+// -----------------------------------------------------------------
+
+/// One release, sent.
+///
+/// It names the release whose stamped copies travelled and the run that
+/// carried them. What became of the put is on that run rather than here
+/// — `asterism_core::domain::send` is the argument, which this crate
+/// names no Asterism crate to link at.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeSendDto {
+    /// Send id (UUID hyphenated).
+    pub id: String,
+    /// The release that went out (UUID hyphenated).
+    pub release_id: String,
+    /// The label this send is remembered by.
+    pub destination: String,
+    /// The run that carried the bytes (UUID hyphenated).
+    pub dispatch_id: String,
+    /// When it was sent (unix epoch ms).
+    pub at_ms: i64,
+    /// `"user"` or `"system"`.
+    pub actor_kind: String,
+    /// Who sent it (UUID hyphenated).
+    pub actor_id: String,
+}
+
+/// Puts a release's stamped copies on a destination's host.
+///
+/// The bytes are the files the release wrote, by the paths it recorded.
+/// Where they go and how the host is spoken to is `profile_json`, whose
+/// shape is the transfer exporter's params — `asterism-server schema
+/// print exporter:transfer:params` streams a runnable example of it.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct SendReleaseCommand {
+    /// The release to send (UUID hyphenated). Taken from the path over
+    /// HTTP.
+    #[serde(default)]
+    pub release_id: String,
+    /// The label this send is remembered by.
+    ///
+    /// A label and nothing more: an agency's intake requirements change
+    /// on that agency's schedule, so a vocabulary here would encode
+    /// somebody else's policy. What actually describes a destination is
+    /// the profile beside it.
+    pub destination: String,
+    /// The transport's params, as JSON text.
+    ///
+    /// Text rather than a nested object so that the shape stays the
+    /// exporter's to define — the same reason
+    /// [`CreateDispatchCommand`](crate::command::CreateDispatchCommand)
+    /// carries its params that way. One key is not the profile's to
+    /// set, and the send says which when it refuses one that does.
+    pub profile_json: String,
+    /// See [`OpenForgeLineCommand::author_kind`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// See [`OpenForgeLineCommand::author_subject`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_subject: Option<String>,
+    /// See [`OpenForgeLineCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}

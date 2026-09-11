@@ -196,6 +196,10 @@ pub struct AppState {
     /// [`release`](asterism_core::domain::release) is what a release is
     /// and why it is not the forge's.
     pub release_service: Arc<asterism_core::application::ReleaseService>,
+    /// Putting a release's stamped copies on a destination's host.
+    /// [`send`](asterism_core::domain::send) is what a send is and why
+    /// it hangs off a release.
+    pub send_service: Arc<asterism_core::application::SendService>,
     /// Read-only handle to the apalis job DB pool. Used by the
     /// `jobs_stats` Tauri command that drives the progress banner.
     pub jobs_pool: asterism_infra::jobs::SqlitePool,
@@ -289,6 +293,7 @@ pub async fn init(app: AppHandle) -> anyhow::Result<(AppState, Arc<ServerCtx>)> 
         pursuit_service: core.pursuit_service,
         forge_thread_service: core.forge_thread_service,
         release_service: core.release_service,
+        send_service: core.send_service,
         jobs_pool: core.jobs_pool,
         telemetry: core.telemetry,
         series_strategy_service: core.series_strategy_service,

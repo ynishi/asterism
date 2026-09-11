@@ -98,10 +98,11 @@ use asterism_contract::forge::{
     ForgeChangeRowDto, ForgeCloseDto, ForgeCollisionDto, ForgeDiscardedDto, ForgeEntryStateDto,
     ForgeLineActCommand, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto, ForgeOpDto,
     ForgePursuitActCommand, ForgePursuitDto, ForgeReleaseDto, ForgeReleaseFileDto,
-    ForgeResolvedDto, ForgeRevisionDto, ForgeRoundDto, ForgeStampHalfDto, ForgeStrategyDto,
-    ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand, OpenForgeThreadCommand,
-    PushForgeRoundCommand, ReleaseChangePointCommand, RenameForgeLineCommand,
-    RenameForgeThreadCommand, SayInForgeThreadCommand, SetForgeLineStrategyCommand,
+    ForgeResolvedDto, ForgeRevisionDto, ForgeRoundDto, ForgeSendDto, ForgeStampHalfDto,
+    ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand,
+    OpenForgeThreadCommand, PushForgeRoundCommand, ReleaseChangePointCommand,
+    RenameForgeLineCommand, RenameForgeThreadCommand, SayInForgeThreadCommand, SendReleaseCommand,
+    SetForgeLineStrategyCommand,
 };
 use asterism_contract::query::{
     GetAssetDetailQuery, GetJobStatusQuery, ListAssetsQuery, ListEventsQuery,
@@ -330,6 +331,8 @@ fn main() {
         ForgeReleaseFileDto,
         ForgeStampHalfDto,
         ReleaseChangePointCommand,
+        ForgeSendDto,
+        SendReleaseCommand,
         // Tag administration. Delete and merge answer with a result
         // shape saying what the write moved; rename answers with the
         // tag, so it has none.

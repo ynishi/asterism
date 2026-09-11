@@ -1,0 +1,41 @@
+{
+  "endpoint": "sftp://stock.example.com:22/incoming/2026-09",
+  "auth": {
+    "user": "contributor",
+    "secret_ref": "AGENCY_SFTP_PASSWORD",
+    "key_ref": "AGENCY_SFTP_KEY",
+    "key_passphrase_ref": "AGENCY_SFTP_KEY_PASSPHRASE"
+  },
+  "host_key": {
+    "fingerprint": "SHA256:ldyiXa1JQakitNU5tErauu8DvWQ1dZ7aXu+rm7KQuog"
+  },
+  "allow_insecure": false,
+  "remote_name_template": "{{item.name}}",
+  "sidecar": {
+    "filename": "metadata.csv",
+    "columns": [
+      { "header": "Filename", "template": "{{item.remote_name}}" },
+      { "header": "Title", "template": "{{item.card.title?}}" },
+      { "header": "Keywords", "template": "{{params.extras.keywords}}" },
+      { "header": "Category", "template": "{{params.extras.category}}" }
+    ]
+  },
+  "extras": {
+    "keywords": "studio, portrait, backlit",
+    "category": "People"
+  },
+  "release": {
+    "files": [
+      {
+        "asset_id": "0198c1c2-0000-7000-8000-000000000001",
+        "path": "/absolute/path/to/the/release/key-visual.png",
+        "name": "key-visual.png"
+      },
+      {
+        "asset_id": "0198c1c2-0000-7000-8000-000000000002",
+        "path": "/absolute/path/to/the/release/alternate.png",
+        "name": "alternate.png"
+      }
+    ]
+  }
+}

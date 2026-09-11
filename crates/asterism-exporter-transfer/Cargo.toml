@@ -1,0 +1,53 @@
+[package]
+name        = "asterism-exporter-transfer"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Transport exporter — puts a release's stamped files and a CSV sidecar on a host over SFTP, FTPS or FTP"
+publish     = false
+
+[lib]
+
+[dependencies]
+asterism-contract        = { path = "../asterism-contract" }
+asterism-dispatch-sdk    = { path = "../asterism-dispatch-sdk" }
+asterism-exporter-common = { path = "../asterism-exporter-common" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+async-trait = { workspace = true }
+tokio       = { workspace = true }
+
+# The root certificates an FTPS send trusts. The Mozilla set rather than
+# the platform's store, so what a send trusts is not a property of the
+# machine it ran on — the same choice `reqwest` is pinned with above.
+webpki-roots = "1"
+
+# SSH and its SFTP subsystem, pure Rust. `russh` speaks the transport
+# and the authentication; `russh-sftp` is the subsystem on top of one of
+# its channels. Two crates because SFTP is a protocol carried over SSH
+# rather than a part of it, and the split is the upstream authors'.
+#
+# Pure Rust is the requirement rather than a preference: the alternative
+# in this space is `libssh2-sys`, a C build with a system library to
+# locate, and this workspace already refuses that trade for the same
+# reason it builds `c2pa` with `rust_native_crypto`.
+russh      = "0.63"
+russh-sftp = "3"
+
+# FTP and FTPS, pure Rust. `tokio` selects the async client — the crate
+# ships a blocking one by default, and a blocking socket inside an
+# exporter would hold a runtime thread for the length of an upload.
+# `tokio-rustls-ring` is the TLS backend, and it is rustls over ring so
+# the workspace keeps the one it already pins for `reqwest`; the
+# alternatives on offer are native-tls (a system library to locate) and
+# aws-lc-rs (a second C build).
+suppaftp = { version = "12", default-features = false, features = ["tokio", "tokio-rustls-ring"] }
+
+[dev-dependencies]
+tempfile = "3"

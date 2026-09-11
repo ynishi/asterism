@@ -92,6 +92,10 @@ pub struct ServerCtx {
     /// half and is not reachable from here, by design: only the runner
     /// drives it.
     pub release_service: Arc<asterism_core::application::ReleaseService>,
+    /// Putting a release's stamped copies on a destination's host.
+    /// [`send`](asterism_core::domain::send) is what a send is and why
+    /// it hangs off a release.
+    pub send_service: Arc<asterism_core::application::SendService>,
     /// Registered exporters — surfaces which backends the server can
     /// dispatch to.
     pub exporter_registry: ExporterRegistry,
@@ -145,6 +149,7 @@ impl ServerCtx {
             pursuit_service: core.pursuit_service.clone(),
             forge_thread_service: core.forge_thread_service.clone(),
             release_service: core.release_service.clone(),
+            send_service: core.send_service.clone(),
             exporter_registry: core.exporter_registry.clone(),
             jobs_pool: core.jobs_pool.clone(),
             telemetry: core.telemetry.clone(),

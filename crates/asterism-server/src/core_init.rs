@@ -37,6 +37,7 @@ use asterism_dispatch_sdk::Exporter;
 use asterism_exporter_comfy::ComfyHttpExporter;
 use asterism_exporter_file::FileExporter;
 use asterism_exporter_http::HttpExporter;
+use asterism_exporter_transfer::TransferExporter;
 use asterism_infra::dispatch::{DispatchRunEnv, ExporterRegistry, QueueReEnqueue, ReEnqueue};
 use asterism_infra::jobs::{self, JobDeps};
 // Named for what it is on this side of the boundary: the core's port is
@@ -518,6 +519,13 @@ pub struct CoreCtx {
     /// not one. Stamping the copies is the runner's half and lives in
     /// [`support`](Self::support).
     pub release_service: Arc<asterism_core::application::ReleaseService>,
+    /// Putting a release's stamped copies on a destination's host: the
+    /// record, and the run that carries the bytes.
+    ///
+    /// Beside [`release_service`](Self::release_service) rather than on
+    /// it — [`send`](asterism_core::domain::send) is what a send is, and
+    /// it is a verb over a release rather than a second way to make one.
+    pub send_service: Arc<asterism_core::application::SendService>,
     /// Query Group evaluate-and-materialize pipeline: startup refresh,
     /// the create / update-rule commands, and (W4) the refresh job.
     pub query_group_service: Arc<QueryGroupService>,
@@ -1301,8 +1309,17 @@ pub async fn init_core_with(
         releases.clone(),
         snapshot_service.clone(),
         dispatch_service.clone(),
-        forge_actors,
-        forge_clock,
+        forge_actors.clone(),
+        forge_clock.clone(),
+    ));
+    // The verb over a release, on the same connection and over an
+    // adapter of its own for the same reason.
+    let send_service = Arc::new(asterism_core::application::SendService::new(
+        releases.clone(),
+        Arc::new(sqlite::repo::SqliteSendRepository::new(isle.clone())),
+        dispatch_service.clone(),
+        forge_actors.clone(),
+        forge_clock.clone(),
     ));
     // The other half, which only the runner drives. Where it goes and
     // where it deliberately does not is `application_support::
@@ -1326,6 +1343,7 @@ pub async fn init_core_with(
     let file: Arc<dyn Exporter> = Arc::new(FileExporter::new());
     let home = asterism_infra::paths::asterism_home()?;
     let http: Arc<dyn Exporter> = Arc::new(HttpExporter::new(home.join("custody")));
+    let transfer: Arc<dyn Exporter> = Arc::new(TransferExporter::new());
 
     // A profile names an environment variable; this is where the
     // process gets a chance to have one. Profile-local rather than
@@ -1343,6 +1361,7 @@ pub async fn init_core_with(
     exporters.insert(comfy.slug().to_string(), comfy);
     exporters.insert(file.slug().to_string(), file);
     exporters.insert(http.slug().to_string(), Arc::clone(&http));
+    exporters.insert(transfer.slug().to_string(), transfer);
     // `cloud` was a separate crate until hosted platforms turned out to
     // be a profile of this one, and the slug outlived it: it is on every
     // dispatch row that ran under it and on every asset those produced.
@@ -1454,6 +1473,7 @@ pub async fn init_core_with(
         pursuit_service,
         forge_thread_service,
         release_service,
+        send_service,
         query_group_service,
         modality_service: Arc::new(ModalityService::new(Arc::new(modalities))),
         series_strategy_service: Arc::new(SeriesStrategyService::new(

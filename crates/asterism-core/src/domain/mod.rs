@@ -182,6 +182,7 @@ pub mod query_group_eval;
 pub mod release;
 pub mod render;
 pub mod repository;
+pub mod send;
 pub mod series;
 pub mod session;
 pub mod snapshot;

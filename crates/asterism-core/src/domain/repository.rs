@@ -46,6 +46,7 @@ use crate::domain::persona::Persona;
 use crate::domain::persona_profile::PersonaProfile;
 use crate::domain::persona_theme::PersonaTheme;
 use crate::domain::release::{FileStamp, Release};
+use crate::domain::send::ReleaseSend;
 use crate::domain::series::{SeriesKey, Strategy};
 use crate::domain::session::{Session, SessionMetadataPatch};
 use crate::domain::snapshot::Snapshot;
@@ -57,8 +58,8 @@ use crate::domain::thread::{Message, Thread, ThreadAnchor};
 use crate::domain::value::{
     AssetCommentId, AssetId, ChapterMarkId, DirId, DispatchId, DuplicateConflictId,
     ExternalSessionKey, GroupId, MaterialLayerId, MaterialMarkId, MessageId, MimeType, Modality,
-    PackId, Page, PersonaId, Progress, ReleaseId, SessionId, SnapshotId, SourceKind, StrategyId,
-    TagId, ThreadId,
+    PackId, Page, PersonaId, Progress, ReleaseId, SendId, SessionId, SnapshotId, SourceKind,
+    StrategyId, TagId, ThreadId,
 };
 // A release names a change point, and this is the one port whose
 // subject sits on both sides of the forge boundary — the forge may not
@@ -3483,6 +3484,27 @@ pub trait ReleaseRepository: Send + Sync {
     /// and a second pass over the same files is a correction of the
     /// first rather than more of it.
     async fn note_files(&self, id: &ReleaseId, files: &[FileStamp]) -> Result<(), DomainError>;
+}
+
+/// Persistence port for [`ReleaseSend`] — one release put on a
+/// destination's host.
+///
+/// Narrow for the reason [`ReleaseRepository`] is, and narrower: a send
+/// is written once and read, and it learns nothing afterwards — what
+/// became of the put is on the dispatch it names, as
+/// [`send`](crate::domain::send) says.
+#[async_trait]
+pub trait SendRepository: Send + Sync {
+    /// Records a send that has just been made.
+    async fn record(&self, send: &ReleaseSend) -> Result<(), DomainError>;
+
+    /// Fetches one send.
+    async fn find(&self, id: &SendId) -> Result<Option<ReleaseSend>, DomainError>;
+
+    /// Every send of one release, most recent first.
+    ///
+    /// A list rather than an option — see [`ReleaseSend`].
+    async fn of_release(&self, release: &ReleaseId) -> Result<Vec<ReleaseSend>, DomainError>;
 }
 
 /// Persistence port for [`DispatchJob`].
