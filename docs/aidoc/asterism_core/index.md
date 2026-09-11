@@ -70,6 +70,7 @@ the private design notes.
 - [`application::query_group_invalidation`](application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [`application::query_group_service`](application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
 - [`application::release_service`](application__release_service.md): `ReleaseService` — writing out what a change point carries.
+- [`application::send_service`](application__send_service.md): `SendService` — putting a release's stamped set on a destination's
 - [`application::series_strategy_service`](application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
 - [`application::session_service`](application__session_service.md): `SessionService` — use cases for the Session 1st-class entity.
 - [`application::snapshot_service`](application__snapshot_service.md): `SnapshotService` — application surface for the immutable `Snapshot`
@@ -156,6 +157,7 @@ the private design notes.
 - [`domain::release`](domain__release.md): `Release` — the record that a change point's state was written out.
 - [`domain::render`](domain__render.md): How an asset is rendered — thumbnail eligibility, media path, and
 - [`domain::repository`](domain__repository.md): Repository ports — the persistence traits declared here and implemented
+- [`domain::send`](domain__send.md): `ReleaseSend` — the record that a release was put on a destination's
 - [`domain::series`](domain__series.md): `series` — "made the same way": a rule for reading a material's
 - [`domain::session`](domain__session.md): `Session` — the Dialog-modality 1st-class aggregate root.
 - [`domain::snapshot`](domain__snapshot.md): `Snapshot` — an immutable, content-addressed freeze of an ordered

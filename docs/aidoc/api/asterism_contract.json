@@ -1043,6 +1043,11 @@
       "docs": "One round of work — what it asks the line to say, and who asked.\n\nA round is a request rather than a landing. Nothing here is on the\nline: what the line says is [`ForgeEntryStateDto`], and what put it\nthere is [`ForgeChangePointDto`]."
     },
     {
+      "path": "asterism_contract::forge::ForgeSendDto",
+      "kind": "struct",
+      "docs": "One release, sent.\n\nIt names the release whose stamped copies travelled and the run that\ncarried them. What became of the put is on that run rather than here\n— `asterism_core::domain::send` is the argument, which this crate\nnames no Asterism crate to link at."
+    },
+    {
       "path": "asterism_contract::forge::ForgeStampHalfDto",
       "kind": "struct",
       "docs": "One half of a stamp: what happened, and what there is to say about\nit.\n\nThree states rather than a boolean, because \"not written\" is at\nleast three answers and they lead somewhere different: a container\nthat cannot carry this half, a build with no certificate configured,\nand a certificate that stopped working. `detail` carries the reason\na half was skipped (`\"no_signing_identity\"` and its siblings, which\nare stable tokens) or the cause of a failure (a sentence), and is\nabsent only when the half was written."
@@ -1096,6 +1101,11 @@
       "path": "asterism_contract::forge::SayInForgeThreadCommand",
       "kind": "struct",
       "docs": "Says something in a conversation."
+    },
+    {
+      "path": "asterism_contract::forge::SendReleaseCommand",
+      "kind": "struct",
+      "docs": "Puts a release's stamped copies on a destination's host.\n\nThe bytes are the files the release wrote, by the paths it recorded.\nWhere they go and how the host is spoken to is `profile_json`, whose\nshape is the transfer exporter's params — `asterism-server schema\nprint exporter:transfer:params` streams a runnable example of it."
     },
     {
       "path": "asterism_contract::forge::SetForgeLineStrategyCommand",

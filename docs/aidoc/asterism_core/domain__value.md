@@ -57,6 +57,7 @@ Design notes:
 - `Progress` — Job progress payload; the `ProgressEmitter` forwards it to the UI.
 - `RegisterNote` — Short annotation about the asset's register / tone; the presentation
 - `ReleaseId` — Surrogate id for a `Release` — one change point's state written
+- `SendId` — Surrogate id for a `ReleaseSend` — one release put on a
 - `SessionId` — Session identifier attached to a dialogue asset — after the
 - `SnapshotId` — Surrogate id for a `Snapshot` — the immutable, content-addressed
 - `SourceKind` — Ingest source slug for an asset (open slug).

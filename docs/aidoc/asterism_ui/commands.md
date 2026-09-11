@@ -159,6 +159,7 @@ other.
 - `list_forge_lines` — Every line, without its history.
 - `list_forge_pursuit_children` — Work opened from this work.
 - `list_forge_pursuits_of_line` — Every piece of work against a line, open and ended alike.
+- `list_forge_release_sends` — Every time one release went out, most recent first.
 - `list_forge_releases_of_change_point` — Every time one change point was written out, most recent first.
 - `list_forge_strategies` — Every rule a line can be pointed at, built from the rules this
 - `list_forge_threads_about` — Conversations about one thing in the forge — the work as a whole,
@@ -247,6 +248,7 @@ other.
 - `say_in_forge_thread` — Says something.
 - `search_asset_ids` — The same retrieval as `search_assets`, reduced to the rank order.
 - `search_assets` — Full-text / fuzzy search.
+- `send_forge_release` — Puts a release's stamped copies on the host its profile describes.
 - `set_default_material_layer` — Chooses the band the panel shows, and the one a new mark lands in.
 - `set_forge_line_strategy` — Points the line at a different rule, from here on.
 - `set_persona_profile` — Upserts the persona's identity signal.

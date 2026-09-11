@@ -1,0 +1,151 @@
+{
+  "crate": "asterism-exporter-transfer",
+  "version": "0.1.1",
+  "items": [
+    {
+      "path": "asterism_exporter_transfer::ACTION_PUT",
+      "kind": "constant",
+      "docs": "The single action name — a send puts a set on a host, and what\ndiffers between destinations is the profile rather than the verb."
+    },
+    {
+      "path": "asterism_exporter_transfer::AuthSchema",
+      "kind": "struct",
+      "docs": "The account and where its credential is read from."
+    },
+    {
+      "path": "asterism_exporter_transfer::FileRow",
+      "kind": "struct",
+      "docs": "One copy: which library row it came from, where it is, what it is\ncalled."
+    },
+    {
+      "path": "asterism_exporter_transfer::HostKeySchema",
+      "kind": "struct",
+      "docs": "What the far side's host key has to be.\n\nExactly one of the two. Both would be two answers to one question,\nand neither is the profile not having decided."
+    },
+    {
+      "path": "asterism_exporter_transfer::RESERVED_KEY",
+      "kind": "constant",
+      "docs": "The params key the send writes the release's file list under.\n\nSpelled here and in `asterism_core::application::send_service`, which\nis the writer and where the argument for a reserved key is. The two\ncrates cannot see each other — the core takes no exporter dependency\n— so the word is agreed the way `\"file\"` and `\"write\"` already are\nbetween that layer and `asterism-exporter-file`."
+    },
+    {
+      "path": "asterism_exporter_transfer::RealConnector",
+      "kind": "struct",
+      "docs": "The connector that speaks the protocols, chosen by scheme."
+    },
+    {
+      "path": "asterism_exporter_transfer::ReleaseFiles",
+      "kind": "struct",
+      "docs": "The release's file list, as the send wrote it."
+    },
+    {
+      "path": "asterism_exporter_transfer::SCHEMA_NAME",
+      "kind": "constant",
+      "docs": "Public name for this exporter's params schema in the\n`asterism-server schema` CLI (`exporter:transfer:params`)."
+    },
+    {
+      "path": "asterism_exporter_transfer::SLUG",
+      "kind": "constant",
+      "docs": "Slug the registry uses for this exporter."
+    },
+    {
+      "path": "asterism_exporter_transfer::SidecarColumn",
+      "kind": "struct",
+      "docs": "One column: a header, and how each row's cell is built."
+    },
+    {
+      "path": "asterism_exporter_transfer::SidecarSchema",
+      "kind": "struct",
+      "docs": "The CSV that goes beside the files.\n\nOne per send. An agency that caps a batch's rows caps it at a number\nthat agency changes on its own schedule, and splitting here would put\nthat number in the tree; a profile that has to send fewer files sends\nfewer files, which is a second release and a second send."
+    },
+    {
+      "path": "asterism_exporter_transfer::TransferDispatchParams",
+      "kind": "struct",
+      "docs": "Params schema for [`SLUG`] dispatch calls."
+    },
+    {
+      "path": "asterism_exporter_transfer::TransferExporter",
+      "kind": "struct",
+      "docs": "Transport-backed [`Exporter`].\n\nHolds the thing that opens connections rather than opening them\nitself — see [`transport`] for why that seam is where it is."
+    },
+    {
+      "path": "asterism_exporter_transfer::ftp",
+      "kind": "module",
+      "docs": "`ftps://` and `ftp://` — one client, two answers about TLS.\n\n`suppaftp` fixes the TLS stream as a type parameter at construction,\nso a plain connection cannot be upgraded later and the two are\ndifferent types all the way down. [`FtpWire`] is that pair, and every\nverb below matches on it.\n\n# What each scheme costs\n\n`ftps://` negotiates TLS on the control connection before the\ncredential is sent and asks for the data connections to be protected\ntoo, so the files are encrypted as well as the login. `ftp://`\nprotects neither, which is why nothing reaches this module under that\nscheme unless the profile said so — the refusal is in\n`crate::check_scheme`, where the message can name the field.\n\n# Roots\n\nThe Mozilla set, compiled in. The alternative is the platform's own\nstore, which would make what a send trusts a property of the machine\nit ran on; this workspace already made that choice for its HTTP\nclient, and this is the same choice rather than a second one."
+    },
+    {
+      "path": "asterism_exporter_transfer::ftp::open",
+      "kind": "function",
+      "docs": "Opens an FTP or FTPS session on the host the endpoint names."
+    },
+    {
+      "path": "asterism_exporter_transfer::local",
+      "kind": "module",
+      "docs": "`file://` — a directory on this machine as a destination.\n\nWhy it exists is on [`Scheme::File`](crate::transport::Scheme::File):\neverything above the transport trait needs a far side a test can read\nback, and an SFTP server inside a test answers for the server rather\nthan for this adapter.\n\nIt is a destination a profile may name, not a stub. What it does is\nwhat the others do — reach the directory, put the files, put the\nsidecar — with the filesystem as the wire, so a send to it lands the\nsame bytes under the same names in the same order."
+    },
+    {
+      "path": "asterism_exporter_transfer::local::open",
+      "kind": "function",
+      "docs": "Opens the directory the endpoint names."
+    },
+    {
+      "path": "asterism_exporter_transfer::params_example_json",
+      "kind": "function",
+      "docs": "Canonical example JSON for [`TransferDispatchParams`] — streamed by\n`asterism-server schema print exporter:transfer:params`."
+    },
+    {
+      "path": "asterism_exporter_transfer::sftp",
+      "kind": "module",
+      "docs": "`sftp://` — SSH's file transfer subsystem.\n\nTwo crates carry it: `russh` speaks the transport and the\nauthentication, `russh-sftp` is the subsystem on one of its channels.\n\n# The host is checked before anything else happens\n\n`russh` asks its handler about the host's key while the connection is\nbeing established, before a credential is sent and long before a\nfile is. [`HostCheck`] answers that question and nothing else: it\ncompares the fingerprint the profile named, or looks the host up in\nthe `known_hosts` file the profile named, and records what was\noffered so the refusal can say both halves.\n\nWhy the answer is recorded rather than returned as an error: the\nhandler's error type has to be one `russh` can build from its own,\nand a mismatch is this adapter's word rather than the library's. So\nthe handler says no, the connection fails, and the reason is read\nback out of the slot the handler wrote it into. Without that, every\nrefusal would arrive as `russh`'s generic rejection and a reader\ncould not tell a wrong key from a closed port."
+    },
+    {
+      "path": "asterism_exporter_transfer::sftp::open",
+      "kind": "function",
+      "docs": "Opens an SFTP session on the host the endpoint names."
+    },
+    {
+      "path": "asterism_exporter_transfer::transport",
+      "kind": "module",
+      "docs": "The port between the exporter and the wire.\n\nOne trait with three verbs — reach the directory, put a file in it,\nclose — and one trait that opens a connection to reach it with.\nEverything above this line is the same whichever protocol carries the\nbytes: which files go, under what names, in what order, what the\nsidecar says and what the attempt record ends up holding.\n\n# Why the split is here and not at the exporter\n\nA protocol needs a server to talk to, and an SFTP server in a unit\ntest is a second implementation of the thing under test. Behind this\ntrait the exporter's own decisions are exercised against a far side\nheld in memory, which is a map of what it was asked to put; the\nprotocol implementations answer for the protocol and nothing else.\n\n# What a refusal is, and what a failure is\n\n[`TransportError::Refused`] is the answer before any byte moved: a\nscheme the profile did not opt into, a host whose key is not the one\nnamed, a credential the server would not take.\n[`TransportError::Failed`] is what the far end said about something\nthat was attempted. The exporter records both, and the difference is\nwhat a reader needs: a refusal means nothing arrived, a failure means\nsome of it may have."
+    },
+    {
+      "path": "asterism_exporter_transfer::transport::Connector",
+      "kind": "trait",
+      "docs": "What opens one.\n\nA trait rather than a function so that the exporter can be built\nagainst a far side a test owns — see the module docs."
+    },
+    {
+      "path": "asterism_exporter_transfer::transport::Credentials",
+      "kind": "struct",
+      "docs": "What the far side is asked to accept as proof of who is calling.\n\nValues, resolved per call from the environment variables the profile\nnamed. Nothing here is ever written to a row: the profile carries the\nnames and the attempt record repeats the names, and\n[`Redaction`](asterism_exporter_common::Redaction) takes the values\nback out of anything an implementation composed from them."
+    },
+    {
+      "path": "asterism_exporter_transfer::transport::HostKey",
+      "kind": "enum",
+      "docs": "How the far side's identity is checked.\n\nThere is no third state. An SFTP endpoint with neither is refused\nbefore the socket opens: an unverified host key is a credential\nhanded to whoever answered, and a prompt is not something a\nbackground dispatch can put in front of anybody."
+    },
+    {
+      "path": "asterism_exporter_transfer::transport::Scheme",
+      "kind": "enum",
+      "docs": "The protocols this adapter speaks."
+    },
+    {
+      "path": "asterism_exporter_transfer::transport::Target",
+      "kind": "struct",
+      "docs": "Where a send is going, as the profile's endpoint describes it."
+    },
+    {
+      "path": "asterism_exporter_transfer::transport::Transport",
+      "kind": "trait",
+      "docs": "An open connection to one destination."
+    },
+    {
+      "path": "asterism_exporter_transfer::transport::TransportError",
+      "kind": "enum",
+      "docs": "What went wrong."
+    },
+    {
+      "path": "asterism_exporter_transfer::transport::read_endpoint",
+      "kind": "function",
+      "docs": "Reads a profile's endpoint into a [`Target`].\n\nThe grammar is a URL's, narrowed to what a destination needs:\n`<scheme>://[host][:port][/dir]`. Credentials in the authority are\nrefused rather than parsed — a password in an endpoint would be\nwritten into the params blob, which is persisted unedited and handed\nback on every read of the dispatch, and the profile's `auth` block is\nthe way that does not do that."
+    }
+  ]
+}

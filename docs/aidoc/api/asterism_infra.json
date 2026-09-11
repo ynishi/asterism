@@ -1183,6 +1183,16 @@
       "docs": "SQLite adapter for `ReleaseRepository`."
     },
     {
+      "path": "asterism_infra::sqlite::repo::send",
+      "kind": "module",
+      "docs": "SQLite adapter for the `SendRepository` port.\n\n`forge_send` holds where a release went, when, and by whose hand. It\nis written once and read; nothing here updates a row, for the reason\n[`asterism_core::domain::send`] gives.\n\nWhy this is not on `SqliteForge` is the same answer the release\nadapter beside it gives, and [`super::release`] is where it is\nwritten. What it borrows is the same thing, and for the same reason:\n[`ActRow`], because an act is three columns wherever it appears."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::send::SqliteSendRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `SendRepository`."
+    },
+    {
       "path": "asterism_infra::sqlite::repo::series",
       "kind": "module",
       "docs": "SQLite adapter for the `SeriesRepository` port — the series axis's\ntwo tables (`series_strategy` / `material_series`, V73).\n\nFollows the crate-wide adapter convention: only `rusqlite` primitives\ninside the isle closure, promotion into domain types outside it\n([`StrategyRow::into_domain`]).\n\nThe one thing worth stating beyond that convention is where the path\nlists are taken apart. `include` / `exclude` are JSON columns (the\nV73 doc comment argues why they are not a side table), so the\n`serde_json` call is the promotion step and a column this build\ncannot parse is [`DomainError::Infra`] — a rule read as though it\nselected nothing would derive keys nobody wrote."
