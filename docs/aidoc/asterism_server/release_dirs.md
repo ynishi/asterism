@@ -21,11 +21,10 @@ string is what it writes, and it means "the profile home's own".
 
 That convention needs exactly one reader, or it becomes two
 resolvers that disagree the first time somebody changes the leaf
-name. This module is it. Both transports call in here rather than
-joining a path of their own, and the frontend is handed the answer
-rather than deriving it — it cannot read the environment at all, and
-a second copy of the rule in TypeScript is the copy nobody would
-edit.
+name. This module is it: callers ask it rather than joining a path
+of their own, and the frontend is handed the answer rather than
+deriving it — it cannot read the environment at all, and a second
+copy of the rule in TypeScript is the copy nobody would edit.
 
 # A value somebody set is used as typed
 

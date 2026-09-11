@@ -655,7 +655,7 @@
     {
       "path": "asterism_ui::commands::list_transfer_profiles",
       "kind": "function",
-      "docs": "Every destination profile this machine holds, and where they were\nread from.\n\nProfiles are JSON files in a directory a registered setting names,\nand each is validated with the transport's own parser — a list that\nblessed one the send then refused is the failure the listing exists\nto prevent. `asterism_server::transfer_profiles` is the whole of it;\nthis command resolves the directory and hands it over.\n\nA read, so it names no surface. The write it feeds is\n[`send_forge_release`], which does."
+      "docs": "Every destination profile this machine holds, and where they were\nread from.\n\nProfiles are JSON files in a directory a registered setting names,\neach validated with the transport's own parser.\n`asterism_server::transfer_profiles` is the whole of it, and says\nhow far that validation goes; this command resolves the directory\nand hands it over.\n\nA read, so it names no surface. The write it feeds is\n[`send_forge_release`], which does."
     },
     {
       "path": "asterism_ui::commands::merge_assets",
@@ -800,7 +800,7 @@
     {
       "path": "asterism_ui::commands::read_transfer_profile",
       "kind": "function",
-      "docs": "One destination profile's text, whole.\n\n[`list_transfer_profiles`] answers with a summary built to be\nrendered — scheme, host, directory — and a send needs the profile as\nit stands, `auth` block included. Read when a profile is chosen\nrather than carried in the listing, so choosing is what fetches one.\n\n`name` is one file in the resolved profile directory, and\n`transfer_profiles::read_body` refuses a name that would leave it."
+      "docs": "One destination profile's text, whole.\n\n`transfer_profiles::read_body` says why the listing beside this one\nis not enough to send with, and what `name` may be; this command\nresolves the directory and hands it over."
     },
     {
       "path": "asterism_ui::commands::rebuild_edges",

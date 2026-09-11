@@ -15,15 +15,16 @@ of them.
 # The parser is the sender's
 
 [`asterism_exporter_transfer::read_profile`] is what answers for
-each file, which is the same `serde_json::from_value` over the same
-struct that `dispatch` runs, plus the refusals the send makes before
-a connection opens. A list that blessed a profile the send then
-refused would be the failure this listing exists to prevent, so the
-two do not get separate opinions. That is also why this module sits
-in `asterism-server`: it is the crate that already builds the
-exporter registry, so it can name the transfer crate's parser
-without the desktop crate taking a dependency on an adapter it does
-not otherwise know about.
+each file, and how far it mirrors the send — and the two things past
+that which stay the dispatch's — is stated there. A list that
+blessed a profile the send then refused on its shape would be the
+failure this listing exists to prevent, so the two do not get
+separate opinions.
+
+That is also why this module sits in `asterism-server`: it is the
+crate that already builds the exporter registry, so it can name the
+transfer crate's parser without the desktop crate taking a
+dependency on an adapter it does not otherwise know about.
 
 # A file that does not parse is listed, with its reason
 

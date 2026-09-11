@@ -14805,11 +14805,10 @@ string is what it writes, and it means "the profile home's own".
 
 That convention needs exactly one reader, or it becomes two
 resolvers that disagree the first time somebody changes the leaf
-name. This module is it. Both transports call in here rather than
-joining a path of their own, and the frontend is handed the answer
-rather than deriving it — it cannot read the environment at all, and
-a second copy of the rule in TypeScript is the copy nobody would
-edit.
+name. This module is it: callers ask it rather than joining a path
+of their own, and the frontend is handed the answer rather than
+deriving it — it cannot read the environment at all, and a second
+copy of the rule in TypeScript is the copy nobody would edit.
 
 # A value somebody set is used as typed
 
@@ -14874,15 +14873,16 @@ of them.
 # The parser is the sender's
 
 [`asterism_exporter_transfer::read_profile`] is what answers for
-each file, which is the same `serde_json::from_value` over the same
-struct that `dispatch` runs, plus the refusals the send makes before
-a connection opens. A list that blessed a profile the send then
-refused would be the failure this listing exists to prevent, so the
-two do not get separate opinions. That is also why this module sits
-in `asterism-server`: it is the crate that already builds the
-exporter registry, so it can name the transfer crate's parser
-without the desktop crate taking a dependency on an adapter it does
-not otherwise know about.
+each file, and how far it mirrors the send — and the two things past
+that which stay the dispatch's — is stated there. A list that
+blessed a profile the send then refused on its shape would be the
+failure this listing exists to prevent, so the two do not get
+separate opinions.
+
+That is also why this module sits in `asterism-server`: it is the
+crate that already builds the exporter registry, so it can name the
+transfer crate's parser without the desktop crate taking a
+dependency on an adapter it does not otherwise know about.
 
 # A file that does not parse is listed, with its reason
 
