@@ -94,6 +94,13 @@
         modality: null,
         occurred_from_ms: null,
         occurred_until_ms: null,
+        // No calendar cut either, for the same reason as the raw window
+        // above; `time_zone` is only read beside a day and is left out
+        // with it.
+        day_from: null,
+        day_until: null,
+        day_of_year: null,
+        time_zone: null,
         // Ingest / modification windows are differential-sync axes for
         // API consumers; this panel wants the Session's whole comment
         // history, so it asks for no window on either.

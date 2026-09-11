@@ -63,6 +63,8 @@ function detail(labels: string[]): AssetDetailDto {
       modality: "image",
       labels,
       occurred_at_ms: 1,
+      occurred_source: "unknown",
+      time_zone: null,
       container_id: null,
       title: null,
       bundle_id: null,

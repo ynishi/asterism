@@ -2359,6 +2359,14 @@
           locator: durablePath,
           modality: null,
           occurred_at_ms: Date.now(),
+          // The stamp above is the moment of the drop, not anything the
+          // file says about itself, and `import` is the rung that names
+          // that (`AddAssetCommand::occurred_source`). Left to the
+          // wire's `unknown` default, the row would read its arrival as
+          // an occurrence. No zone: a drop reads nothing that carries
+          // one.
+          occurred_source: "import",
+          time_zone: null,
           session_id: null,
           labels: ["dropped"],
           register_note: null,

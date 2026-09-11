@@ -37,6 +37,8 @@ function side(id: string, locator: string): DuplicateConflictDto["newcomer"] {
     persona_id: "p1",
     modality: "image",
     occurred_at_ms: 1,
+    occurred_source: "unknown",
+    time_zone: null,
     cover: null,
     labels: [],
     file_size_bytes: 10,
