@@ -34,13 +34,14 @@
 //!
 //! [`day_window`] and [`local_date`] are the two directions between an
 //! instant and a calendar day under a zone. A day is **the 24 hours
-//! from that day's local midnight**, and where the midnight falls is
-//! the zone's rule for that year — a daylight-saving transition moves
-//! it without a line of code here noticing. What is deliberately not
-//! handled, and stated once so nobody looks for it: a midnight a zone
-//! skips, a day a zone repeats or shortens, and the date line are all
-//! read as whatever `earliest()` and `+ 24h` give, and nothing here
-//! corrects for them.
+//! from that day's first instant** — its local midnight, or the end of
+//! the gap where a zone's rule skipped that midnight — and where that
+//! falls is the zone's rule for that year: a daylight-saving transition
+//! moves it without a line of code here noticing. What is deliberately
+//! not handled, and stated once so nobody looks for it: a day a zone
+//! repeats or shortens is still 24 hours from its start, and a date a
+//! zone skipped whole at the date line is a date its calendar does not
+//! have; nothing here corrects for either.
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use chrono_tz::Tz;
@@ -236,26 +237,71 @@ pub struct DayWindow {
 /// Milliseconds in the day [`day_window`] opens.
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// The 24 hours from `(year, month, day)`'s local midnight in `zone`,
-/// as UTC milliseconds.
+/// The 24 hours from the first instant of `(year, month, day)` in
+/// `zone`, as UTC milliseconds.
 ///
-/// `None` when `earliest()` has no midnight to start from: a date the
-/// calendar lacks (29 February in a non-leap year, 31 April), and — the
-/// case the module doc says is not handled — a midnight the zone's
-/// rule skipped that year. The window is `+ 24h` from the start rather
-/// than "to the next local midnight", so a day a transition shortens
-/// or lengthens is still answered as 24 hours; that is the rule, and
-/// the test on a transition day states what it measures.
+/// The first instant is the day's local midnight, except where the
+/// zone's rule skipped that midnight — Havana moves to daylight time
+/// at 00:00, so its 9 March 2025 begins at 01:00 — in which case it is
+/// the first wall-clock second the zone does have that day. Either
+/// way the window is `+ 24h` from there rather than "to the next local
+/// midnight", so a day a transition shortens or lengthens is still
+/// answered as 24 hours; that is the rule, and the tests on the two
+/// kinds of transition day state what they measure.
+///
+/// `None` means one thing: the calendar has no such date — 29 February
+/// in a common year, 31 April, month 13. A date a zone skipped whole
+/// (a date-line move) answers the same way, because in that zone the
+/// calendar does not have it either; the module doc says that case is
+/// not corrected for beyond this.
 pub fn day_window(zone: Tz, year: i32, month: u32, day: u32) -> Option<DayWindow> {
-    let midnight = zone
-        .with_ymd_and_hms(year, month, day, 0, 0, 0)
-        .earliest()?;
-    let from_ms = midnight.timestamp_millis();
+    let date = NaiveDate::from_ymd_opt(year, month, day)?;
+    let first_instant = first_second_of(zone, date)?;
+    let from_ms = first_instant.timestamp_millis();
     Some(DayWindow {
         from_ms,
         until_ms: from_ms + DAY_MS,
     })
 }
+
+/// The earliest wall-clock second of `date` that `zone` resolves.
+///
+/// Midnight, nearly always. When the rule skipped it, the seconds the
+/// zone lacks form one run from 00:00 up to the gap's end (a
+/// transition is a jump forward, so nothing before the end resolves
+/// and everything from it on does), which is what lets a binary search
+/// over the day's seconds find the end in seventeen probes rather than
+/// a minute-by-minute walk. Seconds and not minutes because the tz
+/// database records some old transitions at second precision.
+///
+/// `None` only when no second of the day resolves — the whole date is
+/// absent from the zone's calendar.
+fn first_second_of(zone: Tz, date: NaiveDate) -> Option<DateTime<Tz>> {
+    let resolves = |second: u32| {
+        zone.from_local_datetime(&date.and_hms_opt(second / 3600, second / 60 % 60, second % 60)?)
+            .earliest()
+    };
+    if let Some(midnight) = resolves(0) {
+        return Some(midnight);
+    }
+    // First resolving second in `1..SECONDS_IN_DAY`, if any.
+    let (mut low, mut high) = (1u32, SECONDS_IN_DAY);
+    let mut found = None;
+    while low < high {
+        let mid = low + (high - low) / 2;
+        match resolves(mid) {
+            Some(at) => {
+                found = Some(at);
+                high = mid;
+            }
+            None => low = mid + 1,
+        }
+    }
+    found
+}
+
+/// Seconds in the day [`first_second_of`] searches.
+const SECONDS_IN_DAY: u32 = 24 * 60 * 60;
 
 /// The calendar day `instant` falls on in `zone` — the inverse of
 /// [`day_window`], and the one function that writes the derived
@@ -272,8 +318,7 @@ pub fn local_date(zone: Tz, instant: DateTime<Utc>) -> NaiveDate {
 pub enum DayAsk {
     /// Days from `from` (inclusive) to `until` (exclusive). Both are
     /// real calendar dates by construction — `NaiveDate` cannot hold
-    /// 30 February — so [`day_window`] answers for both unless the zone
-    /// skipped one of the two midnights, which the mapper checks.
+    /// 30 February — so [`day_window`] answers for both.
     Range {
         /// First day, inclusive.
         from: NaiveDate,
@@ -333,8 +378,9 @@ impl DayFilter {
                     }],
                     // Inverted or empty: nothing, on the terms the raw
                     // occurrence window sets (an empty page, not an
-                    // error). A skipped midnight is refused by the
-                    // mapper before it reaches here.
+                    // error). Neither end can fail to open — both are
+                    // real dates — so the `None` arms are unreachable
+                    // and fold into the same answer.
                     _ => Vec::new(),
                 }
             }
@@ -425,6 +471,36 @@ mod tests {
             "2026-03-09T04:00:00Z"
         );
         assert_eq!(window.until_ms - next_local_midnight, 60 * 60 * 1000);
+    }
+
+    /// Cuba moves to daylight time at 00:00, so 9 March 2025 has no
+    /// midnight in America/Havana: the clock goes from 23:59:59 CST
+    /// (04:59:59Z) to 01:00:00 CDT (05:00:00Z). The day's first instant
+    /// is the end of that gap — measured 1741496400 s, 2025-03-09T05:00Z
+    /// — and the window runs 24 hours from it, to 01:00 CDT on the 10th.
+    /// The same request without the gap handling answered `None`, which
+    /// read as "no such date" for a date the calendar plainly has.
+    #[test]
+    fn a_skipped_midnight_starts_the_day_at_the_end_of_the_gap() {
+        let window = day_window(America::Havana, 2025, 3, 9).unwrap();
+        assert_eq!(window.from_ms, 1_741_496_400_000, "2025-03-09T05:00:00Z");
+        assert_eq!(window.until_ms, 1_741_582_800_000, "2025-03-10T05:00:00Z");
+        // Both ends of the gap, off the zone itself: the second before
+        // the start resolves to the day before, and the start is 01:00
+        // on the 9th.
+        let start = at(window.from_ms).with_timezone(&America::Havana);
+        assert_eq!(start.date_naive(), ymd(2025, 3, 9));
+        assert_eq!(start.format("%H:%M:%S").to_string(), "01:00:00");
+        assert_eq!(
+            local_date(America::Havana, at(window.from_ms - 1)),
+            ymd(2025, 3, 8)
+        );
+        // And the day after, which has a midnight, opens there.
+        assert_eq!(
+            day_window(America::Havana, 2025, 3, 10).unwrap().from_ms,
+            1_741_579_200_000,
+            "2025-03-10T04:00:00Z, midnight CDT"
+        );
     }
 
     #[test]

@@ -29,7 +29,7 @@ use crate::application::forge::Anchored;
 use crate::domain::app_setting::EffectiveSetting;
 use crate::domain::asset::{Asset, AssetCard, AssetQuery, TrashFilter, UNCLASSIFIED_MODALITY};
 use crate::domain::asset_comment::AssetComment;
-use crate::domain::asset_zone::{self, DayAsk, DayFilter, GlobalZone};
+use crate::domain::asset_zone::{DayAsk, DayFilter, GlobalZone};
 use crate::domain::chapter_mark::ChapterMark;
 use crate::domain::color::ColorBucket;
 use crate::domain::dir::Dir;
@@ -187,14 +187,10 @@ fn longest_month(month: u32) -> Option<u32> {
 /// zone name the tz database does not carry (deliberately not a
 /// fallback to UTC — a day answered some hours wrong is the kind of
 /// wrong nobody reports); `day_of_year` together with a range; a date
-/// string the calendar cannot hold; a month or day out of range; and a
-/// range end whose midnight the zone skipped that day, which
-/// `day_window` cannot open and the module doc says is not corrected
-/// for. An inverted range is not one of them — it returns an empty
-/// page, mirroring the raw occurrence window it is the calendar form
-/// of.
+/// string the calendar cannot hold; a month or day out of range. An
+/// inverted range is not one of them — it returns an empty page,
+/// mirroring the raw occurrence window it is the calendar form of.
 fn to_day_filter(query: &ListAssetsQuery) -> Result<Option<DayFilter>, DomainError> {
-    use chrono::Datelike;
     let has_range = query.day_from.is_some() || query.day_until.is_some();
     if !has_range && query.day_of_year.is_none() {
         return Ok(None);
@@ -243,14 +239,6 @@ fn to_day_filter(query: &ListAssetsQuery) -> Result<Option<DayFilter>, DomainErr
                 Some(raw) => parse_day(raw, "day_until")?,
                 None => NaiveDate::from_ymd_opt(2200, 1, 1).expect("far end"),
             };
-            for (date, field) in [(from, "day_from"), (until, "day_until")] {
-                if asset_zone::day_window(zone, date.year(), date.month(), date.day()).is_none() {
-                    return Err(DomainError::Validation(format!(
-                        "{field} {date} has no midnight in {zone_name}: the zone skipped it, and \
-                         asset_zone does not correct for that"
-                    )));
-                }
-            }
             DayAsk::Range { from, until }
         }
     };
