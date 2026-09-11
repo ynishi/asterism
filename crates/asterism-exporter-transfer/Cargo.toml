@@ -56,8 +56,9 @@ russh-sftp = "3"
 # blocking one by default, and a blocking socket inside an exporter
 # would hold a runtime thread for the length of an upload.
 # `tokio-rustls-ring` is the TLS backend: rustls over the same `ring`
-# the russh line above names, for the same reason. The other offer is
-# native-tls, which locates the platform's own TLS — refused by the
+# the russh line above names, which is what this crate's TLS client
+# already resolves. Among the alternatives suppaftp offers is a
+# native-tls one, which locates the platform's own TLS — refused by the
 # native-code rule in the root manifest.
 suppaftp = { version = "12", default-features = false, features = ["tokio", "tokio-rustls-ring"] }
 

@@ -112,7 +112,7 @@
 //! Both are recorded on the attempt before the error is returned, so a
 //! reader of the dispatch sees which refusal it was rather than a
 //! message alone — and so is every other answer given between reading
-//! the params and the first successful put, down to a blob that did not
+//! the params and the first put attempted, down to a blob that did not
 //! parse. [`refuse`] is the one arm those leave through. On either side
 //! of that span the shape is different and deliberately so: an action
 //! this adapter does not take is the SDK's own variant and is answered
@@ -674,7 +674,7 @@ fn account_note(auth: Option<&AuthSchema>) -> Value {
 
 /// Records a refusal and turns it into what `dispatch` returns.
 ///
-/// Every arm between reading the params and the first successful put
+/// Every arm between reading the params and the first put attempted
 /// comes through here, which is what makes the crate doc's promises hold
 /// as one mechanism rather than as a rule each arm has to remember. Not
 /// the two outside that span: an unsupported action is answered before
@@ -1427,9 +1427,10 @@ mod tests {
         );
     }
 
-    /// Every answer this adapter gives without a handle reaches the row,
-    /// including the two that happen before there is a profile or a
-    /// credential to describe.
+    /// The span the crate doc describes reaches back to before there is
+    /// a profile to describe: a blob that did not parse is recorded like
+    /// every other answer between reading the params and the first put
+    /// attempted.
     #[tokio::test]
     async fn a_params_blob_that_does_not_parse_is_recorded() {
         let recorded = Recorded::default();

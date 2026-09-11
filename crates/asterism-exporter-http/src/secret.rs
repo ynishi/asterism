@@ -117,10 +117,10 @@ impl SecretGrammar {
     /// Here rather than at any of the call sites, because every arm
     /// whose text came off the wire is one of them and a rule each arm
     /// has to remember is a rule an arm added later will not. The arms
-    /// that do not reach it are the ones with nothing to hide: an
-    /// unsupported action, a handle from another adapter, a params blob
-    /// that did not parse — each built from a slug or from this
-    /// adapter's own words, answered before anything was sent.
+    /// that do not reach it are the ones with nothing to hide: their
+    /// text is a slug, a path, or this adapter's own words about a
+    /// shape it did not get — never anything the backend said, whether
+    /// or not a call had already been made.
     /// [`Redaction::error`](asterism_exporter_common::Redaction::error)
     /// is what it does and why it has to happen at all.
     pub fn scrub_error(&self, err: ExporterError) -> ExporterError {

@@ -324,10 +324,10 @@ argon2 = "0.5"
 # `rsa` / `p256` / `p384`, the same family argon2 comes from, and that
 # family is the whole of why it is this one. The alternative is
 # `aws_lc_rs`, and the native-code rule at the `c2pa` pin below does not
-# rule it out — `aws-lc-sys` vendors what it builds, and this workspace
-# already resolves it through `rustls`. Until 2026-09-11 this comment
-# said it was "a C build of AWS-LC, which nothing here wants", which
-# read as a prohibition and was wrong on both halves.
+# rule it out: `aws-lc-sys` vendors what it builds and locates nothing,
+# which that rule permits. Until 2026-09-11 this comment said it was "a
+# C build of AWS-LC, which nothing here wants", which read as a
+# prohibition the workspace does not have.
 # Discovery, PKCE and the code exchange are plain HTTP and JSON and
 # stay on `reqwest`; only the signature check needed a crate.
 jsonwebtoken = { version = "11", default-features = false, features = ["use_pem", "rust_crypto"] }
@@ -373,11 +373,28 @@ rand_chacha = "0.9"
 #   platform's own TLS — each makes what a build produces a property of
 #   the machine that ran it, and a user's failure a question about their
 #   machine. What it permits is `ring` and `aws-lc-sys`, which carry
-#   what they need and locate nothing. Both are in this graph: `rustls`
-#   and `rustls-webpki` resolve both providers once their features are
-#   unified across everything here that speaks TLS, and `ring` arrives a
-#   second way through `russh`. That is permitted and not merely
-#   tolerated — nothing here undertakes to get it down to one.
+#   what they need and locate nothing.
+#
+#   The rule is about the target graph — what the shipped binary links.
+#   A build script or a proc-macro runs on the machine doing the build
+#   and ships nothing, so it is outside the rule, the same boundary
+#   `about.toml` draws when it asks what reaches a user. That exemption
+#   is load-bearing rather than tidy: `ort-sys`'s default `tls-native`
+#   puts native-tls into `ureq` for `ort`'s build script under
+#   `asterism-vision`'s optional `onnx` feature, which the sentence
+#   above would otherwise refuse.
+#
+#   What the target graph actually holds, on `aarch64-apple-darwin`:
+#   one provider, `ring`, under every TLS user here — `reqwest` 0.12,
+#   `sqlx-core` (which asks for `_tls-rustls-ring-webpki`), `suppaftp`
+#   and `russh`. `aws-lc-rs` is compiled, but only host-side: `reqwest`
+#   0.13 turns on `__rustls-aws-lc-rs` under `lindera-dictionary`, a
+#   build-dependency of `lindera-ipadic`, and the `sqlx-macros`
+#   proc-macro shares that host `rustls`. So `cargo build` compiles it
+#   and the binary does not link it. Read with
+#   `cargo tree --workspace -e normal,no-proc-macro -i aws-lc-rs`, which
+#   prints nothing, against the same command without the filter, which
+#   prints the host path.
 #
 #   Which is why the rule does not decide this bullet, and saying so is
 #   the point of writing it down: c2pa takes `openssl` with its own
@@ -388,11 +405,11 @@ rand_chacha = "0.9"
 #   and it needs no C build at all.
 #
 #   Until 2026-09-11 this comment said the swap kept the workspace to
-#   "one toolchain". That was never true: `sqlx` has brought
-#   `aws-lc-sys` alongside `ring` since it arrived. The sentence is
-#   recorded here so the next reader does not reinstate a rule this
-#   workspace does not hold, and does not refuse a vendored dependency
-#   on the strength of it.
+#   "one toolchain". Keeping the count down is not the rule and never
+#   was; a vendored backend is allowed however many there are. The
+#   sentence is recorded here so the next reader does not reinstate a
+#   rule this workspace does not hold, and does not refuse a vendored
+#   dependency on the strength of it.
 # - `default_http` — four HTTP client backends, pulled in for fetching
 #   remote manifests and timestamps. This workspace already pins one
 #   `reqwest` line deliberately (see above), and a local-first exporter

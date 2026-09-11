@@ -832,7 +832,7 @@ impl Lines for SqliteForge {
 
                 // Every foreign key inside the forge is RESTRICT, and
                 // `pursuit.parent_id` points at `pursuit` — so no order
-                // over these six statements is right for every shape a
+                // over the deletes below is right for every shape a
                 // line can hold: work filed under work is a chain, and
                 // one `DELETE` cannot walk it parent-last.
                 //
