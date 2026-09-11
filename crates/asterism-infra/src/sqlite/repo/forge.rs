@@ -842,6 +842,24 @@ impl Lines for SqliteForge {
                 // a reference into this line from outside it — another
                 // line's work filed under this line's — still fails,
                 // and fails the whole drop.
+                //
+                // `RESTRICT` is deferred here too, which is the part
+                // worth writing down because the pragma's own
+                // documentation is about foreign keys in general and
+                // `RESTRICT` is usually the exception to deferral.
+                // Measured on SQLite 3.46.0, in-memory, one `RESTRICT`
+                // parent and child: with this pragma set, deleting the
+                // parent while the child is there returns `Ok` and the
+                // COMMIT fails (extended code 787); without it the
+                // statement itself fails (extended code 1811, which is
+                // `RESTRICT`'s implicit trigger). So inside this
+                // transaction every delete below is checked once, at
+                // the end, and the order they are written in is a
+                // reader's convenience rather than a constraint. What
+                // is not optional is that everything referencing the
+                // line is deleted before the COMMIT — a table left out
+                // fails the drop there, naming a constraint rather than
+                // the table somebody forgot.
                 tx.pragma_update(None, "defer_foreign_keys", 1)?;
 
                 // What was said about any of it goes too. A remark
@@ -872,11 +890,12 @@ impl Lines for SqliteForge {
                 )?;
 
                 // Releases of anything on this line, and the sends of
-                // those releases, which `Lines::discard` names among what
-                // a drop takes. The sends go first: `forge_send`'s
-                // reference into `forge_release` is `RESTRICT`, which
-                // SQLite checks at the statement, so a release that has
-                // been sent cannot be deleted while its send is there.
+                // those releases, which `Lines::discard` names among
+                // what a drop takes. A send left here is what the
+                // deferral paragraph above warns about: the COMMIT
+                // fails and says "FOREIGN KEY constraint failed", and
+                // the line cannot be dropped at all while a record of
+                // where its files went is still pointing at it.
                 tx.execute(
                     "DELETE FROM forge_send WHERE release_id IN \
                          (SELECT id FROM forge_release WHERE line_id = ?1)",

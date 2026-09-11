@@ -7986,14 +7986,13 @@ CREATE TABLE forge_release_file (
 ///
 /// # What has an FK and what does not
 ///
-/// The release and the dispatch both do, and both are `RESTRICT`. So
-/// nothing deletes a release while a send names it, and the order in
-/// which a drop takes them is not free: `SqliteForge::discard` deletes
-/// the line's sends ahead of its releases for that reason, and
-/// `Lines::discard` is where what a drop takes is decided.
-/// `destination` has no FK: it is the label the caller gave, and there
-/// is no table of destinations for it to point at, which is the whole of
-/// what "a label and nothing more" means.
+/// The release and the dispatch both do, and both are `RESTRICT`, so
+/// nothing deletes a release while a send names it. What that costs a
+/// drop, and why the order of the deletes inside one is not what makes
+/// it work, is on `SqliteForge::discard`; `Lines::discard` is where what
+/// a drop takes is decided. `destination` has no FK: it is the label the
+/// caller gave, and there is no table of destinations for it to point
+/// at, which is the whole of what "a label and nothing more" means.
 ///
 /// The unique index on `dispatch_id` says a run carries one send.
 /// Sending a release twice is two sends and two runs — the same shape
