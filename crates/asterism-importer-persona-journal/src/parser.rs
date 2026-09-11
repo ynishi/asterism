@@ -110,6 +110,7 @@ impl SourceParser for PersonaJournalParser {
                 external_id: None,
             },
             occurred_at,
+            occurred_source: Default::default(),
             kind,
             body,
             bundle_id,

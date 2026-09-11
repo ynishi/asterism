@@ -130,6 +130,7 @@ impl SourceParser for ImageParser {
                 external_id: None,
             },
             occurred_at,
+            occurred_source: Default::default(),
             // Standalone image import — no conversation container.
             external_session_key: None,
             alt,

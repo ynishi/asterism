@@ -288,6 +288,7 @@ mod tests {
                     external_id: None,
                 },
                 occurred_at: raw.occurred_at.unwrap(),
+                occurred_source: Default::default(),
                 body: String::from_utf8(raw.payload).unwrap(),
                 source_app: None,
                 labels: vec![],

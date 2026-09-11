@@ -22,9 +22,10 @@ use std::path::Path;
 use asterism_contract::command::{
     AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AttachTagBatchCommand,
     AttachTagBatchResult, DeclareProvenanceCommand, DetachTagBatchCommand, DetachTagBatchResult,
-    EmptyTrashCommand, EmptyTrashResult, OnDuplicate as WireOnDuplicate, OrganizeByLocationCommand,
-    OrganizeByLocationResult, PurgeAssetCommand, RestoreAssetCommand, TrashAssetCommand,
-    UpdateAssetMetaBatchCommand, UpdateAssetMetaBatchResult, UpdateAssetMetaCommand,
+    EmptyTrashCommand, EmptyTrashResult, OccurredSource as WireOccurredSource,
+    OnDuplicate as WireOnDuplicate, OrganizeByLocationCommand, OrganizeByLocationResult,
+    PurgeAssetCommand, RestoreAssetCommand, TrashAssetCommand, UpdateAssetMetaBatchCommand,
+    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand,
 };
 use asterism_contract::dto::{
     AssetDetailDto, AssetDto, AssetPageDto, RetrievedIdsDto, RetrievedPageDto, SampledPageDto,
@@ -42,6 +43,7 @@ use crate::application::mapping::{
 };
 use crate::domain::asset::Asset;
 use crate::domain::asset_comment::{AssetComment, CommentAuthor, SelectionGesture};
+use crate::domain::asset_zone::OccurredSource;
 use crate::domain::attribution::{AttributionContext, OperatorRef};
 use crate::domain::content_hash;
 use crate::domain::edge::{ConstellationEdge, EdgeKind};
@@ -1210,6 +1212,12 @@ impl AssetService {
             WireOnDuplicate::Fold => OnDuplicate::Fold,
             WireOnDuplicate::Separate => OnDuplicate::Separate,
         });
+        // Where the stamp came from and the zone it is read in, parsed
+        // here before the first write for the reason the declared hash
+        // below is: the zone is an open IANA name deserialisation
+        // cannot police.
+        let (occurred_source, time_zone) =
+            time_facts_from(command.occurred_source, command.time_zone.as_deref())?;
 
         // The pre-hash declaration, read here for the reason the
         // strategy above is: a notation this service cannot accept is
@@ -1372,6 +1380,10 @@ impl AssetService {
         // platforms number their records alike. The only thing this
         // assignment must not become is a lookup.
         asset.external_key = command.external_key;
+        // The two facts the row's time is resolved from
+        // (`domain::asset_zone`), as the caller stated them.
+        asset.occurred_source = occurred_source;
+        asset.time_zone = time_zone;
         asset.bundle_id = command
             .bundle_id
             .map(crate::domain::value::BundleId::new)
@@ -5518,6 +5530,38 @@ impl AssetService {
     }
 }
 
+/// The two facts a row's time is resolved from
+/// (`domain::asset_zone`), read off the add command.
+///
+/// The source is an exhaustive match over the closed wire enum, on
+/// the terms `on_duplicate` sets in [`AssetService::add`]: a rung added
+/// on either side has to be answered for on the other. The zone is an
+/// IANA name deserialisation cannot police, so a name the tz database
+/// does not carry is refused here as a `Validation` — the request's
+/// fault — and never reaches a row.
+fn time_facts_from(
+    source: WireOccurredSource,
+    time_zone: Option<&str>,
+) -> Result<(OccurredSource, Option<chrono_tz::Tz>), DomainError> {
+    let occurred_source = match source {
+        WireOccurredSource::Exif => OccurredSource::Exif,
+        WireOccurredSource::Mtime => OccurredSource::Mtime,
+        WireOccurredSource::Record => OccurredSource::Record,
+        WireOccurredSource::Import => OccurredSource::Import,
+        WireOccurredSource::Unknown => OccurredSource::Unknown,
+    };
+    let time_zone = time_zone
+        .map(|name| {
+            name.trim().parse::<chrono_tz::Tz>().map_err(|_| {
+                DomainError::Validation(format!(
+                    "unknown time_zone: {name:?} (expected an IANA name such as \"Asia/Tokyo\")"
+                ))
+            })
+        })
+        .transpose()?;
+    Ok((occurred_source, time_zone))
+}
+
 /// The one normalisation a tag name goes through, shared by every
 /// path that mints or rewrites one
 /// ([`AssetService::attach_tag`] / [`AssetService::rename_tag`]).
@@ -6123,6 +6167,62 @@ fn synth_item(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The add path is the one place a caller's rung reaches a row,
+    /// and the row's time is decided from it. A command saying its
+    /// stamp is the import moment produces an entity whose resolved
+    /// time is its arrival — `Added`, on `created_at` — under every
+    /// viewer zone, while the same command saying nothing keeps the
+    /// occurrence stamp. A zone the tz database does not carry is
+    /// refused before any row could be written.
+    #[test]
+    fn an_import_sourced_command_resolves_to_the_arrival() {
+        use crate::domain::asset_zone::{GlobalZone, TimeStamp, resolve};
+        use crate::domain::value::SourceKind;
+
+        let stamp = parse_ms(1_700_000_000_000, "occurred_at_ms").unwrap();
+        // The same two steps `add` takes — the wire pair through
+        // `time_facts_from`, then the assignment after `Asset::new` —
+        // on the entity `add` would build from such a command.
+        let build = |source: WireOccurredSource, zone: Option<&str>| {
+            let (occurred_source, time_zone) = time_facts_from(source, zone)?;
+            let mut asset = Asset::new(
+                PersonaId::new(),
+                SourceRef::new(SourceKind::new(SourceKind::FS).unwrap(), "/gen/out.png").unwrap(),
+                None,
+                stamp,
+                &AttributionContext::unrecorded(),
+            );
+            asset.occurred_source = occurred_source;
+            asset.time_zone = time_zone;
+            Ok::<_, DomainError>(asset)
+        };
+
+        let imported = build(WireOccurredSource::Import, None).unwrap();
+        let resolved = resolve(&imported.asset_time(), GlobalZone(chrono_tz::UTC));
+        assert_eq!(resolved.stamp, TimeStamp::Added);
+        assert_eq!(resolved.instant, imported.created_at);
+        assert_ne!(
+            resolved.instant, stamp,
+            "the bogus occurrence is not the time"
+        );
+
+        let unsaid = build(WireOccurredSource::Unknown, Some("Asia/Tokyo")).unwrap();
+        let resolved = resolve(&unsaid.asset_time(), GlobalZone(chrono_tz::UTC));
+        assert_eq!(resolved.stamp, TimeStamp::Occurred);
+        assert_eq!(resolved.instant, stamp);
+        assert_eq!(
+            resolved.zone,
+            chrono_tz::Asia::Tokyo,
+            "the row's own zone wins"
+        );
+
+        let err = build(WireOccurredSource::Exif, Some("Mars/Olympus")).unwrap_err();
+        assert!(
+            matches!(err, DomainError::Validation(ref m) if m.contains("Mars/Olympus")),
+            "{err:?}"
+        );
+    }
 
     /// The assertion writes into `_trace` beside what is already there,
     /// and its removal takes only its own key — the care every `_trace`

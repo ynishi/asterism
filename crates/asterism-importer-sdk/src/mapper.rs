@@ -1,7 +1,7 @@
 //! Convenience shape for parser output plus the mapping to the wire
 //! `AddAssetCommand`.
 
-use asterism_contract::command::AddAssetCommand;
+use asterism_contract::command::{AddAssetCommand, OccurredSource};
 use chrono::{DateTime, Utc};
 
 /// What a parser hands back to the pipeline.
@@ -24,6 +24,21 @@ pub struct AssetSpec {
     pub modality: Option<String>,
     /// Occurrence time.
     pub occurred_at: DateTime<Utc>,
+    /// Which rung of the parser's fallback ladder produced
+    /// [`occurred_at`](Self::occurred_at). A parser that read a capture
+    /// time says `Exif`; one that fell back to the file's modification
+    /// time says `Mtime`; one that had nothing and wrote the import
+    /// moment says `Import` — and that last one is the value the
+    /// server reads to treat the row's time as its arrival rather than
+    /// the stamp. A parser that does not say leaves `Unknown`, which
+    /// the server reads as an occurrence, the way every row was read
+    /// before the rung was recorded.
+    pub occurred_source: OccurredSource,
+    /// The zone the recorded thing happened in, by IANA name, when the
+    /// source states one. `None` for every parser today — no source
+    /// this workspace reads carries a zone yet — and the server reads
+    /// an unzoned row in the viewer's zone.
+    pub time_zone: Option<String>,
     /// Session.id UUID direct — reserved for callers that already
     /// hold a materialised `Session.id`. Importers cannot know the
     /// server-side surrogate id, so they always leave this `None`
@@ -182,6 +197,8 @@ pub fn spec_to_command(spec: AssetSpec, persona_id: &str) -> AddAssetCommand {
         locator: spec.locator,
         modality: spec.modality,
         occurred_at_ms: spec.occurred_at.timestamp_millis(),
+        occurred_source: spec.occurred_source,
+        time_zone: spec.time_zone,
         session_id: spec.session_id,
         external_session_key: spec.external_session_key,
         external_key: spec.external_key,
@@ -245,6 +262,7 @@ mod tests {
                 external_id: None,
             },
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             body: "a note".into(),
             source_app: None,
             labels: Vec::new(),
@@ -293,6 +311,7 @@ mod tests {
                 external_id: None,
             },
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             external_session_key: None,
             alt: None,
             dims: None,

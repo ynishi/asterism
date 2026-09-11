@@ -42,6 +42,8 @@ fn add_command(
         locator: locator.to_string(),
         modality: None,
         occurred_at_ms,
+        occurred_source: Default::default(),
+        time_zone: None,
         session_id: None,
         external_session_key: None,
         external_key: None,

@@ -56,6 +56,7 @@ impl SourceParser for TapeParser {
                 external_id: None,
             },
             occurred_at: item.occurred_at.unwrap_or_else(Utc::now),
+            occurred_source: Default::default(),
             title: Some(title),
             excerpt,
             // Tape is a non-Dialog modality — the file stem drives

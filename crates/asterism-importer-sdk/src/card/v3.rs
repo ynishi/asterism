@@ -66,6 +66,7 @@ impl CharacterCardParser for V3Parser {
             out.push(Footprint::Doc(Doc {
                 source: ctx.footprint_source(&format!("field=creator_notes_ml={lang}")),
                 occurred_at: ctx.occurred_at,
+                occurred_source: ctx.occurred_source,
                 title: Some(format!("creator_notes:{lang}")),
                 excerpt: text.to_string(),
                 format: DocFormat::Markdown,
@@ -112,6 +113,7 @@ impl CharacterCardParser for V3Parser {
                 out.push(Footprint::ChatMessage(ChatMessage {
                     source: ctx.footprint_source(&format!("group_only_greeting={i}")),
                     occurred_at: ctx.occurred_at,
+                    occurred_source: ctx.occurred_source,
                     external_session_key: ctx.session_id.to_string(),
                     role: ChatRole::Assistant,
                     body: text.to_string(),
@@ -158,6 +160,7 @@ impl CharacterCardParser for V3Parser {
                     // when its `assets[]` are references to elsewhere.
                     source: ctx.asset_source(uri, &format!("asset={atype}/{name}[{i}]")),
                     occurred_at: ctx.occurred_at,
+                    occurred_source: ctx.occurred_source,
                     external_session_key: None,
                     alt: Some(format!("{atype}:{name}")),
                     dims: None,
@@ -200,6 +203,7 @@ mod tests {
             locator: "/tmp/alice.png",
             session_id: "sid-v3",
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             platform: Some("SillyTavern"),
             archive_entries: None,
         }

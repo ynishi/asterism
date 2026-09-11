@@ -702,6 +702,8 @@ pub async fn paste_image_import(
         // extension — not a semantic classification.
         modality: None,
         occurred_at_ms: now.timestamp_millis(),
+        occurred_source: Default::default(),
+        time_zone: None,
         session_id: None,
         // `external_session_key` was added alongside `session_id`;
         // pasted images are ad-hoc (no importer key) so both stay
@@ -4506,6 +4508,8 @@ impl asterism_teams_client::clone::Imports for LocalLibrary<'_> {
                     // from the file.
                     modality: None,
                     occurred_at_ms: arrival.occurred_at.timestamp_millis(),
+                    occurred_source: Default::default(),
+                    time_zone: None,
                     session_id: None,
                     external_session_key: None,
                     external_key: None,

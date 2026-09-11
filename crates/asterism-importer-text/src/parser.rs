@@ -128,6 +128,7 @@ impl SourceParser for TextParser {
             // `derived_from`, which the SDK places on the three media
             // variants and says why beside them.
             occurred_at: item.occurred_at.unwrap_or_else(Utc::now),
+            occurred_source: Default::default(),
             title: Some(title),
             excerpt,
             format,

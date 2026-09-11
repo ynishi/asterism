@@ -93,6 +93,8 @@ fn add_command(
         locator: locator.to_string(),
         modality: Some(modality.to_string()),
         occurred_at_ms,
+        occurred_source: Default::default(),
+        time_zone: None,
         session_id: None,
         external_session_key: None,
         external_key: None,

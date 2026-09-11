@@ -101,6 +101,8 @@ async fn an_asset_of(
                 locator: file.to_string_lossy().into_owned(),
                 modality: Some("dialogue".into()),
                 occurred_at_ms: 0,
+                occurred_source: Default::default(),
+                time_zone: None,
                 session_id: None,
                 external_session_key: None,
                 external_key: None,

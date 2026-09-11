@@ -120,6 +120,7 @@ impl SourceParser for AudioParser {
                 external_id: None,
             },
             occurred_at,
+            occurred_source: Default::default(),
             alt,
             duration_ms: probed.as_ref().and_then(|p| p.duration_ms),
             file_size_bytes,

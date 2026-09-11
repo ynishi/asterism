@@ -126,6 +126,7 @@ impl SourceParser for VideoParser {
                 external_id: None,
             },
             occurred_at,
+            occurred_source: Default::default(),
             alt,
             dims,
             duration_ms,

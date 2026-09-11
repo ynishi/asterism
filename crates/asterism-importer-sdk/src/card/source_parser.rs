@@ -11,13 +11,12 @@
 //! so they only need to configure the source_kind slug and the batch
 //! posting loop.
 
-use chrono::Utc;
 use serde_json::Value;
 
-use crate::Footprint;
 use crate::bundle::session_id_for;
-use crate::parser::{ParseError, SourceParser};
+use crate::parser::{ParseError, SourceParser, resolve_occurrence};
 use crate::scanner::RawItem;
+use crate::{Footprint, OccurredSource};
 
 use super::charx;
 use super::envelope::{CardContext, CardEnvelope};
@@ -101,12 +100,16 @@ impl SourceParser for CharaSourceParser {
             return Ok(Vec::new());
         };
         let session_id = session_id_for(&item.locator);
-        let occurred_at = item.occurred_at.unwrap_or_else(Utc::now);
+        // A card carries no timestamp of its own, so rung 1 is empty
+        // and the ladder starts at the container's.
+        let (occurred_at, occurred_source) =
+            resolve_occurrence(None, OccurredSource::Record, item.occurred_at);
         let ctx = CardContext {
             source_kind: &item.source_kind,
             locator: &item.locator,
             session_id: &session_id,
             occurred_at,
+            occurred_source,
             platform: self.platform.as_deref(),
             archive_entries: entries.as_deref(),
         };

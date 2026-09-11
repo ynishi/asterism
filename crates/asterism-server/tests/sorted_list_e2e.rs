@@ -51,6 +51,8 @@ fn add_command(persona_id: &str, locator: &str, occurred_at_ms: i64) -> AddAsset
         locator: locator.to_string(),
         modality: Some("image".into()),
         occurred_at_ms,
+        occurred_source: Default::default(),
+        time_zone: None,
         session_id: None,
         external_session_key: None,
         external_key: None,

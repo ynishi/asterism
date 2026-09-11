@@ -62,6 +62,9 @@ fn report(keyword: &str, env: &CardEnvelope) {
         locator: "character-card-lyra.png",
         session_id: "sess-card",
         occurred_at: Utc::now(),
+        // An inspection, not an import: the stamp is the moment of the
+        // look and nothing records it, so the rung is the import one.
+        occurred_source: asterism_importer_sdk::OccurredSource::Import,
         platform: Some("SillyTavern"),
         archive_entries: None,
     };

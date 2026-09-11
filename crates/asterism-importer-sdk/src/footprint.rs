@@ -29,6 +29,8 @@
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
+use asterism_contract::command::OccurredSource;
+
 use crate::mapper::AssetSpec;
 
 /// Maximum cover hint length in Unicode scalar values.
@@ -238,6 +240,11 @@ pub struct ChatMessage {
     pub source: FootprintSource,
     /// Time the message occurred in the outside world.
     pub occurred_at: DateTime<Utc>,
+    /// Which rung of the parser's fallback ladder produced
+    /// [`occurred_at`](Self::occurred_at) — see
+    /// [`AssetSpec::occurred_source`](crate::mapper::AssetSpec::occurred_source),
+    /// which this lands on unchanged.
+    pub occurred_source: OccurredSource,
     /// External session identifier the importer knows (Claude Code
     /// session UUID, JSONL file stem, conversation id, thread id, …).
     /// Required — chat without a session context has nothing to
@@ -274,6 +281,11 @@ pub struct Doc {
     pub source: FootprintSource,
     /// Time the doc was authored / updated.
     pub occurred_at: DateTime<Utc>,
+    /// Which rung of the parser's fallback ladder produced
+    /// [`occurred_at`](Self::occurred_at) — see
+    /// [`AssetSpec::occurred_source`](crate::mapper::AssetSpec::occurred_source),
+    /// which this lands on unchanged.
+    pub occurred_source: OccurredSource,
     /// Optional title (first heading, filename, …). Becomes the
     /// register note when present.
     pub title: Option<String>,
@@ -307,6 +319,11 @@ pub struct Note {
     pub source: FootprintSource,
     /// Time the note was recorded.
     pub occurred_at: DateTime<Utc>,
+    /// Which rung of the parser's fallback ladder produced
+    /// [`occurred_at`](Self::occurred_at) — see
+    /// [`AssetSpec::occurred_source`](crate::mapper::AssetSpec::occurred_source),
+    /// which this lands on unchanged.
+    pub occurred_source: OccurredSource,
     /// Body text. Becomes the cover hint (truncated) and register
     /// note (further truncated).
     pub body: String,
@@ -334,6 +351,11 @@ pub struct Image {
     pub source: FootprintSource,
     /// Time the image was captured.
     pub occurred_at: DateTime<Utc>,
+    /// Which rung of the parser's fallback ladder produced
+    /// [`occurred_at`](Self::occurred_at) — see
+    /// [`AssetSpec::occurred_source`](crate::mapper::AssetSpec::occurred_source),
+    /// which this lands on unchanged.
+    pub occurred_source: OccurredSource,
     /// Session container binding (asset-model v4 P4). `Some(key)` for
     /// an image that entered a conversation — the server resolves the
     /// key to the same composite the conversation's messages belong
@@ -401,6 +423,11 @@ pub struct Video {
     pub source: FootprintSource,
     /// Time the video was recorded / generated.
     pub occurred_at: DateTime<Utc>,
+    /// Which rung of the parser's fallback ladder produced
+    /// [`occurred_at`](Self::occurred_at) — see
+    /// [`AssetSpec::occurred_source`](crate::mapper::AssetSpec::occurred_source),
+    /// which this lands on unchanged.
+    pub occurred_source: OccurredSource,
     /// Caption / title / filename stem. Becomes the cover hint when
     /// present.
     pub alt: Option<String>,
@@ -456,6 +483,11 @@ pub struct Audio {
     pub source: FootprintSource,
     /// Time the audio was recorded / synthesised.
     pub occurred_at: DateTime<Utc>,
+    /// Which rung of the parser's fallback ladder produced
+    /// [`occurred_at`](Self::occurred_at) — see
+    /// [`AssetSpec::occurred_source`](crate::mapper::AssetSpec::occurred_source),
+    /// which this lands on unchanged.
+    pub occurred_source: OccurredSource,
     /// Caption / title / filename stem. Becomes the cover hint when
     /// present.
     pub alt: Option<String>,
@@ -501,6 +533,11 @@ pub struct Tape {
     pub source: FootprintSource,
     /// Time the tape session occurred.
     pub occurred_at: DateTime<Utc>,
+    /// Which rung of the parser's fallback ladder produced
+    /// [`occurred_at`](Self::occurred_at) — see
+    /// [`AssetSpec::occurred_source`](crate::mapper::AssetSpec::occurred_source),
+    /// which this lands on unchanged.
+    pub occurred_source: OccurredSource,
     /// Optional title / stem.
     pub title: Option<String>,
     /// Excerpt shown on the card cover.
@@ -568,6 +605,11 @@ pub struct JournalEntry {
     pub source: FootprintSource,
     /// Time the entry was recorded.
     pub occurred_at: DateTime<Utc>,
+    /// Which rung of the parser's fallback ladder produced
+    /// [`occurred_at`](Self::occurred_at) — see
+    /// [`AssetSpec::occurred_source`](crate::mapper::AssetSpec::occurred_source),
+    /// which this lands on unchanged.
+    pub occurred_source: OccurredSource,
     /// Modality slug via [`JournalKind`].
     pub kind: JournalKind,
     /// Body text. Becomes the cover hint (truncated) and register
@@ -671,6 +713,10 @@ fn chat_to_spec(m: ChatMessage) -> AssetSpec {
         // (V43).
         modality: Some("message".into()),
         occurred_at: m.occurred_at,
+        occurred_source: m.occurred_source,
+        // No source this workspace reads carries a zone; see
+        // `AssetSpec::time_zone`.
+        time_zone: None,
         // Importers never know the server-side `Session.id` — they
         // hand the raw key through `external_session_key` and let
         // the server resolve it via `find_or_create_by_external_key`.
@@ -707,6 +753,10 @@ fn doc_to_spec(d: Doc) -> AssetSpec {
         locator: d.source.locator,
         modality: Some("work_product".into()),
         occurred_at: d.occurred_at,
+        occurred_source: d.occurred_source,
+        // No source this workspace reads carries a zone; see
+        // `AssetSpec::time_zone`.
+        time_zone: None,
         session_id: None,
         external_session_key: None,
         external_key: d.source.external_id,
@@ -743,6 +793,10 @@ fn note_to_spec(n: Note) -> AssetSpec {
         locator: n.source.locator,
         modality: Some("memory".into()),
         occurred_at: n.occurred_at,
+        occurred_source: n.occurred_source,
+        // No source this workspace reads carries a zone; see
+        // `AssetSpec::time_zone`.
+        time_zone: None,
         session_id: None,
         external_session_key: None,
         external_key: n.source.external_id,
@@ -775,6 +829,10 @@ fn journal_to_spec(j: JournalEntry) -> AssetSpec {
         locator: j.source.locator,
         modality: Some(j.kind.as_modality_slug().to_string()),
         occurred_at: j.occurred_at,
+        occurred_source: j.occurred_source,
+        // No source this workspace reads carries a zone; see
+        // `AssetSpec::time_zone`.
+        time_zone: None,
         session_id: None,
         external_session_key: None,
         external_key: j.source.external_id,
@@ -815,6 +873,10 @@ fn image_to_spec(i: Image) -> AssetSpec {
         // it on the material layer from the locator.
         modality: None,
         occurred_at: i.occurred_at,
+        occurred_source: i.occurred_source,
+        // No source this workspace reads carries a zone; see
+        // `AssetSpec::time_zone`.
+        time_zone: None,
         session_id: None,
         external_session_key: i.external_session_key,
         external_key: i.source.external_id,
@@ -864,6 +926,10 @@ fn video_to_spec(v: Video) -> AssetSpec {
         // Format, not classification (see the Image arm).
         modality: None,
         occurred_at: v.occurred_at,
+        occurred_source: v.occurred_source,
+        // No source this workspace reads carries a zone; see
+        // `AssetSpec::time_zone`.
+        time_zone: None,
         session_id: None,
         external_session_key: None,
         external_key: v.source.external_id,
@@ -912,6 +978,10 @@ fn audio_to_spec(a: Audio) -> AssetSpec {
         // Format, not classification (see the Image arm).
         modality: None,
         occurred_at: a.occurred_at,
+        occurred_source: a.occurred_source,
+        // No source this workspace reads carries a zone; see
+        // `AssetSpec::time_zone`.
+        time_zone: None,
         session_id: None,
         external_session_key: None,
         external_key: a.source.external_id,
@@ -946,6 +1016,10 @@ fn tape_to_spec(t: Tape) -> AssetSpec {
         locator: t.source.locator,
         modality: Some("tape".into()),
         occurred_at: t.occurred_at,
+        occurred_source: t.occurred_source,
+        // No source this workspace reads carries a zone; see
+        // `AssetSpec::time_zone`.
+        time_zone: None,
         session_id: None,
         external_session_key: None,
         external_key: t.source.external_id,
@@ -992,6 +1066,7 @@ mod tests {
         let fp = Footprint::ChatMessage(ChatMessage {
             source: stub_source(),
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             external_session_key: "s-1".into(),
             role: ChatRole::User,
             body: "hello world".into(),
@@ -1035,6 +1110,7 @@ mod tests {
         let fp = Footprint::Doc(Doc {
             source: stub_source(),
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             title: Some("My Doc".into()),
             excerpt: "abstract goes here".into(),
             format: DocFormat::Markdown,
@@ -1061,6 +1137,7 @@ mod tests {
                 external_id: None,
             },
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             body: "quick thought".into(),
             source_app: Some("Apple Notes".into()),
             labels: vec![],
@@ -1082,6 +1159,7 @@ mod tests {
                 external_id: None,
             },
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             body: "1girl, solo".into(),
             source_app: None,
             labels: vec![],
@@ -1104,6 +1182,7 @@ mod tests {
                 external_id: None,
             },
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             external_session_key: None,
             alt: Some("stub".into()),
             dims: None,
@@ -1145,6 +1224,7 @@ mod tests {
                 external_id: None,
             },
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             external_session_key: None,
             alt: None,
             dims,
@@ -1166,6 +1246,7 @@ mod tests {
                 external_id: None,
             },
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             alt: None,
             dims,
             duration_ms: Some(4_000),
@@ -1246,6 +1327,7 @@ mod tests {
         let chat = Footprint::ChatMessage(ChatMessage {
             source: stub_source(),
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             external_session_key: "s-1".into(),
             role: ChatRole::User,
             body: "hello".into(),
@@ -1257,6 +1339,7 @@ mod tests {
         let doc = Footprint::Doc(Doc {
             source: stub_source(),
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             title: None,
             excerpt: "an excerpt".into(),
             format: DocFormat::Markdown,
@@ -1269,6 +1352,7 @@ mod tests {
         let note = Footprint::Note(Note {
             source: stub_source(),
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             body: "a note".into(),
             source_app: None,
             labels: vec![],
@@ -1278,6 +1362,7 @@ mod tests {
         let journal = Footprint::JournalEntry(JournalEntry {
             source: stub_source(),
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             kind: JournalKind::State,
             body: "a state".into(),
             bundle_id: None,
@@ -1287,6 +1372,7 @@ mod tests {
         let audio = Footprint::Audio(Audio {
             source: stub_source(),
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             alt: None,
             duration_ms: Some(1_000),
             file_size_bytes: None,
@@ -1302,6 +1388,7 @@ mod tests {
         let tape = Footprint::Tape(Tape {
             source: stub_source(),
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             title: None,
             excerpt: "a transcript".into(),
             bundle_id: None,
@@ -1356,6 +1443,7 @@ mod tests {
         let fp = Footprint::ChatMessage(ChatMessage {
             source: stub_source(),
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             external_session_key: "s".into(),
             role: ChatRole::Assistant,
             body: long,

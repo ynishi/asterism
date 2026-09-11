@@ -196,6 +196,8 @@ fn arrival(persona: &PersonaId, locator: &str) -> AddAssetCommand {
         locator: locator.to_string(),
         modality: None,
         occurred_at_ms: 1_700_000_000_000,
+        occurred_source: Default::default(),
+        time_zone: None,
         session_id: None,
         external_session_key: None,
         external_key: None,
