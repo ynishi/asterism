@@ -9,7 +9,7 @@
   // a view of its own — the grid stays the grid, holding fewer cards.
   //
   // State (0-prop, catalog-driven):
-  //   - activeFilter.dayFrom / .dayUntil / .dayOfYear
+  //   - activeFilter.dayFrom / .dayUntil / .dayOfYear / .dayTimeZone
   //
   // This component never does date arithmetic: `activeFilter.jumpTo()`
   // turns a date and a span into the range, `jumpToDayOfYear()` turns
@@ -64,14 +64,6 @@
     activeFilter.jumpTo(date, next);
   }
 
-  // The range as a sentence, for the case the span buttons cannot
-  // describe. The dates are shown as themselves: they are calendar
-  // dates in the filter's zone, and formatting them through the
-  // machine's own zone could move one by a day.
-  function rangeText(): string {
-    return `${activeFilter.dayFrom ?? "…"} → ${activeFilter.dayUntil ?? "…"}`;
-  }
-
   // The zone the days are read in, shown only when it is not where the
   // viewer is — a restored rule carries its own, and a day under a zone
   // the viewer does not live in is worth a line on screen.
@@ -116,7 +108,7 @@
     {#if span === null && !everyYear}
       <!-- A range this picker did not draw and cannot round off. It
            is applied all the same, so it is shown as itself. -->
-      <p class="jump-note">{rangeText()}</p>
+      <p class="jump-note">{activeFilter.dayRangeText()}</p>
     {/if}
     {#if foreignZone !== null}
       <p class="jump-note">read in {foreignZone}</p>

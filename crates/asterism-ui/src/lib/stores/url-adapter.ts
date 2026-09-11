@@ -103,9 +103,11 @@ function isViewMode(v: string): v is ViewMode {
 // is what has to be remembered when the union changes.
 
 // A calendar date off the query string, in the one form the store
-// takes. Shape only — whether the calendar has the day is the store's
-// question on the way in and the backend's on the way out; here a
-// malformed half reads as an open end rather than failing the link.
+// takes. Shape only: the link path writes the field directly, so
+// whether the calendar has the day (`2026-02-30`) is left to the
+// backend, which refuses it and says so — a link with a typo should
+// say so. A half that is not even the shape reads as an open end
+// rather than failing the whole link.
 function parseIsoDay(raw: string | undefined): string | null {
   if (raw === undefined) return null;
   const s = raw.trim();

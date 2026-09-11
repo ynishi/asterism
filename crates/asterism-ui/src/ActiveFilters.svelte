@@ -18,10 +18,9 @@
   // The three callback props are App-owned grid side effects (the
   // one prop category the 0-prop rule allows): search-clear and reset both
   // flush the App-side search debounce timer + reload, and save opens
-  // the App-owned custom-prompt modal. Per-axis clears (persona /
-  // modality / label / tags / groups / session) mutate `activeFilter`
-  // directly because the App reload `$effect` already tracks those
-  // fields.
+  // the App-owned custom-prompt modal. Every other chip's clear
+  // mutates `activeFilter` directly, because the App reload `$effect`
+  // already tracks the field it clears.
   //
   // Two chips carry a *mode* rather than a selection:
   //   - the AND checkbox flips `tagMatchAll` (OR ⇄ AND over the tag
@@ -110,7 +109,7 @@
     const date = activeFilter.jumpDate();
     const span = activeFilter.jumpSpan();
     if (date !== null && span !== null) return `${date} · ${span}${zone}`;
-    return `${activeFilter.dayFrom ?? "…"} → ${activeFilter.dayUntil ?? "…"}${zone}`;
+    return `${activeFilter.dayRangeText()}${zone}`;
   }
 </script>
 

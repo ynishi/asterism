@@ -239,14 +239,15 @@ export type DayFilterQuery = {
  * day in a past year under that year's own rule; an offset would only
  * describe today (`ListAssetsQuery::time_zone`).
  *
- * Read as what the spec actually promises: `timeZone` is an optional
- * member of `ResolvedDateTimeFormatOptions`, and TypeScript's lib types
- * declare it required, so the widening is what keeps the fallback a
- * real branch. Every runtime this app ships on does resolve it; the
- * fallback is for the one that does not, and `"UTC"` is the one name the
- * backend is certain to accept — a day answered in UTC on such a
- * platform is a day answered, where an empty name is a refused query
- * with nothing on screen to say why.
+ * ECMA-402 has answered `resolvedOptions().timeZone` with the default
+ * zone since its second edition, and TypeScript's lib types declare it
+ * required on that basis; only the first edition (2012) returned
+ * `undefined` when no zone option was passed. The widening is for an
+ * engine still on that edition, and is what keeps the fallback a real
+ * branch rather than dead code. `"UTC"` is the one name the backend is
+ * certain to accept — a day answered in UTC on such an engine is a day
+ * answered, where an empty name is a refused query with nothing on
+ * screen to say why.
  */
 export function viewerTimeZone(): string {
   const zone = (Intl.DateTimeFormat().resolvedOptions() as { timeZone?: string }).timeZone;
@@ -379,8 +380,10 @@ class Filter {
    * than as a place to scroll to. `dayFrom` / `dayUntil` are a half-open
    * `[from, until)` range of `YYYY-MM-DD` dates, `null` at either end
    * meaning that end is open; `dayOfYear` is one month-and-day across
-   * every year. The backend refuses both cuts at once, and the setters
-   * below never produce that state.
+   * every year. The backend refuses both cuts at once; `jumpTo` and
+   * `jumpToDayOfYear` each clear the other, and the two paths that
+   * take the fields from outside — a stored rule and a link — keep the
+   * range and drop the day-of-year when they arrive together.
    *
    * Held as calendar dates, which are the wire's own form
    * (`ListAssetsQuery::day_from`): nothing is converted on the way out
@@ -403,12 +406,14 @@ class Filter {
 
   /**
    * The zone the calendar filter is read in, by IANA name. The viewer's
-   * own zone, read once from the platform, except after a Query Group
-   * restore: a rule persists the zone it was written under
-   * (`ListAssetsQuery::time_zone`), and restoring the days under a
-   * different one would show a different set than the group holds. It
-   * goes back to the viewer's zone when the filter is cleared, so a day
-   * picked fresh is read where the person picking it is.
+   * own zone, except when the days arrived with one of their own: a
+   * Query Group rule persists the zone it was written under
+   * (`ListAssetsQuery::time_zone`) and a deep link carries it beside
+   * the days (`url-adapter`), and reading either's days under a
+   * different zone would show a different set than the one saved. It
+   * goes back to the viewer's zone — read from the platform again —
+   * whenever the filter is cleared, so a day picked fresh is read where
+   * the person picking it is.
    */
   dayTimeZone = $state<string>(viewerTimeZone());
 
@@ -531,7 +536,7 @@ class Filter {
 
   /**
    * The calendar filter in wire form. Spread by the grid's query
-   * builder and by both Query Group writers, so "which fields is the
+   * builder and by the Query Group writers, so "which fields is the
    * day filter" is stated once. The zone is sent only beside a day: it
    * is inert without one on the backend, and a rule frozen with no day
    * should look like one frozen before the fields existed.
@@ -548,6 +553,17 @@ class Filter {
   /** `true` while the grid is held to a calendar cut of either kind. */
   hasDayFilter(): boolean {
     return this.dayFrom !== null || this.dayUntil !== null || this.dayOfYear !== null;
+  }
+
+  /**
+   * The range as a sentence, for a range the span picker cannot
+   * describe. The dates are shown as themselves: they are calendar
+   * dates in the filter's zone, and formatting them through the
+   * machine's own zone could move one by a day. An open end is `…`.
+   * Owned here so the sidebar note and the chip say the same thing.
+   */
+  dayRangeText(): string {
+    return `${this.dayFrom ?? "…"} → ${this.dayUntil ?? "…"}`;
   }
 
   /**
@@ -888,12 +904,16 @@ class Filter {
     // state comes back out through `jumpSpan()`. A day-of-year that is
     // not a pair of numbers is dropped rather than sent: the wire would
     // refuse the whole query, and a rule the backend already evaluates
-    // cannot have carried one.
+    // cannot have carried one. A rule naming both cuts is one the
+    // backend stores and then refuses to evaluate; the range wins here,
+    // the same precedence the URL adapter applies, so the restored
+    // filter is one the grid can answer rather than one it refuses on
+    // every reload.
     this.dayFrom = f.day_from ?? null;
     this.dayUntil = f.day_until ?? null;
     const doy = f.day_of_year;
     this.dayOfYear =
-      doy && typeof doy.month === "number" && typeof doy.day === "number"
+      !this.hasDayFilter() && doy && typeof doy.month === "number" && typeof doy.day === "number"
         ? { month: doy.month, day: doy.day }
         : null;
     // The zone the rule was written under outranks the viewer's while

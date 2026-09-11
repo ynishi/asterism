@@ -160,6 +160,12 @@ describe("jumpDate / jumpSpan — reading the controls back out", () => {
     expect(activeFilter.jumpDate(2028)).toBe("2028-02-29");
   });
 
+  it("renders an open end as an ellipsis", () => {
+    activeFilter.dayFrom = "2026-03-14";
+    activeFilter.dayUntil = null;
+    expect(activeFilter.dayRangeText()).toBe("2026-03-14 → …");
+  });
+
   it("says a range it did not draw is no span, and still applies it", () => {
     // A rule written through the MCP tool, or by hand, can name any two
     // dates. Rounding it to the nearest day on the way in would make a
@@ -316,5 +322,23 @@ describe("restoreQueryGroup — the calendar filter is part of a saved rule", ()
   it("drops a day-of-year that is not a pair of numbers", () => {
     activeFilter.restoreQueryGroup(rule({ day_of_year: { month: "3", day: 14 } }));
     expect(activeFilter.dayOfYear).toBeNull();
+  });
+
+  it("keeps the range and drops the day-of-year when a rule names both", () => {
+    // The backend stores such a rule and refuses to evaluate it. The
+    // URL adapter lets the range win; the restore path has to agree,
+    // or a restored group would be a filter the grid refuses on every
+    // reload.
+    activeFilter.restoreQueryGroup(
+      rule({
+        day_from: "2026-03-01",
+        day_until: "2026-03-02",
+        day_of_year: { month: 3, day: 14 },
+        time_zone: "UTC",
+      }),
+    );
+    expect(activeFilter.dayFrom).toBe("2026-03-01");
+    expect(activeFilter.dayOfYear).toBeNull();
+    expect(activeFilter.dayFilter().time_zone).toBe("UTC");
   });
 });

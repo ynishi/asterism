@@ -18,12 +18,12 @@
 //!
 //! # Why the fixtures are instants written in UTC
 //!
-//! Asia/Tokyo is UTC+9 with no transitions and America/Phoenix is
-//! UTC-7 with none, so every window below is arithmetic a reader can
-//! check by hand, and no date in this file depends on which year's
-//! rule the tz database applied. What a zone that transitions does is
-//! the unit tests' subject (`asset_zone`); the e2e is about which rows
-//! a live query returns.
+//! Asia/Tokyo is UTC+9 and America/Phoenix is UTC-7 in every year this
+//! file names (Japan's last transition was 1951, Phoenix's 1967), so
+//! every window below is arithmetic a reader can check by hand, and no
+//! date here depends on which year's rule the tz database applied.
+//! What a zone that transitions does is the unit tests' subject
+//! (`asset_zone`); the e2e is about which rows a live query returns.
 //!
 //! The one instant that is not written down is the `import`-sourced
 //! row's: its time is its arrival, which is the moment the test adds
