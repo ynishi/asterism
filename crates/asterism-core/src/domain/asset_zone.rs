@@ -264,6 +264,87 @@ pub fn local_date(zone: Tz, instant: DateTime<Utc>) -> NaiveDate {
     instant.with_timezone(&zone).date_naive()
 }
 
+/// The calendar cut a listing asks for, on the resolved time.
+///
+/// One of two shapes, never both: a range of days, or one month-and-
+/// day across every year. The mapper refuses a request naming both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DayAsk {
+    /// Days from `from` (inclusive) to `until` (exclusive). Both are
+    /// real calendar dates by construction — `NaiveDate` cannot hold
+    /// 30 February — so [`day_window`] answers for both unless the zone
+    /// skipped one of the two midnights, which the mapper checks.
+    Range {
+        /// First day, inclusive.
+        from: NaiveDate,
+        /// Day after the last, exclusive.
+        until: NaiveDate,
+    },
+    /// This month and day, in every year the corpus spans. `month` /
+    /// `day` are in range (the mapper's check), but a given year may
+    /// still lack the date — 29 February — and that year contributes
+    /// no window.
+    DayOfYear {
+        /// Month, `1..=12`.
+        month: u32,
+        /// Day of the month, `1..=` the month's longest.
+        day: u32,
+    },
+}
+
+/// The day filter as the repository receives it: the ask, and the
+/// viewer's zone the global layer reads it in.
+///
+/// Rows with a zone of their own are not read through this zone at all
+/// — each such row has a stored local day, and the ask is compared to
+/// that directly. [`global_windows`](Self::global_windows) is therefore
+/// the half of the predicate that concerns unzoned rows only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DayFilter {
+    /// The viewer's zone.
+    pub zone: GlobalZone,
+    /// What is asked.
+    pub ask: DayAsk,
+}
+
+impl DayFilter {
+    /// The UTC windows an **unzoned** row's resolved instant must fall
+    /// in one of.
+    ///
+    /// A range is one window from the first day's midnight to the
+    /// exclusive day's midnight. A day-of-year is one window per year
+    /// in `years`, OR-ed by the caller; `years` is the span the corpus
+    /// occupies, which the repository knows and this function does
+    /// not — handing it in is what keeps the arithmetic here and the
+    /// corpus fact there. A year in which the zone has no such midnight
+    /// (29 February in a common year) contributes nothing, and an empty
+    /// result is a predicate that matches no unzoned row, which is the
+    /// right answer for an empty corpus.
+    pub fn global_windows(&self, years: std::ops::RangeInclusive<i32>) -> Vec<DayWindow> {
+        use chrono::Datelike;
+        let zone = self.zone.0;
+        match self.ask {
+            DayAsk::Range { from, until } => {
+                let open = |d: NaiveDate| day_window(zone, d.year(), d.month(), d.day());
+                match (open(from), open(until)) {
+                    (Some(start), Some(end)) if start.from_ms < end.from_ms => vec![DayWindow {
+                        from_ms: start.from_ms,
+                        until_ms: end.from_ms,
+                    }],
+                    // Inverted or empty: nothing, on the terms the raw
+                    // occurrence window sets (an empty page, not an
+                    // error). A skipped midnight is refused by the
+                    // mapper before it reaches here.
+                    _ => Vec::new(),
+                }
+            }
+            DayAsk::DayOfYear { month, day } => years
+                .filter_map(|year| day_window(zone, year, month, day))
+                .collect(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,5 +485,60 @@ mod tests {
             local_date(America::New_York, later),
             NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()
         );
+    }
+
+    fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    #[test]
+    fn a_range_is_one_window_from_first_midnight_to_the_exclusive_days_midnight() {
+        let filter = DayFilter {
+            zone: GlobalZone(Asia::Tokyo),
+            ask: DayAsk::Range {
+                from: ymd(2026, 3, 8),
+                until: ymd(2026, 3, 10),
+            },
+        };
+        let windows = filter.global_windows(1970..=2100);
+        assert_eq!(
+            windows,
+            vec![DayWindow {
+                from_ms: day_window(Asia::Tokyo, 2026, 3, 8).unwrap().from_ms,
+                until_ms: day_window(Asia::Tokyo, 2026, 3, 10).unwrap().from_ms,
+            }]
+        );
+        // Inverted and empty both answer nothing, as the raw window does.
+        for (from, until) in [
+            (ymd(2026, 3, 10), ymd(2026, 3, 8)),
+            (ymd(2026, 3, 8), ymd(2026, 3, 8)),
+        ] {
+            let filter = DayFilter {
+                zone: GlobalZone(UTC),
+                ask: DayAsk::Range { from, until },
+            };
+            assert!(
+                filter.global_windows(1970..=2100).is_empty(),
+                "{from}..{until}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_day_of_year_is_one_window_per_year_the_calendar_has_it() {
+        let filter = DayFilter {
+            zone: GlobalZone(UTC),
+            ask: DayAsk::DayOfYear { month: 2, day: 29 },
+        };
+        // 2024 and 2028 are leap years; 2025-2027 are not.
+        let windows = filter.global_windows(2024..=2028);
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0], day_window(UTC, 2024, 2, 29).unwrap());
+        assert_eq!(windows[1], day_window(UTC, 2028, 2, 29).unwrap());
+        let ordinary = DayFilter {
+            zone: GlobalZone(America::New_York),
+            ask: DayAsk::DayOfYear { month: 3, day: 8 },
+        };
+        assert_eq!(ordinary.global_windows(2020..=2026).len(), 7);
     }
 }

@@ -12,7 +12,7 @@ use asterism_contract::query::TagMatch;
 use asterism_core::domain::asset::{
     Asset, AssetCard, AssetQuery, ContentFlags, TrashFilter, UNCLASSIFIED_MODALITY,
 };
-use asterism_core::domain::asset_zone::OccurredSource;
+use asterism_core::domain::asset_zone::{self, DayAsk, DayFilter, OccurredSource};
 use asterism_core::domain::attribution::{Author, OperatorRef, PersistedAttribution};
 use asterism_core::domain::color::{ColorBucket, buckets_of};
 use asterism_core::domain::duplicate_conflict::DuplicateAxis;
@@ -2467,7 +2467,19 @@ pub(crate) struct QueryParts {
 }
 
 impl QueryParts {
-    pub(crate) fn build(query: &AssetQuery) -> Self {
+    /// Takes the connection because one predicate is a fact about the
+    /// corpus rather than about the query: the day-of-year cut opens
+    /// one window per year the unzoned rows span, and how many years
+    /// that is can only be read off the table
+    /// ([`push_day_predicate`]). Every other conjunct is built from the
+    /// query alone. A connectionless twin would have to be handed the
+    /// span by every caller, and a caller that forgot would compile
+    /// clean and drop the filter — which is the shape this signature
+    /// rules out.
+    pub(crate) fn build(
+        conn: &rusqlite::Connection,
+        query: &AssetQuery,
+    ) -> Result<Self, rusqlite::Error> {
         let mut conditions: Vec<String> = Vec::new();
         let mut params: Vec<Value> = Vec::new();
 
@@ -2514,6 +2526,11 @@ impl QueryParts {
         if let Some(until) = &query.occurred_until {
             conditions.push("occurred_at < ?".into());
             params.push(Value::Integer(datetime_to_ms(until)));
+        }
+        // The calendar cut on the *resolved* time, beside the raw pair
+        // above and composing with it as one more conjunct.
+        if let Some(day) = &query.day {
+            push_day_predicate(conn, &mut conditions, &mut params, day)?;
         }
         // Ingest and last-modification windows — the differential-sync
         // axes, and the reason both ends are `<=` where the occurrence
@@ -2780,8 +2797,117 @@ impl QueryParts {
         } else {
             format!("WHERE {}", conditions.join(" AND "))
         };
-        Self { where_sql, params }
+        Ok(Self { where_sql, params })
     }
+}
+
+/// A row's resolved instant, as SQL — the stamp `asset_zone::resolve`
+/// picks, spelled over the two columns: an `import`-sourced row's time
+/// is its arrival, every other source's (`unknown` included) is its
+/// occurrence. The one place the rule is written in SQL; the day
+/// predicate is its only reader.
+const RESOLVED_INSTANT: &str =
+    "CASE asset.occurred_source WHEN 'import' THEN asset.created_at ELSE asset.occurred_at END";
+
+/// Appends the calendar cut (`AssetQuery::day`), which is two
+/// predicates OR-ed by which zone a row is read in:
+///
+/// - **Unzoned rows** (`time_zone IS NULL`) are read in the viewer's
+///   zone, so the ask becomes UTC windows on [`RESOLVED_INSTANT`] —
+///   one for a range, one per year for a day-of-year, from
+///   `DayFilter::global_windows`.
+/// - **Zoned rows** carry their own local day (`occurred_local_date`,
+///   derived at write time in their own zone), and the ask is compared
+///   to that string directly: a `>= / <` pair for a range, a
+///   `LIKE '%-MM-DD'` for a day-of-year. The viewer's zone does not
+///   enter: a row that knows where it happened is not re-read in
+///   somebody else's day.
+///
+/// # The year span for a day-of-year
+///
+/// "Every year" has to be spelled as a finite list of windows, because
+/// which offset the zone used is a per-year fact the tz database holds
+/// and SQLite cannot compute. The list is taken from the corpus — the
+/// years between the earliest and latest resolved instant among the
+/// unzoned rows, read in the viewer's zone — rather than from a
+/// constant, for two reasons: a constant either under-reaches (a
+/// scanned 1960s negative sits before any floor somebody picks) or
+/// pays for a century of windows on every request, while the corpus
+/// span is exactly the set of years that could hold a row. It costs
+/// one aggregate over the table per day-of-year request, and nothing
+/// on any other request. An empty span is an empty window list, which
+/// is spelled `0` so the unzoned half matches nothing.
+///
+/// Every reference is qualified (`asset.`) for the reason the ingest
+/// windows give: this clause is spliced into statements with
+/// `asset_bucket` in scope.
+fn push_day_predicate(
+    conn: &rusqlite::Connection,
+    conditions: &mut Vec<String>,
+    params: &mut Vec<Value>,
+    day: &DayFilter,
+) -> Result<(), rusqlite::Error> {
+    use chrono::Datelike;
+    let years = match day.ask {
+        // A range's window is fixed by its two dates; the span is not
+        // consulted.
+        DayAsk::Range { .. } => Some(0..=0),
+        DayAsk::DayOfYear { .. } => {
+            let (min, max): (Option<i64>, Option<i64>) = conn.query_row(
+                &format!(
+                    "SELECT MIN({RESOLVED_INSTANT}), MAX({RESOLVED_INSTANT}) FROM asset \
+                     WHERE asset.folded_into IS NULL AND asset.time_zone IS NULL"
+                ),
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            let year_of = |ms: i64| {
+                DateTime::<Utc>::from_timestamp_millis(ms)
+                    .map(|at| asset_zone::local_date(day.zone.0, at).year())
+            };
+            match (min.and_then(year_of), max.and_then(year_of)) {
+                (Some(first), Some(last)) => Some(first..=last),
+                // No unzoned row at all: no span, so no window.
+                _ => None,
+            }
+        }
+    };
+    let windows = years
+        .map(|years| day.global_windows(years))
+        .unwrap_or_default();
+    let global = if windows.is_empty() {
+        "0".to_string()
+    } else {
+        windows
+            .iter()
+            .map(|_| format!("({RESOLVED_INSTANT} >= ? AND {RESOLVED_INSTANT} < ?)"))
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    };
+    let mut day_params: Vec<Value> = Vec::with_capacity(windows.len() * 2 + 2);
+    for window in &windows {
+        day_params.push(Value::Integer(window.from_ms));
+        day_params.push(Value::Integer(window.until_ms));
+    }
+    let local = match day.ask {
+        DayAsk::Range { from, until } => {
+            day_params.push(Value::Text(from.format("%Y-%m-%d").to_string()));
+            day_params.push(Value::Text(until.format("%Y-%m-%d").to_string()));
+            "asset.occurred_local_date >= ? AND asset.occurred_local_date < ?"
+        }
+        DayAsk::DayOfYear { month, day } => {
+            // Digits only, so no `LIKE` wildcard can arrive in the
+            // pattern; the leading `%` is the year.
+            day_params.push(Value::Text(format!("%-{month:02}-{day:02}")));
+            "asset.occurred_local_date LIKE ?"
+        }
+    };
+    conditions.push(format!(
+        "((asset.time_zone IS NULL AND ({global})) \
+          OR (asset.time_zone IS NOT NULL AND {local}))"
+    ));
+    params.extend(day_params);
+    Ok(())
 }
 
 /// Appends one inclusive numeric band over a nullable column, together
@@ -2953,11 +3079,10 @@ impl SqliteAssetRepository {
     async fn page(&self, query: &AssetQuery) -> Result<Page<AssetCard>, DomainError> {
         let limit = query.limit.clamp(1, MAX_LIMIT);
         let offset = query.offset;
-        let parts = QueryParts::build(query);
         // Single-group filter is the "browse one collection" case: the
         // user's hand-arranged order is the point, so join asset_bucket
-        // and sort by `position`. The WHERE branch above already
-        // scoped the result set to that bucket via EXISTS, so the join
+        // and sort by `position`. The WHERE clause built below already
+        // scopes the result set to that bucket via EXISTS, so the join
         // is safe (each surviving asset has exactly one matching row).
         // Union filters (multi-group) fall back to occurred_at because
         // per-bucket position has no meaning across buckets.
@@ -2982,19 +3107,23 @@ impl SqliteAssetRepository {
         } else {
             ("ORDER BY occurred_at DESC".to_string(), String::new())
         };
-        let select_sql = format!(
-            "SELECT {} FROM asset {} {} {} LIMIT ? OFFSET ?",
-            CardRow::columns(),
-            join_sql,
-            parts.where_sql,
-            order_sql,
-        );
-        let count_sql = format!("SELECT count(*) FROM asset {}", parts.where_sql);
-        let params = parts.params;
+        // The predicate is built on the connection (`QueryParts::build`
+        // says why), so the statements are composed inside the call.
+        let query = query.clone();
 
         let (rows, group_map, total) = self
             .isle
             .call(move |conn| {
+                let parts = QueryParts::build(conn, &query)?;
+                let select_sql = format!(
+                    "SELECT {} FROM asset {} {} {} LIMIT ? OFFSET ?",
+                    CardRow::columns(),
+                    join_sql,
+                    parts.where_sql,
+                    order_sql,
+                );
+                let count_sql = format!("SELECT count(*) FROM asset {}", parts.where_sql);
+                let params = parts.params;
                 // Join parameter goes first so it lines up with the
                 // leading `?` in `JOIN asset_bucket ... = ?`; the
                 // WHERE-clause params follow, then LIMIT/OFFSET.
@@ -3049,10 +3178,6 @@ impl SqliteAssetRepository {
     ) -> Result<Page<asterism_core::domain::asset::AssetIndex>, DomainError> {
         let limit = query.limit.clamp(1, MAX_LIMIT);
         let offset = query.offset;
-        // Same filter surface as `page` (list mode), differing only in
-        // the SELECT column set.
-        let parts = QueryParts::build(query);
-
         // Same contract as `page`: the sole filtered Group owns both the
         // arrival order and the primary-group answer.
         let sole_group: Option<Uuid> = if query.group_ids.len() == 1 {
@@ -3072,37 +3197,42 @@ impl SqliteAssetRepository {
         } else {
             ("ORDER BY occurred_at DESC".to_string(), String::new())
         };
-        let select_sql = format!(
-            "SELECT {} FROM asset {} {} {} LIMIT ? OFFSET ?",
-            IndexRow::COLUMNS,
-            join_sql,
-            parts.where_sql,
-            order_sql,
-        );
-        let count_sql = format!("SELECT count(*) FROM asset {}", parts.where_sql);
-        // Group-id map in ONE pass: join `asset_bucket` against the
-        // same predicate instead of re-probing per returned id
-        // (the old id-chunked `fetch_group_ids_map` cost ~200 IN()
-        // queries / ~0.3-0.55 s at 110k rows [measured 2026-07-21]).
-        // Over-fetches when LIMIT trims the page — harmless, the
-        // attach step only consumes matching ids. The predicate
-        // columns are unambiguous: `asset_bucket` shares no column
-        // name the WHERE clause references.
-        // `position` rides along, and the `bucket_id` ordering pins which
-        // group counts as primary — same contract as
-        // `fetch_group_ids_map`, which this pass replaced on the index
-        // path.
-        let group_sql = format!(
-            "SELECT asset_bucket.asset_id, asset_bucket.bucket_id, asset_bucket.position \
-             FROM asset_bucket JOIN asset ON asset.id = asset_bucket.asset_id {} \
-             ORDER BY asset_bucket.asset_id, asset_bucket.bucket_id",
-            parts.where_sql,
-        );
-        let params = parts.params;
+        let query = query.clone();
 
         let (rows, group_map, total) = self
             .isle
             .call(move |conn| {
+                // Same filter surface as `page` (list mode), differing
+                // only in the SELECT column set — and built on the
+                // connection for the same reason as there.
+                let parts = QueryParts::build(conn, &query)?;
+                let select_sql = format!(
+                    "SELECT {} FROM asset {} {} {} LIMIT ? OFFSET ?",
+                    IndexRow::COLUMNS,
+                    join_sql,
+                    parts.where_sql,
+                    order_sql,
+                );
+                let count_sql = format!("SELECT count(*) FROM asset {}", parts.where_sql);
+                // Group-id map in ONE pass: join `asset_bucket` against the
+                // same predicate instead of re-probing per returned id
+                // (the old id-chunked `fetch_group_ids_map` cost ~200 IN()
+                // queries / ~0.3-0.55 s at 110k rows [measured 2026-07-21]).
+                // Over-fetches when LIMIT trims the page — harmless, the
+                // attach step only consumes matching ids. The predicate
+                // columns are unambiguous: `asset_bucket` shares no column
+                // name the WHERE clause references.
+                // `position` rides along, and the `bucket_id` ordering pins which
+                // group counts as primary — same contract as
+                // `fetch_group_ids_map`, which this pass replaced on the index
+                // path.
+                let group_sql = format!(
+                    "SELECT asset_bucket.asset_id, asset_bucket.bucket_id, asset_bucket.position \
+                     FROM asset_bucket JOIN asset ON asset.id = asset_bucket.asset_id {} \
+                     ORDER BY asset_bucket.asset_id, asset_bucket.bucket_id",
+                    parts.where_sql,
+                );
+                let params = parts.params;
                 // Breakdown for the persona-switch stall investigation.
                 // No longer dev-only: the records reach stderr under
                 // `RUST_LOG` and `diag_log` in every build, so the same numbers
@@ -4007,13 +4137,15 @@ impl AssetRepository for SqliteAssetRepository {
         // are rebuilt each round because the parameter vector is moved
         // into the isle closure.
         for chunk in ids.chunks(MAX_ID_FILTER_CHUNK) {
-            let mut parts = QueryParts::build(query);
-            parts.restrict_to_ids(chunk);
-            let sql = format!("SELECT id FROM asset {}", parts.where_sql);
-            let params = parts.params;
+            let query = query.clone();
+            let chunk = chunk.to_vec();
             let rows: Vec<Uuid> = self
                 .isle
                 .call(move |conn| {
+                    let mut parts = QueryParts::build(conn, &query)?;
+                    parts.restrict_to_ids(&chunk);
+                    let sql = format!("SELECT id FROM asset {}", parts.where_sql);
+                    let params = parts.params;
                     let mut stmt = conn.prepare(&sql)?;
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(params), |row| {
@@ -4046,16 +4178,17 @@ impl AssetRepository for SqliteAssetRepository {
         if k == 0 {
             return Ok(Vec::new());
         }
-        let parts = QueryParts::build(query);
-        let sql = format!(
-            "SELECT id FROM asset {} ORDER BY RANDOM() LIMIT ?",
-            parts.where_sql,
-        );
-        let mut params = parts.params;
-        params.push(Value::Integer(k as i64));
+        let query = query.clone();
         let rows: Vec<Uuid> = self
             .isle
             .call(move |conn| {
+                let parts = QueryParts::build(conn, &query)?;
+                let sql = format!(
+                    "SELECT id FROM asset {} ORDER BY RANDOM() LIMIT ?",
+                    parts.where_sql,
+                );
+                let mut params = parts.params;
+                params.push(Value::Integer(k as i64));
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt
                     .query_map(rusqlite::params_from_iter(params), |row| {
@@ -6504,6 +6637,16 @@ mod tests {
         PersonaId::from_uuid(pid)
     }
 
+    /// The predicate for a query that names no day-of-year, built on a
+    /// bare connection: nothing else in `QueryParts::build` reads the
+    /// table, so the tests that assert on the generated `WHERE` need no
+    /// schema. A query naming a day-of-year would read the corpus and
+    /// has to go through a migrated isle instead.
+    fn parts_of(query: &AssetQuery) -> QueryParts {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        QueryParts::build(&conn, query).unwrap()
+    }
+
     /// **Two rows may carry one `external_key`** — the write the old
     /// UNIQUE refused, through the production `save` path.
     ///
@@ -7578,7 +7721,7 @@ mod tests {
     /// query without anyone asking for it.
     #[test]
     fn query_parts_excludes_trashed_rows_by_default() {
-        let parts = QueryParts::build(&AssetQuery::default());
+        let parts = parts_of(&AssetQuery::default());
         assert!(
             parts.where_sql.contains("asset.trashed_at IS NULL"),
             "default query must exclude trashed rows, got: {}",
@@ -7825,7 +7968,7 @@ mod tests {
     /// halves were appended independently.
     #[test]
     fn metric_band_states_its_exclusion_once_and_only_when_asked() {
-        let both_ends = QueryParts::build(&AssetQuery {
+        let both_ends = parts_of(&AssetQuery {
             duration_min_ms: Some(1_000),
             duration_max_ms: Some(2_000),
             size_min_bytes: Some(1),
@@ -7846,7 +7989,7 @@ mod tests {
         // And no band asked for adds no clause at all — the state that
         // keeps stills and unprobed containers in every listing whose
         // caller never heard of these axes.
-        let none = QueryParts::build(&AssetQuery::default());
+        let none = parts_of(&AssetQuery::default());
         assert!(
             !none.where_sql.contains("duration_ms") && !none.where_sql.contains("file_size_bytes"),
             "an unasked band must not narrow the default listing, got: {}",
@@ -9961,7 +10104,7 @@ mod tests {
 
     #[test]
     fn query_parts_honours_the_trash_side() {
-        let trashed = QueryParts::build(&AssetQuery {
+        let trashed = parts_of(&AssetQuery {
             trash: TrashFilter::TrashedOnly,
             ..AssetQuery::default()
         });
@@ -9971,7 +10114,7 @@ mod tests {
             trashed.where_sql
         );
 
-        let any = QueryParts::build(&AssetQuery {
+        let any = parts_of(&AssetQuery {
             trash: TrashFilter::Any,
             ..AssetQuery::default()
         });
@@ -9987,7 +10130,7 @@ mod tests {
     /// persona-scoped.
     #[test]
     fn trash_clause_composes_with_other_filters() {
-        let parts = QueryParts::build(&AssetQuery {
+        let parts = parts_of(&AssetQuery {
             persona_id: Some(PersonaId::new()),
             trash: TrashFilter::TrashedOnly,
             ..AssetQuery::default()
@@ -12273,14 +12416,14 @@ mod tests {
             persona_id: Some(PersonaId::from_uuid(Uuid::now_v7())),
             ..AssetQuery::default()
         };
-        let parts = QueryParts::build(&query);
-        let select_sql = format!(
-            "SELECT {} FROM asset {} ORDER BY occurred_at DESC LIMIT ? OFFSET ?",
-            IndexRow::COLUMNS,
-            parts.where_sql,
-        );
         let plan: Vec<String> = isle
             .call(move |conn| {
+                let parts = QueryParts::build(conn, &query)?;
+                let select_sql = format!(
+                    "SELECT {} FROM asset {} ORDER BY occurred_at DESC LIMIT ? OFFSET ?",
+                    IndexRow::COLUMNS,
+                    parts.where_sql,
+                );
                 let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {select_sql}"))?;
                 let mut params = parts.params;
                 params.push(Value::Integer(200_000));
@@ -12399,6 +12542,187 @@ mod tests {
             read_columns(zoned.id).await,
             ("import".to_string(), None, None)
         );
+    }
+
+    /// Lists the ids the day filter answers with, in the viewer's zone.
+    async fn on_day(
+        repo: &SqliteAssetRepository,
+        zone: chrono_tz::Tz,
+        ask: asterism_core::domain::asset_zone::DayAsk,
+    ) -> Vec<AssetId> {
+        use asterism_core::domain::asset_zone::{DayFilter, GlobalZone};
+        let page = repo
+            .list(&AssetQuery {
+                day: Some(DayFilter {
+                    zone: GlobalZone(zone),
+                    ask,
+                }),
+                ..AssetQuery::default()
+            })
+            .await
+            .unwrap();
+        let mut ids: Vec<AssetId> = page.items.into_iter().map(|c| c.id).collect();
+        ids.sort_by_key(|id| *id.as_uuid());
+        ids
+    }
+
+    fn ymd(y: i32, m: u32, d: u32) -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    /// The day range reads each row through the zone it is resolved
+    /// in, and the stamp its source says it means.
+    ///
+    /// Three rows around 8 March 2026. The unzoned one sits at 23:30Z,
+    /// which is the 8th in UTC and the 9th in Tokyo, so which viewer
+    /// asks decides whether it is found — the global layer. The zoned
+    /// one happened at 01:00 JST on the 8th (16:00Z on the 7th), and
+    /// is found by every viewer asking for the 8th, because its own
+    /// zone says so — while the same instant on an unzoned row is read
+    /// in each viewer's zone and falls outside the UTC and New York
+    /// windows, which the fourth row is there to show. The imported one
+    /// carries a bogus
+    /// occurrence in 2020 and an arrival on the 8th, and is found by
+    /// the arrival, because `import` is the source that makes the
+    /// arrival its time.
+    #[tokio::test]
+    async fn a_day_range_reads_each_row_in_its_own_zone_and_by_its_own_stamp() {
+        use asterism_core::domain::asset_zone::{DayAsk, OccurredSource};
+        use chrono::TimeZone;
+        use chrono_tz::{America, Asia, UTC};
+
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteAssetRepository::new(isle.clone());
+        let persona = seed_persona(&isle).await;
+
+        let mut late_utc = item(persona, "/pics/late-utc.png");
+        late_utc.occurred_at = Utc.with_ymd_and_hms(2026, 3, 8, 23, 30, 0).unwrap();
+        let mut tokyo = item(persona, "/pics/tokyo.png");
+        tokyo.occurred_at = Utc.with_ymd_and_hms(2026, 3, 7, 16, 0, 0).unwrap();
+        tokyo.occurred_source = OccurredSource::Exif;
+        tokyo.time_zone = Some(Asia::Tokyo);
+        let mut same_instant_unzoned = item(persona, "/pics/unzoned-twin.png");
+        same_instant_unzoned.occurred_at = tokyo.occurred_at;
+        let mut imported = item(persona, "/gen/imported.png");
+        imported.occurred_at = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        imported.created_at = Utc.with_ymd_and_hms(2026, 3, 8, 10, 0, 0).unwrap();
+        imported.occurred_source = OccurredSource::Import;
+        for asset in [&late_utc, &tokyo, &same_instant_unzoned, &imported] {
+            repo.save(asset).await.unwrap();
+        }
+        let sorted = |mut ids: Vec<AssetId>| {
+            ids.sort_by_key(|id| *id.as_uuid());
+            ids
+        };
+        let the_8th = DayAsk::Range {
+            from: ymd(2026, 3, 8),
+            until: ymd(2026, 3, 9),
+        };
+
+        // A viewer in UTC: the 23:30Z row is still the 8th; the zoned
+        // row is found by its own day; its unzoned twin at 16:00Z on the
+        // 7th is not.
+        assert_eq!(
+            on_day(&repo, UTC, the_8th).await,
+            sorted(vec![late_utc.id, tokyo.id, imported.id])
+        );
+        // A viewer in Tokyo: 23:30Z is already the 9th there, and the
+        // unzoned twin at 16:00Z on the 7th is 01:00 on the 8th — the
+        // same reading the zoned row carries, reached through the
+        // viewer's window instead of the stored day.
+        assert_eq!(
+            on_day(&repo, Asia::Tokyo, the_8th).await,
+            sorted(vec![tokyo.id, same_instant_unzoned.id, imported.id])
+        );
+        // A viewer in New York: the 8th opens at 05:00Z, so the zoned
+        // row's instant is outside the window and it is found anyway,
+        // by its stored local day.
+        assert_eq!(
+            on_day(&repo, America::New_York, the_8th).await,
+            sorted(vec![late_utc.id, tokyo.id, imported.id])
+        );
+        // The imported row's occurrence column says 2020, and that day
+        // does not find it: its time is its arrival.
+        assert_eq!(
+            on_day(
+                &repo,
+                UTC,
+                DayAsk::Range {
+                    from: ymd(2020, 1, 1),
+                    until: ymd(2020, 1, 2),
+                }
+            )
+            .await,
+            Vec::<AssetId>::new()
+        );
+        // The raw occurrence window still reads the raw column, so the
+        // two axes answer differently on purpose.
+        let raw = repo
+            .list(&AssetQuery {
+                occurred_from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()),
+                occurred_until: Some(Utc.with_ymd_and_hms(2020, 1, 2, 0, 0, 0).unwrap()),
+                ..AssetQuery::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            raw.items.iter().map(|c| c.id).collect::<Vec<_>>(),
+            vec![imported.id]
+        );
+    }
+
+    /// The day-of-year opens one window per year the unzoned rows span
+    /// — read off the corpus, so a leap day is found in the leap years
+    /// the corpus reaches and nowhere else — and reads a zoned row's
+    /// stored day by its month and day alone.
+    #[tokio::test]
+    async fn a_day_of_year_spans_the_corpus_years_and_reads_zoned_rows_by_month_and_day() {
+        use asterism_core::domain::asset_zone::{DayAsk, OccurredSource};
+        use chrono::TimeZone;
+        use chrono_tz::{Asia, UTC};
+
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteAssetRepository::new(isle.clone());
+        let persona = seed_persona(&isle).await;
+
+        // An empty corpus answers nothing rather than failing to build
+        // the predicate.
+        let leap_day = DayAsk::DayOfYear { month: 2, day: 29 };
+        assert_eq!(on_day(&repo, UTC, leap_day).await, Vec::<AssetId>::new());
+
+        let mut leap_2024 = item(persona, "/pics/2024-02-29.png");
+        leap_2024.occurred_at = Utc.with_ymd_and_hms(2024, 2, 29, 10, 0, 0).unwrap();
+        let mut leap_2020 = item(persona, "/pics/2020-02-29.png");
+        leap_2020.occurred_at = Utc.with_ymd_and_hms(2020, 2, 29, 10, 0, 0).unwrap();
+        let mut march_1st = item(persona, "/pics/2025-03-01.png");
+        march_1st.occurred_at = Utc.with_ymd_and_hms(2025, 3, 1, 10, 0, 0).unwrap();
+        // Zoned: 23:30 JST on 29 Feb 2016 is 14:30Z, still the 29th in
+        // UTC too, so the row must be found by its stored day and not
+        // by a window — put it at 00:30 JST instead, which is 15:30Z on
+        // the 28th and outside any UTC viewer's window for the 29th.
+        let mut tokyo = item(persona, "/pics/tokyo-2016-02-29.png");
+        tokyo.occurred_at = Utc.with_ymd_and_hms(2016, 2, 28, 15, 30, 0).unwrap();
+        tokyo.occurred_source = OccurredSource::Exif;
+        tokyo.time_zone = Some(Asia::Tokyo);
+        for asset in [&leap_2024, &leap_2020, &march_1st, &tokyo] {
+            repo.save(asset).await.unwrap();
+        }
+        let mut expected = vec![leap_2024.id, leap_2020.id, tokyo.id];
+        expected.sort_by_key(|id| *id.as_uuid());
+        assert_eq!(on_day(&repo, UTC, leap_day).await, expected);
+
+        // The span is the unzoned rows' (2020..=2025 here), and a year
+        // without the date contributes no window: asking for 1 March
+        // finds the 2025 row and nothing else.
+        assert_eq!(
+            on_day(&repo, UTC, DayAsk::DayOfYear { month: 3, day: 1 }).await,
+            vec![march_1st.id]
+        );
+        // And the window is the viewer's: 10:00Z on 29 Feb is the 29th
+        // in Tokyo as well, but 15:30Z on the 28th (the zoned row's
+        // instant) is not read through the Tokyo window at all — it is
+        // matched by its stored `2016-02-29`.
+        assert_eq!(on_day(&repo, Asia::Tokyo, leap_day).await, expected);
     }
 
     /// A hand-edited row is refused, not read as something else: a

@@ -86,6 +86,50 @@ pub enum TagMatch {
     All,
 }
 
+/// A month and a day with no year — the shape of "this day, every
+/// year" ([`ListAssetsQuery::day_of_year`]).
+///
+/// `month` is `1..=12` and `day` is checked against the longest that
+/// month ever gets (`1..=29` for February, `1..=30` for April), which is
+/// what separates the two ways a day can fail to exist: a pair no year
+/// has (31 April) is malformed and refused like a month of `13`, while
+/// a pair some years have and others do not (29 February) is a real
+/// question, answered per year. Both checks run where the query is
+/// mapped, with the other bands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, SchemaBridge)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+pub struct DayOfYear {
+    /// Month, `1..=12`.
+    pub month: u32,
+    /// Day of the month, `1..=` the month's longest.
+    pub day: u32,
+}
+
+/// Accepts a [`DayOfYear`] as either a nested object (JSON transports)
+/// or a JSON-encoded string (HTTP `GET` query strings) — the same dual
+/// form and the same reasoning as [`deserialize_sort`]: a form
+/// deserialiser hands the field one scalar, and a malformed one is an
+/// error rather than a silent `None`.
+fn deserialize_day_of_year<'de, D>(deserializer: D) -> Result<Option<DayOfYear>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum DayOrString {
+        Day(DayOfYear),
+        String(String),
+    }
+    Ok(match Option::<DayOrString>::deserialize(deserializer)? {
+        None => None,
+        Some(DayOrString::Day(day)) => Some(day),
+        Some(DayOrString::String(raw)) if raw.trim().is_empty() => None,
+        Some(DayOrString::String(raw)) => {
+            Some(serde_json::from_str(&raw).map_err(serde::de::Error::custom)?)
+        }
+    })
+}
+
 /// Filter and pagination parameters for the asset grid.
 ///
 /// `#[serde(default)]` lets an HTTP `GET` query string omit fields — the
@@ -103,7 +147,70 @@ pub struct ListAssetsQuery {
     /// Lower bound on occurrence time (unix epoch ms, inclusive).
     pub occurred_from_ms: Option<i64>,
     /// Upper bound on occurrence time (unix epoch ms, exclusive).
+    ///
+    /// This pair and the three calendar fields below are two different
+    /// questions. These two cut the raw `occurred_at` column at two
+    /// instants the caller computed, and stay exactly that for API
+    /// compatibility. The calendar fields cut the asset's **resolved
+    /// time** — the stamp its source says it means, in its own zone
+    /// when it has one and in [`time_zone`](Self::time_zone) otherwise
+    /// (`asterism_core::domain::asset_zone`) — at day boundaries the
+    /// server derives. The two compose as ordinary conjuncts.
     pub occurred_until_ms: Option<i64>,
+    /// First calendar day of a day range, inclusive, as `YYYY-MM-DD` —
+    /// the day is opened in [`time_zone`](Self::time_zone) for rows
+    /// with no zone of their own, and read off each row's own local day
+    /// for rows that carry one.
+    ///
+    /// Naming it without [`time_zone`](Self::time_zone) is a validation
+    /// error: a day has no boundary until a zone is named, and a
+    /// fallback to UTC would put the day some hours wrong for every
+    /// viewer who is not there, which is the kind of wrong nobody
+    /// reports. A string the calendar does not parse (`2026-02-30`) is
+    /// a validation error for the reason `rating_max = 0` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub day_from: Option<String>,
+    /// Last calendar day of the range, **exclusive**, same form and
+    /// same zone rule as [`day_from`](Self::day_from) — so one day is
+    /// `day_from = D, day_until = D + 1`. Exclusive to mirror
+    /// [`occurred_until_ms`](Self::occurred_until_ms), the window this
+    /// one is the calendar form of, and for the same reason: a
+    /// half-open range composes with the next one without overlap. An
+    /// inverted pair is likewise not rejected and returns an empty
+    /// page, matching that window rather than the rating band.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub day_until: Option<String>,
+    /// One month-and-day across every year — "what happened on this
+    /// day". Same zone rule as the range. Cannot be combined with
+    /// `day_from` / `day_until`: the two are different cuts of the same
+    /// axis, and a request naming both is asking two questions.
+    ///
+    /// Dual wire form like [`sort`](Self::sort): a real object over
+    /// JSON, the same object JSON-encoded into one value on a `GET`
+    /// query string.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_day_of_year",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub day_of_year: Option<DayOfYear>,
+    /// The viewer's zone, by IANA name (`"Asia/Tokyo"`, `"UTC"`) — the
+    /// global layer of the zone resolution, carried as a **search
+    /// parameter** the way [`SortSpec::collation`](crate::sort::SortSpec::collation)
+    /// carries the language knob: it belongs to the question, and a
+    /// Query Group persists the zone its day filter was written under.
+    ///
+    /// A zone and not an offset, because the offset a zone uses is not
+    /// a constant of it: a day in a past year is opened under the rule
+    /// the zone had that year, and a single number would be right this
+    /// year and wrong for every year whose transition fell on the other
+    /// side of the date asked about. A name the tz database does not
+    /// carry is a validation error, deliberately not a fallback to UTC.
+    ///
+    /// Required by any of the three calendar fields; inert without
+    /// them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
     /// Lower bound on ingest time (`asset.created_at`, unix epoch ms,
     /// inclusive) — when the row entered *this* library, as opposed to
     /// [`occurred_from_ms`](Self::occurred_from_ms), which is when the
@@ -438,6 +545,13 @@ impl Default for ListAssetsQuery {
             modality: None,
             occurred_from_ms: None,
             occurred_until_ms: None,
+            // No calendar cut, and no zone: the zone is only read when a
+            // day is named, so a default here would be a value nothing
+            // consults.
+            day_from: None,
+            day_until: None,
+            day_of_year: None,
+            time_zone: None,
             // All four `None` = no ingest / modification window asked
             // for. A default window would turn every client that never
             // set the field into a partial reader of its own library.
@@ -1017,6 +1131,59 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// The calendar fields ride the same two transports the sort does:
+    /// a nested object over JSON, one encoded value on a query string.
+    /// Both forms have to land on the same pair, and the dates and the
+    /// zone are plain strings on either.
+    #[test]
+    fn calendar_fields_parse_from_object_and_encoded_string() {
+        let from_object: ListAssetsQuery = serde_json::from_str(
+            r#"{"offset":0,"limit":10,"time_zone":"Asia/Tokyo",
+                "day_of_year":{"month":3,"day":8}}"#,
+        )
+        .unwrap();
+        let from_scalar: ListAssetsQuery = serde_json::from_str(
+            r#"{"offset":0,"limit":10,"time_zone":"Asia/Tokyo",
+                "day_of_year":"{\"month\":3,\"day\":8}"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            from_object.day_of_year,
+            Some(DayOfYear { month: 3, day: 8 })
+        );
+        assert_eq!(from_scalar.day_of_year, from_object.day_of_year);
+        assert_eq!(from_object.time_zone.as_deref(), Some("Asia/Tokyo"));
+
+        let range: ListAssetsQuery = serde_json::from_str(
+            r#"{"offset":0,"limit":10,"time_zone":"UTC",
+                "day_from":"2026-03-08","day_until":"2026-03-09"}"#,
+        )
+        .unwrap();
+        assert_eq!(range.day_from.as_deref(), Some("2026-03-08"));
+        assert_eq!(range.day_until.as_deref(), Some("2026-03-09"));
+    }
+
+    /// Omitted is the only state in which no calendar cut is asked for,
+    /// and a stored `query_json` written before the fields existed has
+    /// to read back as exactly that. The serialised form leaves the
+    /// four out when absent, so a Query Group saved today looks like
+    /// one saved before.
+    #[test]
+    fn calendar_fields_default_to_absent_and_stay_off_the_wire() {
+        let omitted: ListAssetsQuery = serde_json::from_str(r#"{"offset":0,"limit":10}"#).unwrap();
+        assert_eq!(omitted.day_from, None);
+        assert_eq!(omitted.day_until, None);
+        assert_eq!(omitted.day_of_year, None);
+        assert_eq!(omitted.time_zone, None);
+        let default = ListAssetsQuery::default();
+        assert_eq!(default.day_of_year, None);
+        assert_eq!(default.time_zone, None);
+        let json = serde_json::to_string(&default).unwrap();
+        for field in ["day_from", "day_until", "day_of_year", "time_zone"] {
+            assert!(!json.contains(field), "{field} leaked into {json}");
+        }
     }
 
     /// A misspelled axis is an error, not a silent fallback: answering it

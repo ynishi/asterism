@@ -224,39 +224,43 @@ impl QueryGroupRepository for SqliteQueryGroupRepository {
         // shared builder guarantees identical WHERE semantics. No LIMIT:
         // the evaluator consumes the whole set. The full-text predicate is
         // joined in by the service (Tantivy ∩ SQL), not here.
-        let parts = QueryParts::build(query);
-        let select_sql = format!("SELECT {} FROM asset {}", SortRow::COLUMNS, parts.where_sql,);
-        // group_ids in one bulk pass: join `asset_bucket` against the same
-        // predicate rather than probing per returned id (mirrors
-        // `page_index`). The predicate columns are unambiguous — the
-        // WHERE clause references no column that `asset_bucket` also has.
-        //
-        // Trashed Groups are filtered **outside** that inner query, not
-        // by joining `bucket` into it: `bucket` carries `persona_id` and
-        // `trashed_at` too, and the shared builder emits some predicates
-        // unqualified, so pulling the table into the same scope makes
-        // them ambiguous. The filter is needed because `asset_bucket`
-        // rows outlive a trashed Group by design, so the link table alone
-        // would report filings the sidebar no longer shows (same trap as
-        // `fetch_group_ids_map`).
-        // `position` rides along for `Group` + `Ordered`; the outer
-        // ordering pins which filing counts as primary, same contract as
-        // `asset::fetch_group_ids_map`.
-        let group_sql = format!(
-            "SELECT asset_id, bucket_id, position FROM ( \
-                 SELECT asset_bucket.asset_id AS asset_id, \
-                        asset_bucket.bucket_id AS bucket_id, \
-                        asset_bucket.position AS position \
-                 FROM asset_bucket JOIN asset ON asset.id = asset_bucket.asset_id {} \
-             ) WHERE bucket_id IN (SELECT id FROM bucket WHERE trashed_at IS NULL) \
-             ORDER BY asset_id, bucket_id",
-            parts.where_sql,
-        );
-        let params = parts.params;
+        // Built on the connection, inside the call, because one of its
+        // predicates reads the corpus (`QueryParts::build`).
+        let filter = query.clone();
 
         let (rows, group_map) = self
             .isle
             .call(move |conn| {
+                let parts = QueryParts::build(conn, &filter)?;
+                let select_sql =
+                    format!("SELECT {} FROM asset {}", SortRow::COLUMNS, parts.where_sql,);
+                // group_ids in one bulk pass: join `asset_bucket` against the same
+                // predicate rather than probing per returned id (mirrors
+                // `page_index`). The predicate columns are unambiguous — the
+                // WHERE clause references no column that `asset_bucket` also has.
+                //
+                // Trashed Groups are filtered **outside** that inner query, not
+                // by joining `bucket` into it: `bucket` carries `persona_id` and
+                // `trashed_at` too, and the shared builder emits some predicates
+                // unqualified, so pulling the table into the same scope makes
+                // them ambiguous. The filter is needed because `asset_bucket`
+                // rows outlive a trashed Group by design, so the link table alone
+                // would report filings the sidebar no longer shows (same trap as
+                // `fetch_group_ids_map`).
+                // `position` rides along for `Group` + `Ordered`; the outer
+                // ordering pins which filing counts as primary, same contract as
+                // `asset::fetch_group_ids_map`.
+                let group_sql = format!(
+                    "SELECT asset_id, bucket_id, position FROM ( \
+                         SELECT asset_bucket.asset_id AS asset_id, \
+                                asset_bucket.bucket_id AS bucket_id, \
+                                asset_bucket.position AS position \
+                         FROM asset_bucket JOIN asset ON asset.id = asset_bucket.asset_id {} \
+                     ) WHERE bucket_id IN (SELECT id FROM bucket WHERE trashed_at IS NULL) \
+                     ORDER BY asset_id, bucket_id",
+                    parts.where_sql,
+                );
+                let params = parts.params;
                 let mut stmt = conn.prepare(&select_sql)?;
                 let rows = stmt
                     .query_map(

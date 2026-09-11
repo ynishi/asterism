@@ -19,8 +19,9 @@ use asterism_contract::forge::{
     ForgeOpDto, ForgePursuitDto, ForgeReleaseDto, ForgeReleaseFileDto, ForgeRevisionDto,
     ForgeRoundDto, ForgeSendDto, ForgeStampHalfDto, ForgeStrategyDto, ForgeThreadDto,
 };
-use asterism_contract::query::ListAssetsQuery;
-use chrono::{DateTime, Utc};
+use asterism_contract::query::{DayOfYear, ListAssetsQuery};
+use chrono::{DateTime, NaiveDate, Utc};
+use chrono_tz::Tz;
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
@@ -28,6 +29,7 @@ use crate::application::forge::Anchored;
 use crate::domain::app_setting::EffectiveSetting;
 use crate::domain::asset::{Asset, AssetCard, AssetQuery, TrashFilter, UNCLASSIFIED_MODALITY};
 use crate::domain::asset_comment::AssetComment;
+use crate::domain::asset_zone::{self, DayAsk, DayFilter, GlobalZone};
 use crate::domain::chapter_mark::ChapterMark;
 use crate::domain::color::ColorBucket;
 use crate::domain::dir::Dir;
@@ -151,6 +153,113 @@ fn reject_inverted_band<T: PartialOrd + std::fmt::Display>(
     Ok(())
 }
 
+/// Parses one end of the calendar range, `YYYY-MM-DD`.
+///
+/// A string the calendar cannot hold (`2026-02-30`) is refused here,
+/// so the domain filter only ever carries a real date — which is what
+/// lets `DayFilter::global_windows` treat a missing midnight as the
+/// zone's doing rather than the caller's.
+fn parse_day(raw: &str, field: &str) -> Result<NaiveDate, DomainError> {
+    NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").map_err(|_| {
+        DomainError::Validation(format!(
+            "{field} is not a calendar date: {raw:?} (expected YYYY-MM-DD)"
+        ))
+    })
+}
+
+/// The longest a month ever gets — the bound `day_of_year.day` is
+/// checked against, so 29 February passes (some years have it) and 31
+/// April does not (none does).
+fn longest_month(month: u32) -> Option<u32> {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => Some(31),
+        4 | 6 | 9 | 11 => Some(30),
+        2 => Some(29),
+        _ => None,
+    }
+}
+
+/// Builds the calendar cut from the four wire fields, or `None` when
+/// none of the three day fields is named.
+///
+/// The rules, each a `Validation` because each is a fact about the
+/// request rather than the corpus: a day field without `time_zone`; a
+/// zone name the tz database does not carry (deliberately not a
+/// fallback to UTC — a day answered some hours wrong is the kind of
+/// wrong nobody reports); `day_of_year` together with a range; a date
+/// string the calendar cannot hold; a month or day out of range; and a
+/// range end whose midnight the zone skipped that day, which
+/// `day_window` cannot open and the module doc says is not corrected
+/// for. An inverted range is not one of them — it returns an empty
+/// page, mirroring the raw occurrence window it is the calendar form
+/// of.
+fn to_day_filter(query: &ListAssetsQuery) -> Result<Option<DayFilter>, DomainError> {
+    use chrono::Datelike;
+    let has_range = query.day_from.is_some() || query.day_until.is_some();
+    if !has_range && query.day_of_year.is_none() {
+        return Ok(None);
+    }
+    let Some(zone_name) = query.time_zone.as_deref() else {
+        return Err(DomainError::Validation(
+            "a day filter (day_from / day_until / day_of_year) needs time_zone, the viewer's IANA zone"
+                .into(),
+        ));
+    };
+    let zone: Tz = zone_name.trim().parse().map_err(|_| {
+        DomainError::Validation(format!(
+            "unknown time_zone: {zone_name:?} (expected an IANA name such as \"Asia/Tokyo\")"
+        ))
+    })?;
+    let ask = match (query.day_of_year, has_range) {
+        (Some(_), true) => {
+            return Err(DomainError::Validation(
+                "day_of_year cannot be combined with day_from / day_until: they are two cuts of the same axis"
+                    .into(),
+            ));
+        }
+        (Some(DayOfYear { month, day }), false) => {
+            let Some(longest) = longest_month(month) else {
+                return Err(DomainError::Validation(format!(
+                    "day_of_year.month out of range: {month} (expected 1..=12)"
+                )));
+            };
+            if day == 0 || day > longest {
+                return Err(DomainError::Validation(format!(
+                    "day_of_year.day out of range for month {month}: {day} (expected 1..={longest})"
+                )));
+            }
+            DayAsk::DayOfYear { month, day }
+        }
+        (None, _) => {
+            // One end alone is a half-open ask; the other end is the
+            // calendar's own limit. `NaiveDate::MIN` / `MAX` are outside
+            // any zone's rule table, so the range is clamped to what the
+            // tz database can open rather than to the type's extremes.
+            let from = match &query.day_from {
+                Some(raw) => parse_day(raw, "day_from")?,
+                None => NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch"),
+            };
+            let until = match &query.day_until {
+                Some(raw) => parse_day(raw, "day_until")?,
+                None => NaiveDate::from_ymd_opt(2200, 1, 1).expect("far end"),
+            };
+            for (date, field) in [(from, "day_from"), (until, "day_until")] {
+                if asset_zone::day_window(zone, date.year(), date.month(), date.day()).is_none() {
+                    return Err(DomainError::Validation(format!(
+                        "{field} {date} has no midnight in {zone_name}: the zone skipped it, and \
+                         asset_zone does not correct for that"
+                    )));
+                }
+            }
+            DayAsk::Range { from, until }
+        }
+    };
+    Ok(Some(DayFilter {
+        zone: GlobalZone(zone),
+        ask,
+    }))
+}
+
 /// Converts the wire `ListAssetsQuery` to a domain `AssetQuery`. When
 /// `viewer_subject` is `None`, the viewer defaults to `Owner`.
 ///
@@ -233,6 +342,10 @@ pub fn to_asset_query(query: &ListAssetsQuery) -> Result<AssetQuery, DomainError
             .occurred_until_ms
             .map(|ms| parse_ms(ms, "occurred_until_ms"))
             .transpose()?,
+        // The calendar cut, validated and zone-resolved in one place
+        // (`to_day_filter`) so every transport refuses the same bad
+        // request the same way.
+        day: to_day_filter(query)?,
         // Ingest / modification windows. Each end is validated the same
         // way as the occurrence window — an unrepresentable epoch is a
         // `400` naming the field, not a bound quietly dropped — but an
@@ -2393,6 +2506,136 @@ mod tests {
             matches!(err, DomainError::Validation(ref m) if m.contains("rating_max 0")),
             "expected a validation error naming rating_max 0, got {err:?}"
         );
+    }
+
+    fn day_query(over: impl FnOnce(&mut ListAssetsQuery)) -> ListAssetsQuery {
+        let mut query = ListAssetsQuery::default();
+        over(&mut query);
+        query
+    }
+
+    fn day_error(query: &ListAssetsQuery, needle: &str) {
+        let err = to_asset_query(query).unwrap_err();
+        assert!(
+            matches!(err, DomainError::Validation(ref m) if m.contains(needle)),
+            "expected a validation error mentioning {needle:?}, got {err:?}"
+        );
+    }
+
+    /// The four wire fields land on one resolved filter: a range as two
+    /// real dates, a day-of-year as its pair, both under the parsed
+    /// zone. Nothing destructures `AssetQuery` exhaustively, so this is
+    /// what holds the `day:` line of the mapper in place.
+    #[test]
+    fn calendar_fields_reach_the_domain_query_zone_resolved() {
+        let range = to_asset_query(&day_query(|q| {
+            q.time_zone = Some("Asia/Tokyo".into());
+            q.day_from = Some("2026-03-08".into());
+            q.day_until = Some("2026-03-10".into());
+        }))
+        .unwrap();
+        assert_eq!(
+            range.day,
+            Some(DayFilter {
+                zone: GlobalZone(chrono_tz::Asia::Tokyo),
+                ask: DayAsk::Range {
+                    from: NaiveDate::from_ymd_opt(2026, 3, 8).unwrap(),
+                    until: NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+                },
+            })
+        );
+        let day = to_asset_query(&day_query(|q| {
+            q.time_zone = Some("America/New_York".into());
+            q.day_of_year = Some(DayOfYear { month: 2, day: 29 });
+        }))
+        .unwrap();
+        assert_eq!(
+            day.day,
+            Some(DayFilter {
+                zone: GlobalZone(chrono_tz::America::New_York),
+                ask: DayAsk::DayOfYear { month: 2, day: 29 },
+            })
+        );
+        // A zone alone names no cut, and a query naming nothing has none.
+        let inert = to_asset_query(&day_query(|q| q.time_zone = Some("UTC".into()))).unwrap();
+        assert_eq!(inert.day, None);
+        assert_eq!(
+            to_asset_query(&ListAssetsQuery::default()).unwrap().day,
+            None
+        );
+    }
+
+    /// Every refusal is a fact about the request, so each is a
+    /// `Validation` naming what was wrong; none falls back to UTC or
+    /// to an empty page.
+    #[test]
+    fn calendar_fields_refuse_what_no_corpus_could_answer() {
+        // A day without a zone.
+        day_error(
+            &day_query(|q| q.day_from = Some("2026-03-08".into())),
+            "time_zone",
+        );
+        day_error(
+            &day_query(|q| q.day_of_year = Some(DayOfYear { month: 3, day: 8 })),
+            "time_zone",
+        );
+        // A zone the database does not carry — not UTC.
+        day_error(
+            &day_query(|q| {
+                q.time_zone = Some("Mars/Olympus".into());
+                q.day_from = Some("2026-03-08".into());
+            }),
+            "Mars/Olympus",
+        );
+        // Both cuts at once.
+        day_error(
+            &day_query(|q| {
+                q.time_zone = Some("UTC".into());
+                q.day_from = Some("2026-03-08".into());
+                q.day_of_year = Some(DayOfYear { month: 3, day: 8 });
+            }),
+            "cannot be combined",
+        );
+        // A string the calendar cannot hold.
+        day_error(
+            &day_query(|q| {
+                q.time_zone = Some("UTC".into());
+                q.day_until = Some("2026-02-30".into());
+            }),
+            "day_until",
+        );
+        // Month and day out of range — and the bound is the month's
+        // longest, so 29 February passes while 31 April does not.
+        day_error(
+            &day_query(|q| {
+                q.time_zone = Some("UTC".into());
+                q.day_of_year = Some(DayOfYear { month: 13, day: 1 });
+            }),
+            "month",
+        );
+        day_error(
+            &day_query(|q| {
+                q.time_zone = Some("UTC".into());
+                q.day_of_year = Some(DayOfYear { month: 4, day: 31 });
+            }),
+            "1..=30",
+        );
+        day_error(
+            &day_query(|q| {
+                q.time_zone = Some("UTC".into());
+                q.day_of_year = Some(DayOfYear { month: 4, day: 0 });
+            }),
+            "1..=30",
+        );
+        // An inverted range is not refused: it mirrors the raw window
+        // and answers an empty page.
+        let inverted = to_asset_query(&day_query(|q| {
+            q.time_zone = Some("UTC".into());
+            q.day_from = Some("2026-03-10".into());
+            q.day_until = Some("2026-03-08".into());
+        }))
+        .unwrap();
+        assert!(inverted.day.is_some());
     }
 
     /// Each of the six metric bounds has to land on its own domain

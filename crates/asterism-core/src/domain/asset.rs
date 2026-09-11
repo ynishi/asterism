@@ -10,7 +10,7 @@ use asterism_contract::query::TagMatch;
 use chrono::{DateTime, NaiveDate, Utc};
 use chrono_tz::Tz;
 
-use crate::domain::asset_zone::{self, AssetTime, OccurredSource};
+use crate::domain::asset_zone::{self, AssetTime, DayFilter, OccurredSource};
 use crate::domain::attribution::{
     AttributionChannel, AttributionContext, Author, OperatorRef, PersistedAttribution,
 };
@@ -767,6 +767,15 @@ pub struct AssetQuery {
     pub occurred_from: Option<DateTime<Utc>>,
     /// Upper bound on occurrence time (exclusive).
     pub occurred_until: Option<DateTime<Utc>>,
+    /// Calendar cut on the asset's **resolved** time — the stamp its
+    /// source says it means, in its own zone when it has one and in the
+    /// filter's zone otherwise. Already validated and zone-resolved by
+    /// the mapper; the adapter turns it into the two-sided predicate
+    /// (`asset_zone::DayFilter::global_windows` for unzoned rows, the
+    /// stored local day for zoned ones). Composes with the raw
+    /// `occurred_from` / `occurred_until` pair as another conjunct: the
+    /// two cut different things and neither replaces the other.
+    pub day: Option<DayFilter>,
     /// Lower bound on ingest time (`created_at`, inclusive) — when the
     /// row entered the library, which an import separates from
     /// `occurred_from` by however old the imported material is.
@@ -954,6 +963,7 @@ impl Default for AssetQuery {
             modality_unset: false,
             occurred_from: None,
             occurred_until: None,
+            day: None,
             created_from: None,
             created_until: None,
             updated_from: None,
