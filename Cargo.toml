@@ -216,6 +216,13 @@ thiserror   = "2"
 async-trait = "0.1"
 uuid        = { version = "1", features = ["v7", "serde"] }
 chrono      = { version = "0.4", features = ["serde"] }
+# The IANA time-zone database, for the one question a UTC offset cannot
+# answer: which offset a zone was using on a *given* day. A calendar day
+# in `asterism_core::domain::asset_zone` is the 24 hours from that day's
+# local midnight, and where that midnight falls is the zone's rule for
+# that year — a number could not carry it, and neither could a table of
+# offsets this repository maintained itself.
+chrono-tz   = "0.10"
 sha2        = "0.10"
 # Base64. Declared here for the reason `reqwest` is: two crates read the
 # *same* payloads — `asterism-importer-sdk`'s PNG chunk reader decodes a
