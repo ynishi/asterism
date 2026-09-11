@@ -38,8 +38,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use asterism_importer_sdk::{
-    ChatMessage, ChatRole, Footprint, FootprintSource, Image, ParseError, RawItem, RecordAddresses,
-    SourceParser,
+    ChatMessage, ChatRole, Footprint, FootprintSource, Image, OccurredSource, ParseError, RawItem,
+    RecordAddresses, SourceParser, resolve_occurrence,
 };
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -107,13 +107,18 @@ impl SourceParser for CcSessionParser {
             // pointed at. See the module rustdoc.
             let uuid = addresses.declared(obj.get("uuid").and_then(|v| v.as_str()));
 
-            let occurred_at = obj
-                .get("timestamp")
-                .and_then(|v| v.as_str())
-                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                .map(|dt| dt.with_timezone(&Utc))
-                .or(item.occurred_at)
-                .unwrap_or_else(Utc::now);
+            // The ladder, with its rung recorded: the line's own
+            // `timestamp`, then the file's mtime, then the import
+            // moment. An image the line pointed at takes the line's
+            // answer, because it entered the conversation then.
+            let (occurred_at, occurred_source) = resolve_occurrence(
+                obj.get("timestamp")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                    .map(|dt| dt.with_timezone(&Utc)),
+                OccurredSource::Record,
+                item.occurred_at,
+            );
 
             let parent_message_id = obj
                 .get("parentUuid")
@@ -158,6 +163,7 @@ impl SourceParser for CcSessionParser {
                         external_id: None,
                     },
                     occurred_at,
+                    occurred_source,
                     external_session_key: Some(external_session_key.clone()),
                     alt,
                     dims: None,
@@ -181,6 +187,7 @@ impl SourceParser for CcSessionParser {
                     external_id: None,
                 },
                 occurred_at,
+                occurred_source,
                 external_session_key: external_session_key.clone(),
                 role,
                 body,
@@ -337,6 +344,15 @@ mod tests {
             "sanity: message key matches"
         );
         assert_eq!(image.alt.as_deref(), Some("shot 1.png"));
+        // Every line stated its own `timestamp`, so each message is on
+        // the `record` rung with the file's mtime and the import moment
+        // never consulted — and the image that entered the conversation
+        // on the first line takes that line's stamp and rung.
+        for message in &messages {
+            assert_eq!(message.occurred_source, OccurredSource::Record);
+        }
+        assert_eq!(image.occurred_source, OccurredSource::Record);
+        assert_eq!(image.occurred_at, messages[0].occurred_at);
     }
 
     /// A container is still a container.

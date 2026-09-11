@@ -93,6 +93,7 @@ fn ctx() -> CardContext<'static> {
         locator: "character-card-lyra.png",
         session_id: "sess-card",
         occurred_at: Utc::now(),
+        occurred_source: Default::default(),
         platform: Some("SillyTavern"),
         archive_entries: None,
     }

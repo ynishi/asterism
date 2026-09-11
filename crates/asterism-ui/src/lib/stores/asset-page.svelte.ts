@@ -129,6 +129,17 @@ function indexToLightCard(idx: AssetIndexEntryDto): AssetCardDto {
     persona_id: idx.persona_id,
     modality: idx.modality,
     occurred_at_ms: idx.occurred_at_ms,
+    // Placeholders: the index row does not carry where its stamp came
+    // from or which zone it happened in, because no axis the client
+    // evaluates over light rows reads either (`AssetIndexEntryDto`).
+    // `"unknown"` is what the column itself says of a row whose source
+    // was never recorded, so a light card reads exactly as such a row
+    // would — not as `"import"`, which would claim the stamp is the
+    // arrival, nor as any occurrence rung, which would claim a
+    // provenance nothing here has seen. Hydration swaps in the real
+    // pair with the rest of the card.
+    occurred_source: "unknown",
+    time_zone: null,
     cover: null,
     labels: idx.labels,
     // Carried, not placeholdered: `file_size`, `duration` and `pixels`

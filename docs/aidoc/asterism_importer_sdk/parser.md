@@ -43,6 +43,19 @@ the moment the file was last flushed, which erases the
 within-session ordering the domain relies on for edge / grid
 placement.
 
+**Say which rung won.** Every footprint carries an
+[`OccurredSource`] beside its `occurred_at`, and the server reads
+it to decide whether the stamp is the thing's time at all: a row
+that landed on rung 3 has no occurrence, and its time is the moment
+it arrived. Rung 1 is [`Exif`](OccurredSource::Exif) for a capture
+time read out of an image and [`Record`](OccurredSource::Record)
+for a timestamp the record states; rung 2 is
+[`Mtime`](OccurredSource::Mtime), named for the common case and
+covering whatever the scanner derived from the container; rung 3 is
+[`Import`](OccurredSource::Import). [`resolve_occurrence`] applies
+the ladder and answers both at once, so a parser cannot report a
+rung it did not take.
+
 # Partial success on multi-footprint items
 
 One `RawItem` may yield many footprints (JSONL: one file → many
@@ -77,6 +90,10 @@ unreadable in the other direction — the readers in
 no record has the id `L3`, so the body never resolves.
 
 [`RecordAddresses`] is the shared implementation of this rule.
+
+## Functions
+
+- `resolve_occurrence` — The `occurred_at` fallback ladder, applied: the first rung that has
 
 ## Types
 

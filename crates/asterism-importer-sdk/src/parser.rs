@@ -41,6 +41,19 @@
 //! within-session ordering the domain relies on for edge / grid
 //! placement.
 //!
+//! **Say which rung won.** Every footprint carries an
+//! [`OccurredSource`] beside its `occurred_at`, and the server reads
+//! it to decide whether the stamp is the thing's time at all: a row
+//! that landed on rung 3 has no occurrence, and its time is the moment
+//! it arrived. Rung 1 is [`Exif`](OccurredSource::Exif) for a capture
+//! time read out of an image and [`Record`](OccurredSource::Record)
+//! for a timestamp the record states; rung 2 is
+//! [`Mtime`](OccurredSource::Mtime), named for the common case and
+//! covering whatever the scanner derived from the container; rung 3 is
+//! [`Import`](OccurredSource::Import). [`resolve_occurrence`] applies
+//! the ladder and answers both at once, so a parser cannot report a
+//! rung it did not take.
+//!
 //! # Partial success on multi-footprint items
 //!
 //! One `RawItem` may yield many footprints (JSONL: one file → many
@@ -76,8 +89,39 @@
 //!
 //! [`RecordAddresses`] is the shared implementation of this rule.
 
+use asterism_contract::command::OccurredSource;
+use chrono::{DateTime, Utc};
+
 use crate::footprint::Footprint;
 use crate::scanner::RawItem;
+
+/// The `occurred_at` fallback ladder, applied: the first rung that has
+/// a value wins, and the answer says which rung that was.
+///
+/// `record` is rung 1 — a timestamp inside the payload — together with
+/// the source it is if present (`Exif` for an image's capture time,
+/// `Record` for anything a record states). `container` is rung 2, what
+/// the scanner derived ([`RawItem::occurred_at`]), and is always
+/// `Mtime`. Nothing on either rung is rung 3: the import moment, taken
+/// here so that the caller's `Utc::now()` and its `Import` cannot be
+/// paired with anything else.
+///
+/// A parser with more than one candidate on rung 1 (a message's own
+/// stamp, then its conversation's) folds them with `or` first — they
+/// are the same rung — and hands the result in once.
+pub fn resolve_occurrence(
+    record: Option<DateTime<Utc>>,
+    record_source: OccurredSource,
+    container: Option<DateTime<Utc>>,
+) -> (DateTime<Utc>, OccurredSource) {
+    if let Some(at) = record {
+        return (at, record_source);
+    }
+    if let Some(at) = container {
+        return (at, OccurredSource::Mtime);
+    }
+    (Utc::now(), OccurredSource::Import)
+}
 
 /// Errors returned by parsers.
 #[derive(Debug, thiserror::Error)]
@@ -245,5 +289,31 @@ mod tests {
             addresses.diagnostic().as_deref(),
             Some("records dropped: 2 of 3 carried no id of their own (/logs/s.jsonl)"),
         );
+    }
+
+    /// Top rung wins and names itself; the container rung is always
+    /// `Mtime`; and nothing on either rung is the import moment, which
+    /// is the only way a parser can land on `Import` — so the stamp and
+    /// the rung cannot disagree.
+    #[test]
+    fn the_ladder_answers_the_stamp_and_its_rung_together() {
+        let record = DateTime::from_timestamp_millis(1_000).unwrap();
+        let container = DateTime::from_timestamp_millis(2_000).unwrap();
+        assert_eq!(
+            resolve_occurrence(Some(record), OccurredSource::Exif, Some(container)),
+            (record, OccurredSource::Exif)
+        );
+        assert_eq!(
+            resolve_occurrence(Some(record), OccurredSource::Record, None),
+            (record, OccurredSource::Record)
+        );
+        assert_eq!(
+            resolve_occurrence(None, OccurredSource::Record, Some(container)),
+            (container, OccurredSource::Mtime)
+        );
+        let before = Utc::now();
+        let (at, source) = resolve_occurrence(None, OccurredSource::Record, None);
+        assert_eq!(source, OccurredSource::Import);
+        assert!(at >= before && at <= Utc::now());
     }
 }

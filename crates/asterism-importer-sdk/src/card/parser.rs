@@ -179,6 +179,7 @@ pub mod v2_default {
             out.push(Footprint::Note(Note {
                 source,
                 occurred_at: ctx.occurred_at,
+                occurred_source: ctx.occurred_source,
                 body: text.to_string(),
                 source_app: None,
                 labels,
@@ -208,6 +209,7 @@ pub mod v2_default {
             out.push(Footprint::ChatMessage(ChatMessage {
                 source,
                 occurred_at: ctx.occurred_at,
+                occurred_source: ctx.occurred_source,
                 external_session_key: ctx.session_id.to_string(),
                 role: ChatRole::Assistant,
                 body: text.to_string(),
@@ -245,6 +247,7 @@ pub mod v2_default {
                 out.push(Footprint::ChatMessage(ChatMessage {
                     source,
                     occurred_at: ctx.occurred_at,
+                    occurred_source: ctx.occurred_source,
                     external_session_key: ctx.session_id.to_string(),
                     role: ChatRole::Assistant,
                     body: text.to_string(),
@@ -284,6 +287,7 @@ pub mod v2_default {
         vec![Footprint::Doc(Doc {
             source: ctx.footprint_source("field=mes_example"),
             occurred_at: ctx.occurred_at,
+            occurred_source: ctx.occurred_source,
             title: Some("mes_example".into()),
             excerpt: text.to_string(),
             format: DocFormat::Plain,
@@ -320,6 +324,7 @@ pub mod v2_default {
         vec![Footprint::Doc(Doc {
             source: ctx.footprint_source("field=creator_notes"),
             occurred_at: ctx.occurred_at,
+            occurred_source: ctx.occurred_source,
             title: Some("creator_notes".into()),
             excerpt: text.to_string(),
             format: DocFormat::Markdown,
@@ -399,6 +404,7 @@ pub mod v2_default {
             out.push(Footprint::Note(Note {
                 source: ctx.footprint_source(&format!("book_entry={uid}")),
                 occurred_at: ctx.occurred_at,
+                occurred_source: ctx.occurred_source,
                 body: content.to_string(),
                 source_app: None,
                 labels,
@@ -428,6 +434,7 @@ mod tests {
             locator: "/tmp/alice.png",
             session_id: "sid-42",
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             platform: Some("SillyTavern"),
             archive_entries: None,
         }

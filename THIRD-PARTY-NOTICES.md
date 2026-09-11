@@ -37,7 +37,7 @@ Counted by entry rather than by package: a package whose licence expression
 names two licences is listed under each of them, so these add up to more than
 the number of packages.
 
-- 692 entries under MIT License
+- 695 entries under MIT License
 - 25 entries under Apache License 2.0
 - 23 entries under Unicode License v3
 - 20 entries under ISC License
@@ -11842,6 +11842,7 @@ Used by:
 - [btree-range-map 0.7.2](https://github.com/timothee-haudebourg/btree-range-map)
 - [c2pa 0.90.12](https://github.com/contentauth/c2pa-rs)
 - [cargo_toml 0.22.3](https://gitlab.com/lib.rs/cargo_toml)
+- [chrono-tz 0.10.4](https://github.com/chronotope/chrono-tz)
 - [chrono 0.4.45](https://github.com/chronotope/chrono)
 - [delegate 0.13.5](https://github.com/kobzol/rust-delegate)
 - [delegate 0.8.0](https://github.com/kobzol/rust-delegate)
@@ -12746,10 +12747,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Used by:
 
+- [phf 0.12.1](https://github.com/rust-phf/rust-phf)
 - [phf 0.13.1](https://github.com/rust-phf/rust-phf)
 - [phf_codegen 0.13.1](https://github.com/rust-phf/rust-phf)
 - [phf_generator 0.13.1](https://github.com/rust-phf/rust-phf)
 - [phf_macros 0.13.1](https://github.com/rust-phf/rust-phf)
+- [phf_shared 0.12.1](https://github.com/rust-phf/rust-phf)
 - [phf_shared 0.13.1](https://github.com/rust-phf/rust-phf)
 
 ```

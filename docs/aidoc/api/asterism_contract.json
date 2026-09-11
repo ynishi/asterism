@@ -298,6 +298,11 @@
       "docs": "Files a Group under a Dir (`None` = back to the root level).\nOrganisation axis only — the group's members and nesting links\nare untouched."
     },
     {
+      "path": "asterism_contract::command::OccurredSource",
+      "kind": "enum",
+      "docs": "Where the caller got [`AddAssetCommand::occurred_at_ms`] from — the\nrung of its fallback ladder that produced the value.\n\nThe wire half of `asterism_core::domain::asset_zone::OccurredSource`,\non the same terms as [`OnDuplicate`] two declarations up: this crate\nis a leaf, the bindings and tool schemas are generated from it, and\nthe one conversion (`AssetService::add`) is an exhaustive match so\na variant added to either set stops compiling until the other is\nanswered for.\n\nThe value that changes what the row's time *is* is\n[`Import`](Self::Import): the importer had no occurrence and wrote\nthe moment of import, so the row's time is its arrival, not the\nstamp. Every other rung means the stamp is an occurrence.\n[`Unknown`](Self::Unknown) is the default — a caller written before\nthis field existed sends nothing and is read as saying nothing,\nwhich is what the stored column says of such rows too."
+    },
+    {
       "path": "asterism_contract::command::OnDuplicate",
       "kind": "enum",
       "docs": "What the caller wants done if the asset being registered turns out\nto hold bytes an existing asset already holds.\n\nThe wire half of `asterism_core::domain::value::OnDuplicate`, which\nis the type the row is written from. Two declarations of the same\nclosed set rather than one, because this crate is a leaf — it has\nno dependency on `asterism-core` (that arrow points the other way),\nand it is the crate the TypeScript bindings and the MCP tool schemas\nare generated from. The `snake_case` tokens are `ask` / `fold` /\n`separate` on both sides, and the single conversion between them\n(`AssetService::add`) is an exhaustive match, so a variant added to\neither set stops compiling until the other is answered for.\n\nSpelled as an enum rather than a free string — unlike `author_kind`,\nthe neighbouring caller-asserted field — because the set really is\nclosed and small: a caller reading the generated schema sees the\nthree answers instead of guessing, and an unknown token is refused\nby deserialisation, above every side effect the ingest could have."
@@ -1126,6 +1131,11 @@
       "path": "asterism_contract::query",
       "kind": "module",
       "docs": "Query DTOs — inputs for read-side operations.\n\n`viewer_subject` is the raw input for visibility enforcement:\n`None` means the owner view (everything visible), and `Some(subject)`\nmeans a restricted subject view (persona view, and so on)."
+    },
+    {
+      "path": "asterism_contract::query::DayOfYear",
+      "kind": "struct",
+      "docs": "A month and a day with no year — the shape of \"this day, every\nyear\" ([`ListAssetsQuery::day_of_year`]).\n\n`month` is `1..=12` and `day` is checked against the longest that\nmonth ever gets (`1..=29` for February, `1..=30` for April), which is\nwhat separates the two ways a day can fail to exist: a pair no year\nhas (31 April) is malformed and refused like a month of `13`, while\na pair some years have and others do not (29 February) is a real\nquestion, answered per year. Both checks run where the query is\nmapped, with the other bands."
     },
     {
       "path": "asterism_contract::query::DiagLevel",

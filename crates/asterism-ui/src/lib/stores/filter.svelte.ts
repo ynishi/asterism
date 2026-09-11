@@ -40,6 +40,7 @@
 // a callsite would be a second definition of what "5 MB" means.
 
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import type { DayOfYear } from "../../bindings";
 
 // Sort axes mirror the App.svelte types (kept in sync manually until
 // the sort UI is extracted). `SortTarget` picks the dimension,
@@ -204,6 +205,107 @@ function unscaleBand(value: number | null | undefined, factor: number): number |
   return value === null || value === undefined ? null : value / factor;
 }
 
+// How wide a jump reaches from the date that was picked.
+export type JumpSpan = "day" | "week" | "month";
+
+export const JUMP_SPANS: readonly JumpSpan[] = ["day", "week", "month"];
+
+export function isJumpSpan(v: string): v is JumpSpan {
+  return (JUMP_SPANS as readonly string[]).includes(v);
+}
+
+// A month and a day with no year — `ListAssetsQuery.day_of_year`. The
+// wire type itself, re-exported so the picker and the chip name it
+// without reaching into the bindings; unlike `SortTarget` above there
+// is nothing the UI adds or omits.
+export type { DayOfYear };
+
+// Wire form of the calendar filter (`ListAssetsQuery` field names), so
+// the query builders spread it rather than restating the mapping — the
+// same arrangement `MetricBandQuery` has over its three bands. Four
+// fields and not three: the backend reads the days in `time_zone` and
+// refuses a day without one, so the zone rides in the same spread and
+// cannot be forgotten by a builder that remembered the days.
+export type DayFilterQuery = {
+  day_from: string | null;
+  day_until: string | null;
+  day_of_year: DayOfYear | null;
+  time_zone: string | null;
+};
+
+/**
+ * The viewer's zone as an IANA name (`"Asia/Tokyo"`), which is what the
+ * query takes — not an offset. The backend needs the *name* to open a
+ * day in a past year under that year's own rule; an offset would only
+ * describe today (`ListAssetsQuery::time_zone`).
+ *
+ * ECMA-402 has answered `resolvedOptions().timeZone` with the default
+ * zone since its second edition, and TypeScript's lib types declare it
+ * required on that basis; only the first edition (2012) returned
+ * `undefined` when no zone option was passed. The widening is for an
+ * engine still on that edition, and is what keeps the fallback a real
+ * branch rather than dead code. `"UTC"` is the one name the backend is
+ * certain to accept — a day answered in UTC on such an engine is a day
+ * answered, where an empty name is a refused query with nothing on
+ * screen to say why.
+ */
+export function viewerTimeZone(): string {
+  const zone = (Intl.DateTimeFormat().resolvedOptions() as { timeZone?: string }).timeZone;
+  return zone && zone.length > 0 ? zone : "UTC";
+}
+
+// `YYYY-MM-DD` — what `<input type="date">` reads and writes, what the
+// wire carries, and the only text form this module accepts. Parsed to a
+// UTC `Date` so the arithmetic below is over the calendar alone: the
+// zone a day is read in is the backend's business (`time_zone` rides
+// beside the days), and a local-time `Date` here would fold the
+// machine's own zone into a value that is supposed to name a date.
+function parseIsoDate(iso: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  // `Date.UTC(2026, 1, 30)` is 2 March, silently. A date the calendar
+  // rolled over is a malformed request, not a nearby one — the same
+  // reading the backend takes of 30 February. (29 February is the other
+  // case entirely: the backend accepts it and answers it per year.)
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== mo - 1 || date.getUTCDate() !== d) {
+    return null;
+  }
+  return date;
+}
+
+function isoOf(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
+/**
+ * The half-open `[from, until)` day range a date and a span name, as
+ * calendar dates. `null` for a date the calendar does not have.
+ *
+ * A week starts on **Monday** (ISO 8601). The alternative is a
+ * locale-dependent first day, which would make the same saved rule
+ * select different assets on two machines — and a rule that does that
+ * is not a definition.
+ */
+function rangeFor(iso: string, span: JumpSpan): { from: string; until: string } | null {
+  const start = parseIsoDate(iso);
+  if (!start) return null;
+  const from = new Date(start);
+  if (span === "week") {
+    // `getUTCDay()` is 0 on Sunday; shift so Monday is 0.
+    from.setUTCDate(from.getUTCDate() - ((from.getUTCDay() + 6) % 7));
+  } else if (span === "month") {
+    from.setUTCDate(1);
+  }
+  const until = new Date(from);
+  if (span === "day") until.setUTCDate(until.getUTCDate() + 1);
+  else if (span === "week") until.setUTCDate(until.getUTCDate() + 7);
+  else until.setUTCMonth(until.getUTCMonth() + 1);
+  return { from: isoOf(from), until: isoOf(until) };
+}
+
 class Filter {
   activePersona = $state<string | null>(null);
   activeModality = $state<string | null>(null);
@@ -272,6 +374,48 @@ class Filter {
    */
   pixelsMinMp = $state<number | null>(null);
   pixelsMaxMp = $state<number | null>(null);
+
+  /**
+   * Calendar filter — "what is from these days" as a predicate rather
+   * than as a place to scroll to. `dayFrom` / `dayUntil` are a half-open
+   * `[from, until)` range of `YYYY-MM-DD` dates, `null` at either end
+   * meaning that end is open; `dayOfYear` is one month-and-day across
+   * every year. The backend refuses both cuts at once; `jumpTo` and
+   * `jumpToDayOfYear` each clear the other, and the two paths that
+   * take the fields from outside — a stored rule and a link — keep the
+   * range and drop the day-of-year when they arrive together.
+   *
+   * Held as calendar dates, which are the wire's own form
+   * (`ListAssetsQuery::day_from`): nothing is converted on the way out
+   * or back, so a rule written through the MCP tool or by hand that
+   * names a range the picker cannot draw — nine days, a half-open end —
+   * survives the round trip and the span picker simply shows no span.
+   * The picker reads its own state back out through `jumpDate()` and
+   * `jumpSpan()`.
+   *
+   * The day is opened on the asset's **resolved** time — the stamp its
+   * source says it means, in its own zone when it has one and in
+   * `dayTimeZone` otherwise (`asterism_core::domain::asset_zone`). It
+   * composes like every other axis: the grid's query spreads
+   * `dayFilter()` beside persona, modality and the tag chips, and a
+   * Query Group carries it the same way.
+   */
+  dayFrom = $state<string | null>(null);
+  dayUntil = $state<string | null>(null);
+  dayOfYear = $state<DayOfYear | null>(null);
+
+  /**
+   * The zone the calendar filter is read in, by IANA name. The viewer's
+   * own zone, except when the days arrived with one of their own: a
+   * Query Group rule persists the zone it was written under
+   * (`ListAssetsQuery::time_zone`) and a deep link carries it beside
+   * the days (`url-adapter`), and reading either's days under a
+   * different zone would show a different set than the one saved. It
+   * goes back to the viewer's zone — read from the platform again —
+   * whenever the filter is cleared, so a day picked fresh is read where
+   * the person picking it is.
+   */
+  dayTimeZone = $state<string>(viewerTimeZone());
 
   /**
    * `true` = ✦ fuzzy: `searchText` goes to Retrieval (`search_assets`),
@@ -382,7 +526,132 @@ class Filter {
     this.sizeMaxMb = null;
     this.pixelsMinMp = null;
     this.pixelsMaxMp = null;
+    // The calendar filter is a filter like the chips are, so "clear
+    // everything" clears it. Leaving it set would answer a cleared
+    // sidebar with a grid still held to one week, and nothing on screen
+    // would say why.
+    this.clearJump();
     this.discoverRandom = false;
+  }
+
+  /**
+   * The calendar filter in wire form. Spread by the grid's query
+   * builder and by the Query Group writers, so "which fields is the
+   * day filter" is stated once. The zone is sent only beside a day: it
+   * is inert without one on the backend, and a rule frozen with no day
+   * should look like one frozen before the fields existed.
+   */
+  dayFilter(): DayFilterQuery {
+    return {
+      day_from: this.dayFrom,
+      day_until: this.dayUntil,
+      day_of_year: this.dayOfYear,
+      time_zone: this.hasDayFilter() ? this.dayTimeZone : null,
+    };
+  }
+
+  /** `true` while the grid is held to a calendar cut of either kind. */
+  hasDayFilter(): boolean {
+    return this.dayFrom !== null || this.dayUntil !== null || this.dayOfYear !== null;
+  }
+
+  /**
+   * The range as a sentence, for a range the span picker cannot
+   * describe. The dates are shown as themselves: they are calendar
+   * dates in the filter's zone, and formatting them through the
+   * machine's own zone could move one by a day. An open end is `…`.
+   * Owned here so the sidebar note and the chip say the same thing.
+   */
+  dayRangeText(): string {
+    return `${this.dayFrom ?? "…"} → ${this.dayUntil ?? "…"}`;
+  }
+
+  /**
+   * Sends the grid to the day, week or month containing `iso`
+   * (`YYYY-MM-DD`). A date the calendar does not have leaves the filter
+   * alone rather than guessing at a nearby one. Replaces a day-of-year
+   * cut: the two are different questions and the wire refuses both.
+   */
+  jumpTo(iso: string, span: JumpSpan): void {
+    const range = rangeFor(iso, span);
+    if (!range) return;
+    this.dayFrom = range.from;
+    this.dayUntil = range.until;
+    this.dayOfYear = null;
+  }
+
+  /**
+   * Holds the grid to the month and day of `iso`, every year — "what
+   * happened on this day". The year in `iso` is what the picker had to
+   * type to name a day; it is dropped here and nothing remembers it.
+   * A date the calendar does not have is refused the way `jumpTo`
+   * refuses it; 29 February is a date the calendar has.
+   */
+  jumpToDayOfYear(iso: string): void {
+    const date = parseIsoDate(iso);
+    if (!date) return;
+    this.dayOfYear = { month: date.getUTCMonth() + 1, day: date.getUTCDate() };
+    this.dayFrom = null;
+    this.dayUntil = null;
+  }
+
+  /**
+   * Flips between the two cuts over the date the picker shows. Off →
+   * on takes the month and day of the range's first date; on → off
+   * opens that day in `year` (the current one, by default), which is
+   * the year the picker was showing it under. Nothing to flip when no
+   * date is set, and a day-of-year the target year lacks (29 February)
+   * clears rather than lands on 1 March.
+   */
+  toggleEveryYear(year: number = new Date().getFullYear()): void {
+    if (this.dayOfYear !== null) {
+      const iso = this.jumpDate(year);
+      this.clearJump();
+      if (iso !== null) this.jumpTo(iso, "day");
+    } else if (this.dayFrom !== null) {
+      this.jumpToDayOfYear(this.dayFrom);
+    }
+  }
+
+  clearJump(): void {
+    this.dayFrom = null;
+    this.dayUntil = null;
+    this.dayOfYear = null;
+    this.dayTimeZone = viewerTimeZone();
+  }
+
+  /**
+   * The date the picker should show: the first day of the range, or
+   * the day-of-year placed in `year` (the current one, by default), or
+   * `null` when no cut is set — or when the day-of-year does not exist
+   * in that year, since the picker cannot show 29 February 2027 and a
+   * nearby date would be a claim about the filter that is not true.
+   */
+  jumpDate(year: number = new Date().getFullYear()): string | null {
+    if (this.dayFrom !== null) return this.dayFrom;
+    if (this.dayOfYear === null) return null;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const iso = `${year}-${pad(this.dayOfYear.month)}-${pad(this.dayOfYear.day)}`;
+    return parseIsoDate(iso) === null ? null : iso;
+  }
+
+  /**
+   * Which span the current range *is*, or `null` when it is not one of
+   * them — a half-open end, a day-of-year cut, or a range that came
+   * from somewhere with a finer idea of days than this picker has.
+   * Derived rather than stored, and `null` rather than a nearest match,
+   * for the reason [`dayFrom`](Filter.dayFrom) gives.
+   */
+  jumpSpan(): JumpSpan | null {
+    if (this.dayFrom === null || this.dayUntil === null) return null;
+    const from = this.dayFrom;
+    const until = this.dayUntil;
+    return (
+      JUMP_SPANS.find((span) => {
+        const range = rangeFor(from, span);
+        return range !== null && range.from === from && range.until === until;
+      }) ?? null
+    );
   }
 
   /**
@@ -570,6 +839,15 @@ class Filter {
         group_ids?: string[];
         session_id?: string | null;
         label?: string | null;
+        // The calendar filter, in the wire's own form. Absent in every
+        // rule frozen before the fields existed; those read back as no
+        // cut, which is the set they were saved as. Typed loose like
+        // `tag_match`: this is stored JSON, and a hand-written rule may
+        // carry anything.
+        day_from?: string | null;
+        day_until?: string | null;
+        day_of_year?: { month?: unknown; day?: unknown } | null;
+        time_zone?: string | null;
         // Wire units (ms / bytes / raw pixel count), converted back to
         // the sidebar's seconds / MB / MP below. Absent in every rule
         // frozen before the bands existed; those read back as "both ends
@@ -621,6 +899,30 @@ class Filter {
     for (const id of f.group_ids ?? []) this.activeGroupIds.add(id);
     this.activeSessionId = f.session_id ?? null;
     this.activeLabel = f.label ?? null;
+    // Restored as the dates they were saved as, with no attempt to
+    // recognise a day or a week first — see `dayFrom`. The picker's own
+    // state comes back out through `jumpSpan()`. A day-of-year that is
+    // not a pair of numbers is dropped rather than sent: the wire would
+    // refuse the whole query, and a rule the backend already evaluates
+    // cannot have carried one. A rule naming both cuts is one the
+    // backend stores and then refuses to evaluate; the range wins here,
+    // the same precedence the URL adapter applies, so the restored
+    // filter is one the grid can answer rather than one it refuses on
+    // every reload.
+    this.dayFrom = f.day_from ?? null;
+    this.dayUntil = f.day_until ?? null;
+    const doy = f.day_of_year;
+    this.dayOfYear =
+      !this.hasDayFilter() && doy && typeof doy.month === "number" && typeof doy.day === "number"
+        ? { month: doy.month, day: doy.day }
+        : null;
+    // The zone the rule was written under outranks the viewer's while
+    // the rule's days are in force — see `dayTimeZone`. A rule with days
+    // and no zone predates nothing (the fields arrived together), but a
+    // hand-written one can omit it, and the viewer's zone is the honest
+    // reading of a day nobody placed.
+    this.dayTimeZone =
+      this.hasDayFilter() && f.time_zone ? f.time_zone : viewerTimeZone();
     // The inverse of `metricBands()`, and the only place the wire →
     // display conversion happens.
     this.durationMinSec = unscaleBand(f.duration_min_ms, MS_PER_SECOND);

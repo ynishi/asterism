@@ -21,7 +21,8 @@
 //!
 //! **The raw layer.** [`persona`] is the primary aggregate root; [`asset`]
 //! is one recorded footprint, with [`material`] as its physical-original
-//! layer and [`value`] holding the shared newtypes. [`modality`], [`tag`],
+//! layer, [`asset_zone`] resolving which of its stamps is its time and in
+//! which zone, and [`value`] holding the shared newtypes. [`modality`], [`tag`],
 //! [`dir`] and [`group`] are the organisation axes over it; [`instance`]
 //! names the single owner that `Author::Owner` refers to.
 //!
@@ -146,6 +147,7 @@ pub mod album_meta;
 pub mod app_setting;
 pub mod asset;
 pub mod asset_comment;
+pub mod asset_zone;
 pub mod attribution;
 pub mod chapter_mark;
 pub mod color;

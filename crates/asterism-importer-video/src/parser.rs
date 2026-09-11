@@ -10,10 +10,10 @@
 use std::path::PathBuf;
 
 use asterism_importer_sdk::{
-    Footprint, FootprintSource, ParseError, RawItem, SIDECAR_SUFFIX, SourceParser, Video,
+    Footprint, FootprintSource, OccurredSource, ParseError, RawItem, SIDECAR_SUFFIX, SourceParser,
+    Video, resolve_occurrence,
 };
 use asterism_media_probe::ProbeSource;
-use chrono::Utc;
 use serde_json::{Value, json};
 
 /// What the parser declares when it finds a sidecar. The server reads
@@ -58,7 +58,10 @@ impl SourceParser for VideoParser {
 
         let probed = asterism_media_probe::probe(&item.payload);
 
-        let occurred_at = item.occurred_at.unwrap_or_else(Utc::now);
+        // No stamp is read out of the container, so the ladder starts
+        // at the file's mtime and falls to the import moment.
+        let (occurred_at, occurred_source) =
+            resolve_occurrence(None, OccurredSource::Record, item.occurred_at);
         let dims = probed.as_ref().and_then(|m| m.dims);
         let duration_ms = probed.as_ref().and_then(|m| m.duration_ms);
         let codec = probed.as_ref().and_then(|m| m.codec.clone());
@@ -126,6 +129,7 @@ impl SourceParser for VideoParser {
                 external_id: None,
             },
             occurred_at,
+            occurred_source,
             alt,
             dims,
             duration_ms,
@@ -285,6 +289,13 @@ mod tests {
         assert_eq!(v.dims, None);
         assert_eq!(v.duration_ms, None);
         assert_eq!(v.codec, None);
+        // No mtime came with the item and no stamp is read out of the
+        // container, so the stamp is the import moment and the rung
+        // says so.
+        assert_eq!(
+            v.occurred_source,
+            asterism_importer_sdk::OccurredSource::Import
+        );
         assert_eq!(
             v.extra.get("mp4_probe_seen"),
             Some(&serde_json::Value::Bool(false))

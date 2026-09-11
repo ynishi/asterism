@@ -10,6 +10,34 @@ and this project adheres to
 
 ### Added
 
+- **The grid filters by calendar day** (#282). "What is from these days" and
+  "what happened on this day, any year" are two more fields on the list query —
+  `day_from` / `day_until` (a `YYYY-MM-DD` range, exclusive at the end, like the
+  raw occurrence window) and `day_of_year` (a month and a day) — and one more
+  beside them, `time_zone`, the viewer's IANA zone, which any of the three needs
+  and without which the request is refused: a day has no boundary until a zone
+  names one, and a fallback to UTC would put it hours wrong for every viewer who
+  is not there. A zone rather than an offset, because the offset a zone used in
+  2019 is the tz database's fact and not a number a query could carry. Both cuts
+  compose with persona, modality, tags and the rest, count exactly, freeze into
+  a Query Group with their zone, and reach the sidebar as an **Occurred on**
+  section — a date, a day / week / month span, and a "same day, every year"
+  toggle — with a chip in the filter band. There is no strip, no home surface
+  and nothing that loads on open: the day is a filter like the others. **The day
+  is cut on the asset's resolved time**, which is two decisions the row now
+  records. Which stamp: `occurred_source` says where an importer got
+  `occurred_at` — `exif`, `mtime`, `record`, or `import` when it had nothing and
+  wrote the moment it ran — and an `import`-sourced row's time is its arrival,
+  so a generated image no longer sits on the day the importer happened to run as
+  if something had happened then. Rows written before the column existed read
+  `unknown`, which resolves to the occurrence stamp and moves nothing. Which
+  zone: `time_zone` is the zone the thing happened in when a supplier recorded
+  one, and a row that carries it is read on its own local day in every query and
+  never re-read in the viewer's — no importer writes it yet; the column and the
+  command field are there for the one that will. Every importer in the workspace
+  now records its rung, and the desktop app's paste, drop and team-clone say
+  `import`.
+
 - **A release and its sends have a screen** (#280, part of #13, split from
   #254). The two verbs above landed with no surface, and the two records that
   answer after the fact — which half of the disclosure landed on each copy, and

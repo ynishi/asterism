@@ -268,6 +268,8 @@ mod tests {
             mime: Some("image/png".into()),
             media: "image".into(),
             occurred_at_ms: 0,
+            occurred_source: "unknown".into(),
+            time_zone: None,
             cover: None,
             labels: vec![],
             file_size_bytes: None,

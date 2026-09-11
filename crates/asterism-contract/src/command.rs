@@ -131,6 +131,44 @@ pub enum OnDuplicate {
     Separate,
 }
 
+/// Where the caller got [`AddAssetCommand::occurred_at_ms`] from — the
+/// rung of its fallback ladder that produced the value.
+///
+/// The wire half of `asterism_core::domain::asset_zone::OccurredSource`,
+/// on the same terms as [`OnDuplicate`] two declarations up: this crate
+/// is a leaf, the bindings and tool schemas are generated from it, and
+/// the one conversion (`AssetService::add`) is an exhaustive match so
+/// a variant added to either set stops compiling until the other is
+/// answered for.
+///
+/// The value that changes what the row's time *is* is
+/// [`Import`](Self::Import): the importer had no occurrence and wrote
+/// the moment of import, so the row's time is its arrival, not the
+/// stamp. Every other rung means the stamp is an occurrence.
+/// [`Unknown`](Self::Unknown) is the default — a caller written before
+/// this field existed sends nothing and is read as saying nothing,
+/// which is what the stored column says of such rows too.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, SchemaBridge)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum OccurredSource {
+    /// A capture time read out of the artefact's own metadata (EXIF
+    /// `DateTimeOriginal`).
+    Exif,
+    /// The file's modification time, taken because the artefact
+    /// carried nothing better.
+    Mtime,
+    /// A timestamp the source record itself states — a message's
+    /// `timestamp`, a row's own column.
+    Record,
+    /// No occurrence was available and the import moment was written
+    /// in its place.
+    Import,
+    /// Nobody said.
+    #[default]
+    Unknown,
+}
+
 /// Ingests a single asset — entry point for the asset-add pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
@@ -149,6 +187,18 @@ pub struct AddAssetCommand {
     pub modality: Option<String>,
     /// Occurrence time in unix epoch milliseconds.
     pub occurred_at_ms: i64,
+    /// Which rung of the caller's fallback ladder produced
+    /// [`occurred_at_ms`](Self::occurred_at_ms) — see [`OccurredSource`].
+    /// Omitted reads as `unknown`, so every client written before the
+    /// field existed keeps sending what it sent.
+    #[serde(default)]
+    pub occurred_source: OccurredSource,
+    /// The zone the recorded thing happened in, by IANA name, when the
+    /// caller knows it. `None` is the ordinary state — most sources
+    /// carry no zone — and means "read in the viewer's zone", not UTC.
+    /// A name the tz database does not carry is a validation error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
     /// **Session.id UUID direct** — the surrogate id of an existing
     /// `session` row. Callers that already know the Session (server-
     /// side scripts, re-runs that carry the id verbatim) use this

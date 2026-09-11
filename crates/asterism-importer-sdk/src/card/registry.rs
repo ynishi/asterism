@@ -88,6 +88,7 @@ mod tests {
             locator: "/tmp/a.png",
             session_id: "s",
             occurred_at: Utc::now(),
+            occurred_source: Default::default(),
             platform: None,
             archive_entries: None,
         }

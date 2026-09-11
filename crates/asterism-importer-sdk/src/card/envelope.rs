@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use crate::FootprintSource;
+use crate::OccurredSource;
 
 /// Parsed character-card envelope.
 ///
@@ -99,6 +100,9 @@ pub struct CardContext<'a> {
     /// to all outputs; the caller resolves it via the fallback ladder
     /// documented on [`crate::parser::SourceParser`].
     pub occurred_at: DateTime<Utc>,
+    /// Which rung of that ladder [`occurred_at`](Self::occurred_at)
+    /// came from, stamped on every footprint with it.
+    pub occurred_source: OccurredSource,
     /// Optional platform label (`"SillyTavern"`, `"CharacterHub"`,
     /// `"RisuAI"`, …). Flows into every [`FootprintSource::platform`].
     pub platform: Option<&'a str>,
@@ -201,6 +205,7 @@ mod tests {
             locator: "/tmp/alice.png",
             session_id: "sid-42",
             occurred_at: now,
+            occurred_source: OccurredSource::Unknown,
             platform: Some("SillyTavern"),
             archive_entries: None,
         };

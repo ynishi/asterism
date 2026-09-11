@@ -65,6 +65,8 @@ async fn an_unresolvable_claim_still_lands_the_artefact_and_says_why() {
                 locator: returned.to_str().unwrap().to_string(),
                 modality: None,
                 occurred_at_ms: 1_785_000_000_000,
+                occurred_source: Default::default(),
+                time_zone: None,
                 session_id: None,
                 external_session_key: None,
                 external_key: None,

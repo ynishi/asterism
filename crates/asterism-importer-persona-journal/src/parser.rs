@@ -22,9 +22,9 @@
 //! `asset.source_kind + source_locator` unique constraint.
 
 use asterism_importer_sdk::{
-    Footprint, FootprintSource, JournalEntry, JournalKind, ParseError, RawItem, SourceParser,
+    Footprint, FootprintSource, JournalEntry, JournalKind, OccurredSource, ParseError, RawItem,
+    SourceParser, resolve_occurrence,
 };
-use chrono::Utc;
 use serde_json::{Value, json};
 
 /// Parser for persona-journal rows.
@@ -68,7 +68,11 @@ impl SourceParser for PersonaJournalParser {
             return Ok(Vec::new());
         }
 
-        let occurred_at = item.occurred_at.unwrap_or_else(Utc::now);
+        // The scanner lifted the row's own `created_at` column into
+        // `item.occurred_at`, which is a stamp the record states — rung
+        // 1, not a container's mtime — so it is handed in as such.
+        let (occurred_at, occurred_source) =
+            resolve_occurrence(item.occurred_at, OccurredSource::Record, None);
 
         let kind = match kind_slug.as_str() {
             "states" => JournalKind::State,
@@ -110,6 +114,7 @@ impl SourceParser for PersonaJournalParser {
                 external_id: None,
             },
             occurred_at,
+            occurred_source,
             kind,
             body,
             bundle_id,
@@ -161,6 +166,40 @@ mod tests {
         );
         assert_eq!(spec.session_id, None);
         assert_eq!(spec.external_session_key, None);
+    }
+
+    /// The scanner lifts the row's `created_at` into the item, and
+    /// that is a stamp the record states — the `record` rung, not an
+    /// mtime. A row the scanner could not date lands on the import
+    /// rung, because a journal entry with no date has no occurrence
+    /// this parser can name.
+    #[test]
+    fn the_rows_own_timestamp_is_the_record_rung() {
+        use asterism_importer_sdk::OccurredSource;
+        let parser = PersonaJournalParser {
+            persona_name: "aya".into(),
+        };
+        let stamped = chrono::DateTime::from_timestamp_millis(1_700_000_000_000).unwrap();
+        let mut item = raw("states", "gentle morning");
+        item.occurred_at = Some(stamped);
+        let spec = parser
+            .parse(item)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+            .into_asset_spec();
+        assert_eq!(spec.occurred_at, stamped);
+        assert_eq!(spec.occurred_source, OccurredSource::Record);
+
+        let undated = parser
+            .parse(raw("states", "gentle morning"))
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+            .into_asset_spec();
+        assert_eq!(undated.occurred_source, OccurredSource::Import);
     }
 
     #[test]

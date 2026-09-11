@@ -113,6 +113,11 @@ describe("assetPageCatalog", () => {
     expect(card.source_locator).toBe("");
     expect(card.rating).toBeNull();
     expect(card.has_note).toBe(false);
+    // The index row carries neither time fact, and the placeholder has
+    // to be the one that claims nothing: `"unknown"` is what the column
+    // says of a row whose source was never recorded.
+    expect(card.occurred_source).toBe("unknown");
+    expect(card.time_zone).toBeNull();
   });
 
   // The sort keys are the half that must *not* be placeholdered: the

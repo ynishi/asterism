@@ -228,6 +228,8 @@ pub fn add_item(
         locator: locator_of(corpus_dir, spec),
         modality: Some(BENCH_MODALITY.to_string()),
         occurred_at_ms: spec.occurred_at_ms,
+        occurred_source: Default::default(),
+        time_zone: None,
         session_id: None,
         external_session_key: None,
         // The corpus states no outside name for a row it invented.

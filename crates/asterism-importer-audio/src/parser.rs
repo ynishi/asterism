@@ -10,9 +10,9 @@ use std::io::Cursor;
 use std::path::PathBuf;
 
 use asterism_importer_sdk::{
-    Audio, Footprint, FootprintSource, ParseError, RawItem, SIDECAR_SUFFIX, SourceParser,
+    Audio, Footprint, FootprintSource, OccurredSource, ParseError, RawItem, SIDECAR_SUFFIX,
+    SourceParser, resolve_occurrence,
 };
-use chrono::Utc;
 use lofty::config::ParseOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
@@ -58,7 +58,10 @@ impl SourceParser for AudioParser {
             .or(Some(item.payload.len() as u64));
 
         let probed = probe_audio(&item.payload);
-        let occurred_at = item.occurred_at.unwrap_or_else(Utc::now);
+        // No stamp is read out of the container, so the ladder starts
+        // at the file's mtime and falls to the import moment.
+        let (occurred_at, occurred_source) =
+            resolve_occurrence(None, OccurredSource::Record, item.occurred_at);
 
         let mut labels = vec!["audio".to_string()];
         if let Some(ext) = &extension {
@@ -120,6 +123,7 @@ impl SourceParser for AudioParser {
                 external_id: None,
             },
             occurred_at,
+            occurred_source,
             alt,
             duration_ms: probed.as_ref().and_then(|p| p.duration_ms),
             file_size_bytes,
@@ -313,6 +317,14 @@ mod tests {
                 a.extra
             );
         }
+        // No stamp is read out of an audio container, and this item
+        // came with no mtime either, so the parser wrote the import
+        // moment — and says so, which is what lets the server read that
+        // row's time as its arrival.
+        assert_eq!(
+            a.occurred_source,
+            asterism_importer_sdk::OccurredSource::Import
+        );
     }
 
     #[test]

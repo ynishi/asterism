@@ -70,6 +70,13 @@ fn default_role() -> String {
     "item".to_string()
 }
 
+/// `occurred_source` for a payload written before the field existed:
+/// nobody said, which is the same thing the column says of a row
+/// written before it existed.
+fn default_occurred_source() -> String {
+    "unknown".to_string()
+}
+
 /// Wire default for the `media` fields. A payload that predates the
 /// field says nothing about a player, and `none` is the reading that
 /// promises nothing — the same conservative direction `render_policy`
@@ -116,7 +123,31 @@ pub struct AssetCardDto {
     /// normal state for conversation messages and containers).
     pub modality: Option<String>,
     /// Occurrence timestamp (unix epoch ms).
+    ///
+    /// Not always the card's *time*: when
+    /// [`occurred_source`](Self::occurred_source) is `"import"` the
+    /// importer had no occurrence and wrote the import moment here, and
+    /// the row's time is [`created_at_ms`](Self::created_at_ms). A
+    /// renderer that labels this value as "when it happened" without
+    /// reading the source labels an arrival as an event.
     pub occurred_at_ms: i64,
+    /// Where `occurred_at_ms` came from — `"exif"` / `"mtime"` /
+    /// `"record"` / `"import"` / `"unknown"`, the closed set
+    /// `asterism_core::domain::asset_zone::OccurredSource` defines. The
+    /// one value that changes what the card's time is is `"import"`;
+    /// `"unknown"` is every row written before the source was recorded
+    /// and reads as an occurrence, which is what it always did.
+    ///
+    /// Absent in a payload written before the field existed reads as
+    /// `"unknown"`, for the same reason the column defaults to it.
+    #[serde(default = "default_occurred_source")]
+    pub occurred_source: String,
+    /// The zone the recorded thing happened in, by IANA name
+    /// (`"Asia/Tokyo"`), when a supplier recorded one. Absent is the
+    /// ordinary state and means the date is the viewer's to place —
+    /// not a zone of its own, and not UTC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
     /// Cover text (`None` while the `cover_gen` job is still pending;
     /// UIs should show a placeholder).
     pub cover: Option<String>,
@@ -594,8 +625,19 @@ pub struct AssetDto {
     pub modality: Option<String>,
     /// Free-form labels.
     pub labels: Vec<String>,
-    /// Occurrence timestamp (unix epoch ms).
+    /// Occurrence timestamp (unix epoch ms). The same caveat as
+    /// [`AssetCardDto::occurred_at_ms`]: read
+    /// [`occurred_source`](Self::occurred_source) before calling this
+    /// the time.
     pub occurred_at_ms: i64,
+    /// Where `occurred_at_ms` came from — the slugs and their meaning
+    /// are on [`AssetCardDto::occurred_source`].
+    #[serde(default = "default_occurred_source")]
+    pub occurred_source: String,
+    /// The asset's own zone by IANA name, when it has one — see
+    /// [`AssetCardDto::time_zone`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
     /// Composition membership — the hyphenated UUID of the composite
     /// Asset this row belongs to (session-model v2). `None` = top-level
     /// (not inside any composite). Replaces the old `session_id` field:

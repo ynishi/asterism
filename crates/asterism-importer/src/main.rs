@@ -22,12 +22,12 @@ use asterism_importer_sdk::harvest::{HarvestSourceParser, schema_example_json};
 use asterism_importer_sdk::scanner::sqlite::ColumnMap;
 use asterism_importer_sdk::{
     ChatMessage, ChatRole, Doc, DocFormat, Footprint, FootprintSource, FsScanner, ImportOptions,
-    Note, ParseError, RawItem, ScanMode, SourceParser, SqliteScanner, run_import,
+    Note, OccurredSource, ParseError, RawItem, ScanMode, SourceParser, SqliteScanner,
+    resolve_occurrence, run_import,
 };
 use asterism_importer_tape::TapeParser;
 use asterism_importer_text::TextParser;
 use asterism_importer_video::VideoParser;
-use chrono::Utc;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde_json::Value;
 
@@ -323,7 +323,10 @@ impl SourceParser for SqliteRowParser<'_> {
                 message: format!("row body is not UTF-8: {err}"),
             })?
             .to_owned();
-        let occurred_at = raw.occurred_at.unwrap_or_else(Utc::now);
+        // The scanner lifted the row's own timestamp column, which is a
+        // stamp the record states — rung 1, not the container's mtime.
+        let (occurred_at, occurred_source) =
+            resolve_occurrence(raw.occurred_at, OccurredSource::Record, None);
         let source = FootprintSource {
             kind: raw.source_kind,
             locator: raw.locator,
@@ -337,6 +340,7 @@ impl SourceParser for SqliteRowParser<'_> {
             SqliteKind::Note => Footprint::Note(Note {
                 source,
                 occurred_at,
+                occurred_source,
                 body,
                 source_app: self.args.source_app.clone(),
                 labels,
@@ -362,6 +366,7 @@ impl SourceParser for SqliteRowParser<'_> {
                 Footprint::ChatMessage(ChatMessage {
                     source,
                     occurred_at,
+                    occurred_source,
                     external_session_key,
                     role,
                     body,
@@ -374,6 +379,7 @@ impl SourceParser for SqliteRowParser<'_> {
             SqliteKind::Doc => Footprint::Doc(Doc {
                 source,
                 occurred_at,
+                occurred_source,
                 title: self
                     .args
                     .title_column

@@ -8,6 +8,7 @@ means a restricted subject view (persona view, and so on).
 
 ## Types
 
+- `DayOfYear` — A month and a day with no year — the shape of "this day, every
 - `DiagLevel` — Severity of a persisted diagnostic — the closed set `tracing` can
 - `GetAssetDetailQuery` — Detail view (asset + tags + constellation edges).
 - `GetJobStatusQuery` — Job status lookup (for progress polling; push updates travel over the

@@ -108,6 +108,10 @@ pub mod progress;
 pub mod runner;
 pub mod scanner;
 
+/// Where a footprint's `occurred_at` came from, re-exported for the
+/// reason the sidecar vocabulary is: a parser names the rung it took
+/// without depending on the contract crate directly.
+pub use asterism_contract::command::OccurredSource;
 /// The digest notation, re-exported on the same terms: an importer that
 /// builds its own [`AssetSpec`] outside [`run_import`] can spell a
 /// [`AssetSpec::declared_content_hash`] with
@@ -130,7 +134,7 @@ pub use footprint::{
     Image, JournalEntry, JournalKind, Note, REGISTER_MAX_CHARS, Tape, Video,
 };
 pub use mapper::{AssetSpec, spec_to_command};
-pub use parser::{ParseError, RecordAddresses, SourceParser};
+pub use parser::{ParseError, RecordAddresses, SourceParser, resolve_occurrence};
 pub use progress::Progress;
 pub use runner::{ImportOptions, ImportSummary, run_import};
 pub use scanner::{

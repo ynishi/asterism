@@ -7,13 +7,12 @@
 //! [`crate::parser`] for the rule and
 //! [`crate::parser::RecordAddresses`] for the count that goes with it.
 
-use chrono::Utc;
 use serde_json::{Value, json};
 
 use crate::bundle::session_id_for;
-use crate::parser::{ParseError, RecordAddresses, SourceParser};
+use crate::parser::{ParseError, RecordAddresses, SourceParser, resolve_occurrence};
 use crate::scanner::RawItem;
-use crate::{ChatMessage, ChatRole, Footprint, FootprintSource};
+use crate::{ChatMessage, ChatRole, Footprint, FootprintSource, OccurredSource};
 
 use super::envelope::{HARVEST_SPEC, HarvestEnvelope, HarvestMessage};
 
@@ -94,12 +93,15 @@ impl SourceParser for HarvestSourceParser {
                 let Some(msg_id) = addresses.declared(msg.id.as_deref()) else {
                     continue;
                 };
-                let occurred_at = msg
-                    .timestamp
-                    .or(conv.started_at)
-                    .or(env.harvested_at)
-                    .or(raw_occurred_at)
-                    .unwrap_or_else(Utc::now);
+                // Three record-stated stamps make up rung 1 — the
+                // message's own, its conversation's start, the
+                // harvest's — folded first because they are one rung;
+                // then the container's, then the import moment.
+                let (occurred_at, occurred_source) = resolve_occurrence(
+                    msg.timestamp.or(conv.started_at).or(env.harvested_at),
+                    OccurredSource::Record,
+                    raw_occurred_at,
+                );
                 let locator = format!(
                     "{}#conversation={}/message={}",
                     item.locator, conv.id, msg_id
@@ -127,6 +129,7 @@ impl SourceParser for HarvestSourceParser {
                 out.push(Footprint::ChatMessage(ChatMessage {
                     source,
                     occurred_at,
+                    occurred_source,
                     external_session_key: external_session_key.clone(),
                     role,
                     body: msg.body.clone(),

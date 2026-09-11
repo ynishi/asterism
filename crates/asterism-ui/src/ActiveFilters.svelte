@@ -1,11 +1,11 @@
 <script lang="ts">
   // ActiveFilters — the grid-top band that surfaces every engaged
   // filter axis as one removable chip row.
-  // Replaces the sidebar-local "Active filters" chip band (which only
-  // showed tag / group / session) with a unified view across Persona /
-  // Modality / Inbox·label / Tags / Groups / Session / search text, so
-  // the user can see and clear the whole filter at a glance next to
-  // the grid it produces.
+  // Replaces the sidebar-local "Active filters" chip band, which showed
+  // three axes and left the rest to be found in the sidebar, with one
+  // row carrying whichever are engaged — so the whole filter can be
+  // read and cleared next to the grid it produces. The template below
+  // is the list; an enumeration here would be a second one to keep.
   //
   // Data is read 0-prop from the shared stores:
   //   - `activeFilter`   — every selection axis + its carried names
@@ -18,10 +18,9 @@
   // The three callback props are App-owned grid side effects (the
   // one prop category the 0-prop rule allows): search-clear and reset both
   // flush the App-side search debounce timer + reload, and save opens
-  // the App-owned custom-prompt modal. Per-axis clears (persona /
-  // modality / label / tags / groups / session) mutate `activeFilter`
-  // directly because the App reload `$effect` already tracks those
-  // fields.
+  // the App-owned custom-prompt modal. Every other chip's clear
+  // mutates `activeFilter` directly, because the App reload `$effect`
+  // already tracks the field it clears.
   //
   // Two chips carry a *mode* rather than a selection:
   //   - the AND checkbox flips `tagMatchAll` (OR ⇄ AND over the tag
@@ -39,7 +38,7 @@
   // other chips select. It earns a chip because it changes what
   // the grid means more than any single axis does, and because the row
   // is where a user looks to find out why the grid is not a listing.
-  import { activeFilter } from "./lib/stores/filter.svelte";
+  import { activeFilter, viewerTimeZone } from "./lib/stores/filter.svelte";
   import { personaName } from "./lib/formatters";
   import { modalityCatalog } from "./lib/stores/modality.svelte";
   // Colour chips need the swatch ink + label the sidebar uses, so the
@@ -69,6 +68,12 @@
       || activeFilter.activeTagIds.size > 0
       || activeFilter.activeGroupIds.size > 0
       || activeFilter.activeSessionId !== null
+      // The calendar filter earns a chip where the metric bands do not,
+      // and the difference is how much it hides. A size band trims the
+      // library; a week of it removes nearly all of it, so a grid that
+      // looks empty needs a line on screen saying what emptied it —
+      // the same argument the 🎲 chip below carries.
+      || activeFilter.hasDayFilter()
       // Without this the band would stay hidden on a bare 🎲 draw — the
       // one state where the grid least resembles a listing and most
       // needs a line saying why.
@@ -84,6 +89,27 @@
   // for the Inbox case and the raw slug otherwise.
   function labelChipText(label: string): string {
     return label === "inbox" ? "📥 inbox" : label;
+  }
+
+  // The calendar filter in as few words as it can honestly be put. A
+  // recognised span names itself against its date; a day-of-year names
+  // the month and day; anything else — a restored rule the picker did
+  // not draw — shows the range, because calling an arbitrary range "a
+  // day" would be a claim about the filter that is not true. The zone
+  // is appended only when it is not the viewer's own, which is the one
+  // case it says something.
+  function dayChipText(): string {
+    const zone =
+      activeFilter.dayTimeZone === viewerTimeZone() ? "" : ` (${activeFilter.dayTimeZone})`;
+    const doy = activeFilter.dayOfYear;
+    if (doy !== null) {
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${pad(doy.month)}-${pad(doy.day)} · every year${zone}`;
+    }
+    const date = activeFilter.jumpDate();
+    const span = activeFilter.jumpSpan();
+    if (date !== null && span !== null) return `${date} · ${span}${zone}`;
+    return `${activeFilter.dayRangeText()}${zone}`;
   }
 </script>
 
@@ -137,6 +163,17 @@
         ></span>
         {colorCatalog.labelOf(activeFilter.activeColor)}
         <span class="afb-x">✕</span>
+      </button>
+    {/if}
+
+    {#if activeFilter.hasDayFilter()}
+      <button
+        type="button"
+        class="afb-chip day"
+        onclick={() => activeFilter.clearJump()}
+        title="Clear the date filter"
+      >
+        ⌖ {dayChipText()} <span class="afb-x">✕</span>
       </button>
     {/if}
 
@@ -330,6 +367,19 @@
   .afb-chip.label:hover {
     background: var(--danger-surface-strong);
     color: var(--danger-ink);
+  }
+  /* The date chip takes the persona chip's accent, which is the
+     sidebar's "this is the axis in force" ink. It is the strongest
+     narrowing on the row and the one most likely to be why the grid
+     looks empty, so it reads at the same weight as the persona. */
+  .afb-chip.day {
+    background: var(--accent-surface);
+    border-color: var(--accent-line);
+    color: var(--accent-ink);
+  }
+  .afb-chip.day:hover {
+    background: var(--accent-surface-strong);
+    border-color: var(--accent-line-strong);
   }
   .afb-chip.search {
     background: var(--info-surface);

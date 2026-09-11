@@ -21,6 +21,7 @@
   import FormatList from "./FormatList.svelte";
   import ColorList from "./ColorList.svelte";
   import MetricBands from "./MetricBands.svelte";
+  import DateJump from "./DateJump.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
   import UndoToast from "./UndoToast.svelte";
   import DuplicatesPanel from "./DuplicatesPanel.svelte";
@@ -1111,6 +1112,14 @@
       modality: activeFilter.activeModality,
       occurred_from_ms: null,
       occurred_until_ms: null,
+      // "What is from these days" as a predicate: the calendar filter
+      // rides here beside every other axis, so it composes with the
+      // chips and a Query Group can carry it. The store owns what a
+      // date and a span mean and which zone the days are read in; this
+      // builder never does the arithmetic. The raw window above stays
+      // null — that pair cuts the stored instant, this one cuts the
+      // resolved time, and the grid asks only the second question.
+      ...activeFilter.dayFilter(),
       tag_ids: Array.from(activeFilter.activeTagIds),
       // How the tag chips compose. `group_ids` stays OR regardless —
       // nesting expansion already produces a set the user means as
@@ -1809,6 +1818,15 @@
     void activeFilter.sizeMaxMb;
     void activeFilter.pixelsMinMp;
     void activeFilter.pixelsMaxMp;
+    // The calendar filter, for the same reason as the bands above: the
+    // spread in `currentFilter()` is not a dependency, so without these
+    // lines picking a date would move the picker and never the grid.
+    // The zone is on the list because a restored rule can change it
+    // with the days unchanged.
+    void activeFilter.dayFrom;
+    void activeFilter.dayUntil;
+    void activeFilter.dayOfYear;
+    void activeFilter.dayTimeZone;
     void activeFilter.activeGroupIds.size;
     void activeFilter.activeSessionId;
     void activeFilter.viewMode;
@@ -2040,6 +2058,10 @@
     void activeFilter.searchText;
     void activeFilter.searchFuzzy;
     void activeFilter.viewMode;
+    void activeFilter.dayFrom;
+    void activeFilter.dayUntil;
+    void activeFilter.dayOfYear;
+    void activeFilter.dayTimeZone;
     void activeFilter.sortTarget;
     void activeFilter.sortOrder;
     void activeFilter.sortReverse;
@@ -2359,6 +2381,14 @@
           locator: durablePath,
           modality: null,
           occurred_at_ms: Date.now(),
+          // The stamp above is the moment of the drop, not anything the
+          // file says about itself, and `import` is the rung that names
+          // that (`AddAssetCommand::occurred_source`). Left to the
+          // wire's `unknown` default, the row would read its arrival as
+          // an occurrence. No zone: a drop reads nothing that carries
+          // one.
+          occurred_source: "import",
+          time_zone: null,
           session_id: null,
           labels: ["dropped"],
           register_note: null,
@@ -3873,6 +3903,12 @@
         color: activeFilter.activeColor,
         occurred_from_ms: null,
         occurred_until_ms: null,
+        // The calendar filter, for the reason the metric bands below are
+        // here: it is a deterministic predicate, and leaving it out
+        // would freeze a wider set than the one on screen while the
+        // picker still showed a week. The zone rides with it, so the
+        // group is evaluated under the days it was written in.
+        ...activeFilter.dayFilter(),
         tag_ids: Array.from(activeFilter.activeTagIds),
         tag_match: activeFilter.tagMatchAll ? "all" : "any",
         group_ids: Array.from(activeFilter.activeGroupIds),
@@ -5408,6 +5444,13 @@
          MB here and ms / bytes on the wire; `activeFilter.metricBands()`
          owns that conversion. -->
     <MetricBands />
+    <!-- The calendar axis as a filter: a day, a week, a month, or one
+         day of every year. Beside the metric bands because it is the
+         same kind of control — a range over a fact of the asset rather
+         than a closed set of values to click — and because "when did
+         this happen" belongs next to "how long is it" rather than among
+         the classification facets above. -->
+    <DateJump />
     <!-- GROUPING (a list of individual containers, click to open the
          reader) was removed once containers became first-class cards.
          It was a third way to reach the same rows — KIND → Sessions
