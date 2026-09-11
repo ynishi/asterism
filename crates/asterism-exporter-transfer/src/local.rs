@@ -39,8 +39,8 @@ impl Transport for LocalTransport {
     /// Writes one file into that directory.
     ///
     /// `name` is one path segment — `crate::check_remote_name` is where
-    /// that is stated and refused, above this trait so that all three
-    /// transports get the same answer.
+    /// that is stated and refused, above this trait so that it is
+    /// answered once rather than per transport.
     async fn put(&mut self, name: &str, bytes: &[u8]) -> Result<(), TransportError> {
         tokio::fs::write(self.dir.join(name), bytes)
             .await

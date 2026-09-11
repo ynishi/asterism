@@ -127,7 +127,7 @@ asterism/
 │   ├── asterism-importer-sdk/     # importer pipeline (Scanner + Parser plug-ins)
 │   ├── asterism-importer-*/       # per-source importers (cc / tape / journal / image / …)
 │   ├── asterism-dispatch-sdk/     # exporter (outbound) SDK
-│   ├── asterism-exporter-*/       # per-backend exporters (one crate each)
+│   ├── asterism-exporter-*/       # per-backend exporters, plus shared machinery
 │   └── asterism-ui/               # Tauri v2 app (frontend + backend host)
 ├── workspace/                     # local scratch (gitignored)
 └── README.md

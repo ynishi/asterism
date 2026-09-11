@@ -111,9 +111,13 @@
 //!
 //! Both are recorded on the attempt before the error is returned, so a
 //! reader of the dispatch sees which refusal it was rather than a
-//! message alone — and so is every other answer this adapter gives
-//! without a handle, down to a params blob that did not parse. [`refuse`]
-//! is the one arm they all leave through.
+//! message alone — and so is every other answer given between reading
+//! the params and the first successful put, down to a blob that did not
+//! parse. [`refuse`] is the one arm those leave through. On either side
+//! of that span the shape is different and deliberately so: an action
+//! this adapter does not take is the SDK's own variant and is answered
+//! before anything is read, and a put that failed is one row among the
+//! per-file ones below.
 //!
 //! ## The call is recorded per file
 //!
@@ -125,12 +129,10 @@
 //! the first error, and what actually landed is a question only the
 //! record can answer.
 //!
-//! The redaction is applied once per exit rather than per message, at
-//! the two places a record or an error leaves this crate, and it looks
-//! for everything [`Credentials::secrets`] names. That matters most on
-//! the arms nothing here composed: a server that refuses a login
-//! commonly echoes what it was sent, and that text is what the dispatch
-//! row would otherwise keep.
+//! The redaction is applied once per exit rather than per message,
+//! wherever a record or an error leaves this crate, and it looks for
+//! everything [`Credentials::secrets`] names —
+//! [`Redaction`](asterism_exporter_common::Redaction) is what it is for.
 //!
 //! ## Lifecycle
 //!
@@ -611,13 +613,12 @@ fn plan_send(
 
 /// What a file may be called on the far side: one path segment.
 ///
-/// Stated here rather than in each [`Transport`], because the reason is
-/// the same wherever the bytes are going and it is about the name rather
-/// than the protocol. A `remote_name_template` that rendered a separator
-/// would land the bytes outside the directory the endpoint named — a
-/// different destination from the one the send recorded — and a name
-/// that rendered empty would ask three protocols three different
-/// questions.
+/// Stated here rather than in each [`Transport`], because the question
+/// is about the name and not about the protocol carrying it. A
+/// `remote_name_template` that rendered a separator would land the bytes
+/// outside the directory the endpoint named — a different destination
+/// from the one the send recorded — and a name that rendered empty is
+/// not a file anywhere.
 fn check_remote_name(name: &str) -> Result<(), TransportError> {
     if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
         return Err(TransportError::Refused(format!(
@@ -673,15 +674,19 @@ fn account_note(auth: Option<&AuthSchema>) -> Value {
 
 /// Records a refusal and turns it into what `dispatch` returns.
 ///
-/// Every arm of `dispatch` that returns without a handle comes through
-/// here, which is what makes the crate doc's two promises hold as one
-/// mechanism rather than as a rule each arm has to remember. The record
-/// is written because this is the arm a reader has the most questions
-/// about: no handle is produced, so without it the endpoint, the account
-/// and the reason would leave with the error and the row would keep one
-/// message. The scrub is applied to both halves, because a refusal
-/// composed by the far side is the likeliest text to carry back
-/// something it was sent.
+/// Every arm between reading the params and the first successful put
+/// comes through here, which is what makes the crate doc's promises hold
+/// as one mechanism rather than as a rule each arm has to remember. Not
+/// the two outside that span: an unsupported action is answered before
+/// there is anything to describe and is the SDK's own variant, which
+/// routing through here would rewrite as a rejection by the backend; a
+/// put that failed has a row of its own among the per-file ones.
+///
+/// The record is written because this is the arm a reader has the most
+/// questions about: no handle is produced, so without it the endpoint,
+/// the account and the reason would leave with the error and the row
+/// would keep one message. The scrub is applied to both halves — see
+/// [`Redaction`] for what a call's own text can carry back.
 ///
 /// `params` is absent only when the blob did not deserialise, which is
 /// the one refusal that happens before there is a profile to describe.

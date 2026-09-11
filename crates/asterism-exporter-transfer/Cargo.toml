@@ -25,8 +25,9 @@ tokio       = { workspace = true }
 
 # The root certificates an FTPS send trusts. The Mozilla set rather than
 # the platform's store, so what a send trusts is not a property of the
-# machine it ran on — the same choice the root manifest's `reqwest` pin
-# makes, for the reason recorded there.
+# machine it ran on. The same choice this workspace already made for its
+# HTTP client rather than a second one — `ftp.rs` says it beside the
+# code that uses it.
 webpki-roots = "1"
 
 # SSH and its SFTP subsystem. `russh` speaks the transport and the
