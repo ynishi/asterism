@@ -33,7 +33,13 @@ use std::path::Path;
 /// 104 → 105 in #276: `release_forge_change_point` records a release
 /// against a change point on this machine, the owner's own write. The
 /// two reads beside it list and fetch releases and name no surface.
-const TAURI_MUTATION_COMMANDS: usize = 105;
+///
+/// 105 → 106 in #278: `send_forge_release` records a send against a
+/// release on this machine, on the same terms. The bytes leave for
+/// somebody else's host, and the write this counts is still the
+/// owner's: it is the record that they were sent, and the far side
+/// stamps nothing. The read beside it lists a release's sends.
+const TAURI_MUTATION_COMMANDS: usize = 106;
 
 #[test]
 fn the_tauri_mutation_surface_is_the_size_it_records() {

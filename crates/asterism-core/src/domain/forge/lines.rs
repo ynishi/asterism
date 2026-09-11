@@ -129,14 +129,18 @@ pub trait Lines: Send + Sync {
     /// make sense of.
     ///
     /// **And every record that a change point on this line was written
-    /// out**, with what each file that left was told. That record is
-    /// not the forge's — it names a snapshot and a dispatch, which the
-    /// forge may not, so it is `domain::release` and this port cannot
-    /// name its type — but it hangs off a change point exactly as a
-    /// thread does, and a drop is the only thing that removes one. What
-    /// it named outside the line stays: the freeze and the run are the
-    /// raw layer's rows, and a line being dropped says nothing about
-    /// them.
+    /// out**, with what each file that left was told, **and every record
+    /// that one of those went to a destination's host**. Neither record
+    /// is the forge's — each names a snapshot or a dispatch, which the
+    /// forge may not, so they are `domain::release` and `domain::send`
+    /// and this port cannot name either type — but both hang off a
+    /// change point exactly as a thread does, and a drop is the only
+    /// thing that removes one. A send goes with the release it names,
+    /// which is why it is here rather than a case of its own: a send of
+    /// a release that no longer exists is a record of where nothing
+    /// went. What either named outside the line stays: the freeze and
+    /// the runs are the raw layer's rows, and a line being dropped says
+    /// nothing about them.
     ///
     /// All of it or none of it: a line whose history went while its
     /// work stayed is work whose base names a node that is gone, which

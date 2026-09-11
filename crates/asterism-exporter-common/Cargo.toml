@@ -21,3 +21,6 @@ asterism-contract     = { path = "../asterism-contract" }
 asterism-dispatch-sdk = { path = "../asterism-dispatch-sdk" }
 
 serde_json = { workspace = true }
+# `redact` rebuilds an `ExporterError::Other`, whose payload is an
+# `anyhow::Error`, around the scrubbed text.
+anyhow     = { workspace = true }

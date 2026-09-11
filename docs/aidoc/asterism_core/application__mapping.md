@@ -39,6 +39,8 @@ so on) live in `asterism-contract`'s crate docs.
 - `forge_release_to_dto` — Converts a release to what a caller reads.
 - `forge_revision_to_dto` — Converts one correction.
 - `forge_round_to_dto` — Converts one round to what a caller reads.
+- `forge_send_id` — Reads a send id off the wire.
+- `forge_send_to_dto` — Converts a send to what a caller reads.
 - `forge_states_to_dto` — Converts the fold of a line's chain to what is on it.
 - `forge_strategy_id` — Reads a strategy id off the wire.
 - `forge_strategy_to_dto` — Converts a rule's id and description to what a chooser reads.

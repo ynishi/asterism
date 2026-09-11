@@ -33,6 +33,21 @@
       "docs": "Every value the expression selects, in document order."
     },
     {
+      "path": "asterism_exporter_common::redact",
+      "kind": "module",
+      "docs": "Taking a credential back out of what an adapter wrote down.\n\nAn exporter records the call it made — the request as sent, the\nbackend's answer, the text of an error — and every one of those\nreaches the dispatch row, which is handed back on every read of the\ndispatch. A credential that travelled in any of them would be\nreadable by anything that can list dispatches, so the recorded copy\npasses through here first.\n\n# What a scrub can and cannot reach\n\nIt removes a value the adapter was *told* is a credential. A token a\nprofile built out of its own params and interpolated into a URL or a\nbody is not one of those: the adapter never learned it was a secret,\nand no amount of searching here would find it. The way out of that is\nfor the profile to name the credential — which is what the adapters'\nown `secret_ref`-style blocks are for, and what their docs say.\n\n# Why an empty value is left alone\n\nReplacing the empty substring would rewrite every string it is asked\nabout. A variable set to the empty string is a profile pointing at\nnothing rather than a secret to hide, and an unset one never reaches\nhere — an adapter fails at resolution."
+    },
+    {
+      "path": "asterism_exporter_common::redact::REDACTED",
+      "kind": "constant",
+      "docs": "What a redacted value is replaced by wherever an adapter writes down\na call it made.\n\nOne token for every adapter rather than one each: a reader looking at\nan attempt record should not have to know which adapter wrote it in\norder to recognise that something was taken out."
+    },
+    {
+      "path": "asterism_exporter_common::redact::Redaction",
+      "kind": "struct",
+      "docs": "The credentials one call was made with, so they can be taken back out\nof what it recorded.\n\nHolds values rather than reading them per scrub, because a single\ncall must not straddle an environment change and redact against one\ncredential what it sent with another."
+    },
+    {
       "path": "asterism_exporter_common::template",
       "kind": "module",
       "docs": "`{{...}}` substitution over a dispatch — the other half of what a\nschema-driven exporter needs in order to be configured rather than\nwritten.\n\nSimple textual replacement, no arithmetic and no conditionals. The\nresolvable roots are the dispatch's own ids, the input assets, the\nparams blob itself, the handle once one exists, and the current item\nduring a per-item mapping:\n\n```text\n{{selection_id}} {{dispatch_id}} {{persona_id}} {{action}}\n{{input[0].source_locator}}\n{{params.some.nested.key}}\n{{handle.job_id}}\n{{item.url}}\n```\n\nA trailing `?` (`{{item.caption?}}`) resolves a missing path to the\nempty string instead of failing. Without it an unresolved placeholder\nis an error, and that is the right default: a profile that names a\nfield the backend does not send has a bug in it, and silently sending\nan empty prompt is a worse way to find out than a rejected dispatch.\n\n# `params` is the caller's namespace\n\nThe exporter knows nothing about what is in the params blob beyond\nthe fields its own schema names. `{{params.<dot.path>}}` reaches\nanywhere inside it, so a profile author nests per-backend values\nwherever they like and references them from templates.\n\nTwo consequences worth stating together, because the first is the\nreason the second matters. Params are persisted unedited and handed\nback on every read of the dispatch — nothing on that path filters or\nredacts. So a value reachable by `{{params.…}}` is readable by\nanything that can list dispatches, and a credential does not belong\nthere. An adapter that needs one resolves it outside the blob.\n\n# What is here and what is on the trait\n\nThis module is the grammar: what a placeholder may name, and how one\ntemplate string is rendered. Everything built *on top* of that — JSON\ndocuments, header maps — lives on [`crate::TemplateAdapter`] as default\nmethods, so an adapter that changes the grammar changes it in one\nplace and the traversals follow."

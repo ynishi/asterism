@@ -228,7 +228,11 @@ pub const LEGACY_HOSTED_SLUG: &str = "cloud";
 pub const EXPIRY_PREFIX: &str = "deadline exceeded";
 
 /// What a redacted value is replaced by in the recorded request.
-pub const REDACTED: &str = "«redacted»";
+///
+/// Re-exported rather than declared: the token is
+/// [`asterism_exporter_common::REDACTED`], where the rule about it is
+/// stated, and every adapter's records say the same word.
+pub use asterism_exporter_common::REDACTED;
 
 /// Public name for this exporter's params schema in the
 /// `asterism-server schema` CLI (`exporter:http:params`).

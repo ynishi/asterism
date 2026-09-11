@@ -303,6 +303,16 @@
       "docs": "Converts one round to what a caller reads."
     },
     {
+      "path": "asterism_core::application::mapping::forge_send_id",
+      "kind": "function",
+      "docs": "Reads a send id off the wire."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_send_to_dto",
+      "kind": "function",
+      "docs": "Converts a send to what a caller reads."
+    },
+    {
       "path": "asterism_core::application::mapping::forge_states_to_dto",
       "kind": "function",
       "docs": "Converts the fold of a line's chain to what is on it.\n\nOrdered by entry id, which is what the fold already is: a\n`BTreeMap`, so the wire order is stable across reads of the same\nline rather than whatever a hash gave."
@@ -631,6 +641,21 @@
       "path": "asterism_core::application::release_service::ReleaseService",
       "kind": "struct",
       "docs": "Recording a release."
+    },
+    {
+      "path": "asterism_core::application::send_service",
+      "kind": "module",
+      "docs": "`SendService` — putting a release's stamped set on a destination's\nhost.\n\nOne verb: [`send`](SendService::send) reads the release's file rows,\nbuilds the transport's params from the caller's profile plus that\nlist, starts a dispatch over the release's own snapshot, and records\nthat it happened.\n\n# The bytes are the release's copies, never the library's\n\nStamping runs after harvest, on the copies the `file` exporter\nreported — [`outbound_stamp`](crate::application_support::outbound_stamp)\nis where that ordering is decided. A transport sends its bytes inside\n`dispatch`, before harvest, so a transport pointed at the frozen\nmembers would send the library's own unstamped files. The stamped set\nalready exists by then and the release names every copy by path, so\nthe paths are what this hands over and the ordering falls out with\nnothing in the runner to change.\n\nThe dispatch still runs over the release's snapshot, which is what\nmakes the exporter's inputs the same assets the copies were made\nfrom. That is what the sidecar's columns are rendered against; it is\nnot where the bytes come from.\n\n# Where the file list lives in the params\n\nUnder [`RESERVED_KEY`], written here and refused from a profile. The\nalternative was a second argument to `Exporter::dispatch` beside\n`params`, which would widen the port every adapter is written against\nfor one adapter's convenience. A reserved key costs the profile\nauthor one word they may not use, and the refusal below is what tells\nthem so — a profile that set it would otherwise decide which bytes\nleft.\n\n# A send with nothing to send is refused\n\nTwo states get the same answer, [`Blocked`](crate::error::ConflictKind::Blocked),\nbecause both are the state being in the way rather than the request\nbeing malformed: a release whose run has not written its files yet,\nand a release one of whose copies is no longer where it was written.\nSending the first would put an empty directory on somebody's host;\nsending the second would send a set that is not the set the release\nstamped."
+    },
+    {
+      "path": "asterism_core::application::send_service::RESERVED_KEY",
+      "kind": "constant",
+      "docs": "The params key this service writes the file list under, and which a\nprofile may not set."
+    },
+    {
+      "path": "asterism_core::application::send_service::SendService",
+      "kind": "struct",
+      "docs": "Recording a send."
     },
     {
       "path": "asterism_core::application::series_strategy_service",
@@ -2738,6 +2763,11 @@
       "docs": "Which instrument reached a candidate.\n\nSeparate from [`Evidence`], which answers *why* this row and is\nfree to say nothing. This answers *what measured it*, and every\ncandidate has an answer because something produced it — so a\nconsumer that needs to know the score's scale asks this rather than\ninferring it from which variant of an explanation happened to be\nattached.\n\nThe two came apart when a second instrument arrived: the neighbour\nroute scores by cosine and explains itself with [`Evidence::None`],\nso evidence and instrument had already stopped agreeing, and a\nreader that guessed one from the other would have called that\ncosine a BM25 score."
     },
     {
+      "path": "asterism_core::domain::repository::SendRepository",
+      "kind": "trait",
+      "docs": "Persistence port for [`ReleaseSend`] — one release put on a\ndestination's host.\n\nNarrow for the reason [`ReleaseRepository`] is, and narrower: a send\nis written once and read, and it learns nothing afterwards — what\nbecame of the put is on the dispatch it names, as\n[`send`](crate::domain::send) says."
+    },
+    {
       "path": "asterism_core::domain::repository::SeriesRepository",
       "kind": "trait",
       "docs": "Persistence port for the series axis — the [`Strategy`] rules\nthemselves (`series_strategy`, V73) and the answers they derive\n(`material_series`).\n\nTwo populations behind one port because they are one axis and\nneither is usable without the other: a key means nothing without the\nrule it was derived under, and the rule's id is what the key is filed\nby. Splitting them would put the foreign key across two ports.\n\n**Still nothing reads a derived key back.** [`scan_underived`] reads\n`material_series` only to ask which pairs are *missing* from it, and\nthat is the slice rather than an omission: what a reader wants is \"the\nmaterials sharing this key\" — a grouping query whose shape is decided\nby the surface asking for it, and the surfaces do not exist yet.\nGuessing at it now would ship a signature to be replaced. Whatever\nthat statement turns out to be, it has to name\n[`SERIES_RESERVED_VALUES`](crate::domain::series::SERIES_RESERVED_VALUES)\nthe way the duplicate report's adapter names its own reserved list.\n\nThe registration surface arrived without changing that. Its `GET`\nlists the **rules**, which is what a caller about to write one needs,\nand a rule listing groups nothing — so the reserved-value obligation\nis still owed by a statement nobody has written, and the paragraph\nabove still describes the state of this port. Adding a group\nprojection to that listing would have been the guess: the shape it\nwants (per key with counts? per material? paged how?) follows from a\nreader, and the reader this axis is for — a person promoting one\nseries into a real Group, which is why the key sits on the material\nrather than in `asset_bucket` ([`series`](crate::domain::series),\n\"A key on the material, and not a Group\") — is a slice nobody has\nreached.\n\n[`update_strategy`] and [`delete_strategy`] arrived with the surface\nthat calls them (`/asterism/series-strategies`), and\n[`clear_derived`] with them: an edit invalidates the keys derived\nunder the id it edits, and *when those are recomputed* — the one\nquestion the design left open — is \"delete that rule's rows and the\nwalk derives them again\", the whole of it. Held back until there was\na caller for the reason that argument implies — a `delete` with\nnobody calling it is a way to leave a library holding keys from a\nrule that no longer exists.\n\n[`scan_underived`]: SeriesRepository::scan_underived\n[`update_strategy`]: SeriesRepository::update_strategy\n[`delete_strategy`]: SeriesRepository::delete_strategy\n[`clear_derived`]: SeriesRepository::clear_derived"
@@ -2816,6 +2846,16 @@
       "path": "asterism_core::domain::repository::VisualScanCandidate",
       "kind": "struct",
       "docs": "One row of the extraction backfill walk: a primary material whose\nasset has no stored vector (and no failure record) under the model\nidentity being walked."
+    },
+    {
+      "path": "asterism_core::domain::send",
+      "kind": "module",
+      "docs": "`ReleaseSend` — the record that a release was put on a destination's\nhost.\n\n```text\n  Release ── snapshot ── DispatchJob\n     ▲                        ▲\n     └──── ReleaseSend ───────┘\n              act\n              destination\n```\n\n# Why it hangs off a release and not off a change point\n\nWhat travels is the stamped set, and the stamped set is what a\nrelease left behind: [`Release::files`](crate::domain::release::Release::files)\nnames every copy by asset and by path. A send anchored one node\nhigher would have to freeze and stamp a second time to know what its\nbytes were, and the two stamped sets would then differ by whenever\nthe second pass ran.\n\n# Two sends of one release are two records\n\nNothing here keys on the release, and nothing refuses a second send:\na re-submission after a rejection is the case this record exists to\nhold, and a store that collapsed the two would answer \"when did this\ngo out\" with one of the dates.\n\n# What a send does not carry\n\nWhat became of the put. The dispatch it names is where that lives —\nits state, and the attempt record naming each file and what the\nserver answered — and nothing in this process would maintain a\nsecond copy: the runner does not know what a send is, which is the\nsame reason\n[`OutboundStamping`](crate::application_support::OutboundStamping)\nis a port rather than a call.\n\n# Why the type is not called `Send`\n\n`Send` is a trait in the prelude, and traits and structs share the\ntype namespace. A `struct Send` here would shadow the bound in every\nmodule that imported it, so `Send + Sync` on the ports beside it\nwould stop naming the auto trait. The record's own word is in the\nmodule name, the id, the repository and the verb; only the struct\ncarries the qualifier."
+    },
+    {
+      "path": "asterism_core::domain::send::ReleaseSend",
+      "kind": "struct",
+      "docs": "One release, put on a destination's host."
     },
     {
       "path": "asterism_core::domain::series",
@@ -3296,6 +3336,11 @@
       "path": "asterism_core::domain::value::ReleaseId",
       "kind": "struct",
       "docs": "Surrogate id for a `Release` — one change point's state written\nout.\n\nSurrogate rather than the change point it names, because a set\ncan go out more than once: two releases of one change point are\ntwo things that happened, and an id derived from what was\nreleased could only hold one of them."
+    },
+    {
+      "path": "asterism_core::domain::value::SendId",
+      "kind": "struct",
+      "docs": "Surrogate id for a `ReleaseSend` — one release put on a\ndestination's host.\n\nSurrogate for the reason [`ReleaseId`] is, one rung further out:\na release goes out again after a rejection, so two sends of one\nrelease are two things that happened."
     },
     {
       "path": "asterism_core::domain::value::SessionId",

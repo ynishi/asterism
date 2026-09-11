@@ -94,10 +94,11 @@ use asterism_contract::dto::{
 use asterism_contract::forge::{
     AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto,
     ForgeEntryStateDto, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto, ForgeOpDto,
-    ForgePursuitDto, ForgeReleaseDto, ForgeResolvedDto, ForgeRevisionDto, ForgeStrategyDto,
-    ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand, OpenForgeThreadCommand,
-    PushForgeRoundCommand, ReleaseChangePointCommand, RenameForgeLineCommand,
-    RenameForgeThreadCommand, SayInForgeThreadCommand, SetForgeLineStrategyCommand,
+    ForgePursuitDto, ForgeReleaseDto, ForgeResolvedDto, ForgeRevisionDto, ForgeSendDto,
+    ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand,
+    OpenForgeThreadCommand, PushForgeRoundCommand, ReleaseChangePointCommand,
+    RenameForgeLineCommand, RenameForgeThreadCommand, SayInForgeThreadCommand, SendReleaseCommand,
+    SetForgeLineStrategyCommand,
 };
 use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
@@ -114,8 +115,8 @@ use asterism_core::application::mapping::{
     forge_discarded_to_dto, forge_history_to_dto, forge_line_id, forge_line_to_dto,
     forge_message_id, forge_message_to_dto, forge_name, forge_op, forge_outcome, forge_pursuit_id,
     forge_pursuit_to_dto, forge_release_id, forge_release_to_dto, forge_revision_to_dto,
-    forge_round_to_dto, forge_states_to_dto, forge_strategy_id, forge_strategy_to_dto,
-    forge_thread_id, forge_thread_to_dto, parse_asset_id, parse_persona_id,
+    forge_round_to_dto, forge_send_to_dto, forge_states_to_dto, forge_strategy_id,
+    forge_strategy_to_dto, forge_thread_id, forge_thread_to_dto, parse_asset_id, parse_persona_id,
 };
 use asterism_core::domain::attribution::AttributionContext;
 use asterism_core::domain::forge::model::pursuit::Intent;
@@ -4734,15 +4735,10 @@ mod teams_error_tests {
 /// files exist — see
 /// [`ForgeReleaseDto::files`](asterism_contract::forge::ForgeReleaseDto::files).
 ///
-/// Two things differ from the HTTP surface, and both are what every
-/// forge command here does. The ids are arguments rather than path
-/// segments, which is what the command's own `line_id` and
-/// `change_point_id` fields exist for. And the write is the owner's:
-/// this surface is the owner's own, so the attribution is
-/// [`AttributionContext::owner_surface`] and the command's
-/// `author_kind` / `author_subject` / `operator_ai` are not read —
-/// those carry a remote caller's assertion, which is a claim this
-/// process is in no position to receive from itself.
+/// The ids are arguments rather than path segments, which is what the
+/// command's own `line_id` and `change_point_id` fields exist for, and
+/// the write is the owner's — see
+/// [`AttributionContext::owner_surface`].
 #[tauri::command]
 pub async fn release_forge_change_point(
     state: State<'_, AppState>,
@@ -4796,4 +4792,52 @@ pub async fn list_forge_releases_of_change_point(
         )
         .await?;
     Ok(found.iter().map(forge_release_to_dto).collect())
+}
+
+/// Puts a release's stamped copies on the host its profile describes.
+///
+/// Answers with the send as it was recorded, which is before the
+/// transfer has run — the dispatch it names is what carries the bytes.
+///
+/// The id is an argument rather than a path segment, which is what the
+/// command's own `release_id` field exists for, and the write is the
+/// owner's — see [`AttributionContext::owner_surface`].
+#[tauri::command]
+pub async fn send_forge_release(
+    state: State<'_, AppState>,
+    command: SendReleaseCommand,
+) -> Result<ForgeSendDto, UiError> {
+    let profile: serde_json::Value =
+        serde_json::from_str(&command.profile_json).map_err(|err| {
+            UiError::from(DomainError::Validation(format!(
+                "profile_json is not JSON: {err}"
+            )))
+        })?;
+    let sent = state
+        .send_service
+        .send(
+            &forge_release_id(&command.release_id, "release id")?,
+            &command.destination,
+            &profile,
+            &AttributionContext::owner_surface(),
+        )
+        .await?;
+    Ok(forge_send_to_dto(&sent))
+}
+
+/// Every time one release went out, most recent first.
+///
+/// A list, for the reason [`send`](asterism_core::domain::send) gives.
+/// A release id nothing has comes back as [`UiError::NotFound`] rather
+/// than as an empty list.
+#[tauri::command]
+pub async fn list_forge_release_sends(
+    state: State<'_, AppState>,
+    release_id: String,
+) -> Result<Vec<ForgeSendDto>, UiError> {
+    let found = state
+        .send_service
+        .of_release(&forge_release_id(&release_id, "release id")?)
+        .await?;
+    Ok(found.iter().map(forge_send_to_dto).collect())
 }

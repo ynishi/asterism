@@ -80,6 +80,7 @@ projection instead of full `Asset` entities.
 - `ProgressEmitter` — Port for pushing job progress to the UI. In Tauri, the adapter emits
 - `QueryGroupRepository` — Persistence port for the Query Group evaluation core.
 - `ReleaseRepository` — Persistence port for [`Release`] — one change point's state written
+- `SendRepository` — Persistence port for [`ReleaseSend`] — one release put on a
 - `SeriesRepository` — Persistence port for the series axis — the [`Strategy`] rules
 - `SessionRepository` — Persistence port for the [`Session`] entity — the Dialog-modality
 - `SnapshotRepository` — Persistence port for [`Snapshot`] — the immutable content-addressed

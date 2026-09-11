@@ -9,6 +9,12 @@ rather than written: a `{{...}}` substitution over the dispatch
 configured the same way will, and a grammar with two spellings is
 worse than either spelling on its own.
 
+[`redact`] is here on the same terms without being part of a
+grammar: an adapter that resolves a credential has to take it back
+out of what it wrote down, the rule for doing so is one rule, and a
+reader of an attempt record should meet one token for it whichever
+adapter wrote the record.
+
 ## Why not in the SDK
 
 `asterism-dispatch-sdk` is the port. It publishes the `Exporter`
@@ -59,5 +65,6 @@ impl<A: TemplateAdapter + ResponsePath> MyExporter<A> {
 ## Modules
 
 - [`jsonpath`](jsonpath.md): A JSONPath subset — enough to steer a state machine and pluck out
+- [`redact`](redact.md): Taking a credential back out of what an adapter wrote down.
 - [`template`](template.md): `{{...}}` substitution over a dispatch — the other half of what a
 

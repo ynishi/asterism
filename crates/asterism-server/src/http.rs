@@ -142,9 +142,9 @@ use asterism_contract::forge::{
     AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto,
     ForgeEntryStateDto, ForgeLineActCommand, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto,
     ForgePursuitActCommand, ForgePursuitDto, ForgeReleaseDto, ForgeResolvedDto, ForgeRevisionDto,
-    ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand,
+    ForgeSendDto, ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand,
     OpenForgeThreadCommand, PushForgeRoundCommand, ReleaseChangePointCommand,
-    RenameForgeLineCommand, RenameForgeThreadCommand, SayInForgeThreadCommand,
+    RenameForgeLineCommand, RenameForgeThreadCommand, SayInForgeThreadCommand, SendReleaseCommand,
     SetForgeLineStrategyCommand,
 };
 use asterism_contract::query::{
@@ -158,8 +158,8 @@ use asterism_core::application::mapping::{
     forge_discarded_to_dto, forge_history_to_dto, forge_line_id, forge_line_to_dto,
     forge_message_id, forge_message_to_dto, forge_name, forge_op, forge_outcome, forge_pursuit_id,
     forge_pursuit_to_dto, forge_release_id, forge_release_to_dto, forge_revision_to_dto,
-    forge_round_to_dto, forge_states_to_dto, forge_strategy_id, forge_strategy_to_dto,
-    forge_thread_id, forge_thread_to_dto, parse_persona_id,
+    forge_round_to_dto, forge_send_to_dto, forge_states_to_dto, forge_strategy_id,
+    forge_strategy_to_dto, forge_thread_id, forge_thread_to_dto, parse_persona_id,
 };
 use asterism_core::domain::forge::model::pursuit::Intent;
 use asterism_core::domain::forge::model::value::{LineId, PursuitId, ThreadId};
@@ -658,6 +658,13 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
             post(release_forge_change_point).get(list_forge_releases_of_change_point),
         )
         .route("/asterism/forge/releases/{id}", get(get_forge_release))
+        // Where a release went. Under the release rather than under the
+        // change point, because what travels is the stamped set a
+        // release left behind — `domain::send` is the argument.
+        .route(
+            "/asterism/forge/releases/{id}/sends",
+            post(send_forge_release).get(list_forge_release_sends),
+        )
         .with_state(ctx)
 }
 
@@ -4114,4 +4121,53 @@ async fn get_forge_release(
         .get(&forge_release_id(&id, "release id")?)
         .await?;
     Ok(Json(forge_release_to_dto(&found)))
+}
+
+/// `POST /asterism/forge/releases/{id}/sends` — put this release's
+/// stamped copies on the host the profile describes.
+///
+/// Answers with the send as it was recorded, which is before the
+/// transfer has run: the dispatch it names is what carries the bytes,
+/// and waiting here would hold a request open for as long as an upload
+/// takes.
+///
+/// The id comes off the path; the command's own field for it exists for
+/// the transports that have no path.
+async fn send_forge_release(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(command): Json<SendReleaseCommand>,
+) -> ApiResult<ForgeSendDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let profile: serde_json::Value = serde_json::from_str(&command.profile_json)
+        .map_err(|err| DomainError::Validation(format!("profile_json is not JSON: {err}")))?;
+    let sent = ctx
+        .send_service
+        .send(
+            &forge_release_id(&id, "release id")?,
+            &command.destination,
+            &profile,
+            &attribution,
+        )
+        .await?;
+    Ok(Json(forge_send_to_dto(&sent)))
+}
+
+/// `GET /asterism/forge/releases/{id}/sends` — every time this release
+/// went out, most recent first.
+///
+/// A list, for the reason [`send`](asterism_core::domain::send) gives.
+async fn list_forge_release_sends(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<ForgeSendDto>> {
+    let found = ctx
+        .send_service
+        .of_release(&forge_release_id(&id, "release id")?)
+        .await?;
+    Ok(Json(found.iter().map(forge_send_to_dto).collect()))
 }

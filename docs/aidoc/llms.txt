@@ -41,6 +41,7 @@
 - [asterism-core::application::query_group_invalidation](asterism_core/application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [asterism-core::application::query_group_service](asterism_core/application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
 - [asterism-core::application::release_service](asterism_core/application__release_service.md): `ReleaseService` — writing out what a change point carries.
+- [asterism-core::application::send_service](asterism_core/application__send_service.md): `SendService` — putting a release's stamped set on a destination's
 - [asterism-core::application::series_strategy_service](asterism_core/application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
 - [asterism-core::application::session_service](asterism_core/application__session_service.md): `SessionService` — use cases for the Session 1st-class entity.
 - [asterism-core::application::snapshot_service](asterism_core/application__snapshot_service.md): `SnapshotService` — application surface for the immutable `Snapshot`
@@ -127,6 +128,7 @@
 - [asterism-core::domain::release](asterism_core/domain__release.md): `Release` — the record that a change point's state was written out.
 - [asterism-core::domain::render](asterism_core/domain__render.md): How an asset is rendered — thumbnail eligibility, media path, and
 - [asterism-core::domain::repository](asterism_core/domain__repository.md): Repository ports — the persistence traits declared here and implemented
+- [asterism-core::domain::send](asterism_core/domain__send.md): `ReleaseSend` — the record that a release was put on a destination's
 - [asterism-core::domain::series](asterism_core/domain__series.md): `series` — "made the same way": a rule for reading a material's
 - [asterism-core::domain::session](asterism_core/domain__session.md): `Session` — the Dialog-modality 1st-class aggregate root.
 - [asterism-core::domain::snapshot](asterism_core/domain__snapshot.md): `Snapshot` — an immutable, content-addressed freeze of an ordered
@@ -166,6 +168,7 @@
 
 - [asterism-exporter-common overview](asterism_exporter_common/index.md): # asterism-exporter-common
 - [asterism-exporter-common::jsonpath](asterism_exporter_common/jsonpath.md): A JSONPath subset — enough to steer a state machine and pluck out
+- [asterism-exporter-common::redact](asterism_exporter_common/redact.md): Taking a credential back out of what an adapter wrote down.
 - [asterism-exporter-common::template](asterism_exporter_common/template.md): `{{...}}` substitution over a dispatch — the other half of what a
 
 ## asterism-exporter-file 0.1.1
@@ -178,6 +181,14 @@
 - [asterism-exporter-http::custody](asterism_exporter_http/custody.md): Where a produced file lands once we hold it.
 - [asterism-exporter-http::record](asterism_exporter_http/record.md): What the platform said, and — when it said nothing — why.
 - [asterism-exporter-http::secret](asterism_exporter_http/secret.md): The profile grammar this adapter uses: the shared one, plus
+
+## asterism-exporter-transfer 0.1.1
+
+- [asterism-exporter-transfer overview](asterism_exporter_transfer/index.md): # asterism-exporter-transfer
+- [asterism-exporter-transfer::ftp](asterism_exporter_transfer/ftp.md): `ftps://` and `ftp://` — one client, two answers about TLS.
+- [asterism-exporter-transfer::local](asterism_exporter_transfer/local.md): `file://` — a directory on this machine as a destination.
+- [asterism-exporter-transfer::sftp](asterism_exporter_transfer/sftp.md): `sftp://` — SSH's file transfer subsystem.
+- [asterism-exporter-transfer::transport](asterism_exporter_transfer/transport.md): The port between the exporter and the wire.
 
 ## asterism-importer 0.1.1
 
@@ -305,6 +316,7 @@
 - [asterism-infra::sqlite::repo::persona_theme](asterism_infra/sqlite__repo__persona_theme.md): SQLite adapter for the `PersonaThemeRepository` port.
 - [asterism-infra::sqlite::repo::query_group](asterism_infra/sqlite__repo__query_group.md): SQLite adapter for `QueryGroupRepository` — the persistence half of
 - [asterism-infra::sqlite::repo::release](asterism_infra/sqlite__repo__release.md): SQLite adapter for the `ReleaseRepository` port.
+- [asterism-infra::sqlite::repo::send](asterism_infra/sqlite__repo__send.md): SQLite adapter for the `SendRepository` port.
 - [asterism-infra::sqlite::repo::series](asterism_infra/sqlite__repo__series.md): SQLite adapter for the `SeriesRepository` port — the series axis's
 - [asterism-infra::sqlite::repo::session](asterism_infra/sqlite__repo__session.md): SQLite adapter for the [`SessionRepository`] port.
 - [asterism-infra::sqlite::repo::snapshot](asterism_infra/sqlite__repo__snapshot.md): SQLite adapter for the `SnapshotRepository` port.

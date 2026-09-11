@@ -96,3 +96,9 @@ pngmeta     = { version = "0.2.1", features = ["inflate", "test-util"] }
 # qualified paths as syntax. `full` for item syntax, `visit` for the
 # traversal, `parsing` to get there from a string.
 syn         = { version = "2", features = ["full", "visit", "parsing"] }
+
+# `application::send_service` refuses a release whose copies are no
+# longer where it wrote them, and that refusal is a question about the
+# filesystem. Its tests need real files in a directory that goes away
+# with them.
+tempfile    = "3"

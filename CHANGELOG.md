@@ -10,6 +10,34 @@ and this project adheres to
 
 ### Added
 
+- **A release can be sent to an agency's host** (#278, part of #13, split from
+  #254). A release left a stamped set on a disk and stopped there. Sending one
+  puts exactly those files — the copies the release stamped, by the paths it
+  recorded, byte for byte — on a host over SFTP, FTPS or FTP, with a CSV sidecar
+  beside them; a `file://` endpoint names a directory on this machine and does
+  the same thing to it. One transport rather than one platform: the survey on
+  #254 found that no stock marketplace takes a submission over an API and that
+  the channel every one of them sanctions for a batch is this one, so what
+  differs between Adobe Stock and Dreamstime is the sidecar's column set, and
+  that is a profile. The tree carries no agency's columns; the disclosure
+  keyword an agency reads is a column somebody's profile chose, like every other
+  one. A send is a record of its own beside the release, so a re-submission
+  after a rejection is a second record rather than an overwrite, and a release
+  lists what went out. **The credential never lands on a row**: the profile
+  names environment variables and the exporter reads them per call, and what the
+  call recorded is scrubbed of their values before it is written down.
+  **`ftp://` is refused** unless the profile says `allow_insecure`, because the
+  default answer to a credential over cleartext is no. **An SFTP host is the
+  host the profile names**: the fingerprint or the `known_hosts` entry is
+  checked as the connection opens and a key that does not match ends the
+  dispatch with nothing sent — there is no prompt, because a dispatch runs with
+  nobody in front of it. Nothing is minted for what left: a copy on somebody
+  else's host is the same content, and an asset per remote copy would double the
+  library. **No button yet** — the verb is reachable over HTTP and the Tauri
+  binding, and a surface is its own change. **Nothing reads a submission back**,
+  either: no agency offers it, and a rejection is something somebody types into
+  a thread.
+
 - **A change point can be released** (#276, part of #13, split from #254). A
   line could be worked and closed and nothing could hand what it held to
   anybody. Releasing a change point freezes the state that change point left the

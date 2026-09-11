@@ -7966,6 +7966,55 @@ CREATE TABLE forge_release_file (
 ) STRICT;
 "#;
 
+/// V109 — a release, put on a destination's host.
+///
+/// What a send is, and why it hangs off a release rather than off the
+/// change point, is `asterism_core::domain::send`.
+///
+/// # Why the prefix
+///
+/// It is the name of the table this one hangs off, so the two sort
+/// together and a reader who has found one has found the other. The
+/// escape `forge_release` needed is not this table's reason: `SEND` is
+/// not an SQLite keyword.
+///
+/// # One table, because a send learns nothing after it is written
+///
+/// `dispatch_id` is how a reader reaches what became of the put, and no
+/// column here repeats any of it — which is what
+/// `asterism_core::domain::send` decides and why.
+///
+/// # What has an FK and what does not
+///
+/// The release and the dispatch both do, and both are `RESTRICT`, so
+/// nothing deletes a release while a send names it. What that costs a
+/// drop, and why the order of the deletes inside one is not what makes
+/// it work, is on `SqliteForge::discard`; `Lines::discard` is where what
+/// a drop takes is decided. `destination` has no FK: it is the label the
+/// caller gave, and there is no table of destinations for it to point
+/// at, which is the whole of what "a label and nothing more" means.
+///
+/// The unique index on `dispatch_id` says a run carries one send.
+/// Sending a release twice is two sends and two runs — the same shape
+/// `forge_release` has against its own dispatch, and for the same
+/// reason: the row that a run belongs to has to be answerable from the
+/// run.
+const V109_FORGE_SEND: &str = r#"
+CREATE TABLE forge_send (
+    id           BLOB PRIMARY KEY,
+    release_id   BLOB NOT NULL REFERENCES forge_release(id) ON DELETE RESTRICT,
+    destination  TEXT NOT NULL,
+    dispatch_id  BLOB NOT NULL REFERENCES dispatch_job(id) ON DELETE RESTRICT,
+    at           INTEGER NOT NULL,
+    actor_id     BLOB NOT NULL,
+    actor_kind   TEXT NOT NULL
+        CHECK (actor_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE INDEX idx_forge_send_release ON forge_send(release_id, at DESC);
+CREATE UNIQUE INDEX idx_forge_send_dispatch ON forge_send(dispatch_id);
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -8077,6 +8126,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V106_VISUAL_FEATURE_COMPOSITION),
     Step::App(v107_audio_material_mime),
     Step::Sql(V108_FORGE_RELEASE),
+    Step::Sql(V109_FORGE_SEND),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

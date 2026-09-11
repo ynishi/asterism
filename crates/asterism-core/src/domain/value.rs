@@ -126,6 +126,15 @@ define_uuid_id!(
     ReleaseId
 );
 define_uuid_id!(
+    /// Surrogate id for a `ReleaseSend` — one release put on a
+    /// destination's host.
+    ///
+    /// Surrogate for the reason [`ReleaseId`] is, one rung further out:
+    /// a release goes out again after a rejection, so two sends of one
+    /// release are two things that happened.
+    SendId
+);
+define_uuid_id!(
     /// Surrogate id for an `AssetComment` — one entry in an Asset's
     /// comment thread. UUID v7 keeps the natural chronological
     /// ordering matching `created_at`.

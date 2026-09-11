@@ -528,6 +528,11 @@
       "docs": "Every piece of work against a line, open and ended alike."
     },
     {
+      "path": "asterism_ui::commands::list_forge_release_sends",
+      "kind": "function",
+      "docs": "Every time one release went out, most recent first.\n\nA list, for the reason [`send`](asterism_core::domain::send) gives.\nA release id nothing has comes back as [`UiError::NotFound`] rather\nthan as an empty list."
+    },
+    {
       "path": "asterism_ui::commands::list_forge_releases_of_change_point",
       "kind": "function",
       "docs": "Every time one change point was written out, most recent first.\n\nA list, for the reason\n[`release`](asterism_core::domain::release) gives.\n\nBoth ids are arguments, and both are used: a node this line does not\nhave comes back as [`UiError::NotFound`] rather than being answered\nfor."
@@ -835,7 +840,7 @@
     {
       "path": "asterism_ui::commands::release_forge_change_point",
       "kind": "function",
-      "docs": "Freezes what a change point carried, copies it into a directory, and\nstamps each copy on the way out.\n\nAnswers with the release as it was recorded, which is before its\nfiles exist — see\n[`ForgeReleaseDto::files`](asterism_contract::forge::ForgeReleaseDto::files).\n\nTwo things differ from the HTTP surface, and both are what every\nforge command here does. The ids are arguments rather than path\nsegments, which is what the command's own `line_id` and\n`change_point_id` fields exist for. And the write is the owner's:\nthis surface is the owner's own, so the attribution is\n[`AttributionContext::owner_surface`] and the command's\n`author_kind` / `author_subject` / `operator_ai` are not read —\nthose carry a remote caller's assertion, which is a claim this\nprocess is in no position to receive from itself."
+      "docs": "Freezes what a change point carried, copies it into a directory, and\nstamps each copy on the way out.\n\nAnswers with the release as it was recorded, which is before its\nfiles exist — see\n[`ForgeReleaseDto::files`](asterism_contract::forge::ForgeReleaseDto::files).\n\nThe ids are arguments rather than path segments, which is what the\ncommand's own `line_id` and `change_point_id` fields exist for, and\nthe write is the owner's — see\n[`AttributionContext::owner_surface`]."
     },
     {
       "path": "asterism_ui::commands::remeasure_dims",
@@ -966,6 +971,11 @@
       "path": "asterism_ui::commands::search_assets",
       "kind": "function",
       "docs": "Full-text / fuzzy search."
+    },
+    {
+      "path": "asterism_ui::commands::send_forge_release",
+      "kind": "function",
+      "docs": "Puts a release's stamped copies on the host its profile describes.\n\nAnswers with the send as it was recorded, which is before the\ntransfer has run — the dispatch it names is what carries the bytes.\n\nThe id is an argument rather than a path segment, which is what the\ncommand's own `release_id` field exists for, and the write is the\nowner's — see [`AttributionContext::owner_surface`]."
     },
     {
       "path": "asterism_ui::commands::set_default_material_layer",

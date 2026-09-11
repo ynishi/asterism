@@ -419,6 +419,7 @@ showing how a line got where it is.
 - `ForgeResolvedDto` — What `resolve` did.
 - `ForgeRevisionDto` — One correction to something said.
 - `ForgeRoundDto` — One round of work — what it asks the line to say, and who asked.
+- `ForgeSendDto` — One release, sent.
 - `ForgeStampHalfDto` — One half of a stamp: what happened, and what there is to say about
 - `ForgeStrategyDto` — A rule a line can be pointed at.
 - `ForgeThreadDto` — A conversation, whole.
@@ -430,6 +431,7 @@ showing how a line got where it is.
 - `RenameForgeLineCommand` — Renames a line. The name is the line's own description, so this is
 - `RenameForgeThreadCommand` — Renames a conversation, or takes its name off.
 - `SayInForgeThreadCommand` — Says something in a conversation.
+- `SendReleaseCommand` — Puts a release's stamped copies on a destination's host.
 - `SetForgeLineStrategyCommand` — Points a line at a different rule.
 
 
@@ -704,6 +706,7 @@ the private design notes.
 - [`application::query_group_invalidation`](application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [`application::query_group_service`](application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
 - [`application::release_service`](application__release_service.md): `ReleaseService` — writing out what a change point carries.
+- [`application::send_service`](application__send_service.md): `SendService` — putting a release's stamped set on a destination's
 - [`application::series_strategy_service`](application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
 - [`application::session_service`](application__session_service.md): `SessionService` — use cases for the Session 1st-class entity.
 - [`application::snapshot_service`](application__snapshot_service.md): `SnapshotService` — application surface for the immutable `Snapshot`
@@ -790,6 +793,7 @@ the private design notes.
 - [`domain::release`](domain__release.md): `Release` — the record that a change point's state was written out.
 - [`domain::render`](domain__render.md): How an asset is rendered — thumbnail eligibility, media path, and
 - [`domain::repository`](domain__repository.md): Repository ports — the persistence traits declared here and implemented
+- [`domain::send`](domain__send.md): `ReleaseSend` — the record that a release was put on a destination's
 - [`domain::series`](domain__series.md): `series` — "made the same way": a rule for reading a material's
 - [`domain::session`](domain__session.md): `Session` — the Dialog-modality 1st-class aggregate root.
 - [`domain::snapshot`](domain__snapshot.md): `Snapshot` — an immutable, content-addressed freeze of an ordered
@@ -1351,6 +1355,8 @@ so on) live in `asterism-contract`'s crate docs.
 - `forge_release_to_dto` — Converts a release to what a caller reads.
 - `forge_revision_to_dto` — Converts one correction.
 - `forge_round_to_dto` — Converts one round to what a caller reads.
+- `forge_send_id` — Reads a send id off the wire.
+- `forge_send_to_dto` — Converts a send to what a caller reads.
 - `forge_states_to_dto` — Converts the fold of a line's chain to what is on it.
 - `forge_strategy_id` — Reads a strategy id off the wire.
 - `forge_strategy_to_dto` — Converts a rule's id and description to what a chooser reads.
@@ -1751,6 +1757,62 @@ the line and the same request works.
 ## Types
 
 - `ReleaseService` — Recording a release.
+
+
+<!-- asterism_core/application__send_service.md -->
+# asterism-core::application::send_service
+
+`SendService` — putting a release's stamped set on a destination's
+host.
+
+One verb: [`send`](SendService::send) reads the release's file rows,
+builds the transport's params from the caller's profile plus that
+list, starts a dispatch over the release's own snapshot, and records
+that it happened.
+
+# The bytes are the release's copies, never the library's
+
+Stamping runs after harvest, on the copies the `file` exporter
+reported — [`outbound_stamp`](crate::application_support::outbound_stamp)
+is where that ordering is decided. A transport sends its bytes inside
+`dispatch`, before harvest, so a transport pointed at the frozen
+members would send the library's own unstamped files. The stamped set
+already exists by then and the release names every copy by path, so
+the paths are what this hands over and the ordering falls out with
+nothing in the runner to change.
+
+The dispatch still runs over the release's snapshot, which is what
+makes the exporter's inputs the same assets the copies were made
+from. That is what the sidecar's columns are rendered against; it is
+not where the bytes come from.
+
+# Where the file list lives in the params
+
+Under [`RESERVED_KEY`], written here and refused from a profile. The
+alternative was a second argument to `Exporter::dispatch` beside
+`params`, which would widen the port every adapter is written against
+for one adapter's convenience. A reserved key costs the profile
+author one word they may not use, and the refusal below is what tells
+them so — a profile that set it would otherwise decide which bytes
+left.
+
+# A send with nothing to send is refused
+
+Two states get the same answer, [`Blocked`](crate::error::ConflictKind::Blocked),
+because both are the state being in the way rather than the request
+being malformed: a release whose run has not written its files yet,
+and a release one of whose copies is no longer where it was written.
+Sending the first would put an empty directory on somebody's host;
+sending the second would send a set that is not the set the release
+stamped.
+
+## Types
+
+- `SendService` — Recording a send.
+
+## Constants
+
+- `RESERVED_KEY` — The params key this service writes the file list under, and which a
 
 
 <!-- asterism_core/application__series_strategy_service.md -->
@@ -7076,6 +7138,7 @@ projection instead of full `Asset` entities.
 - `ProgressEmitter` — Port for pushing job progress to the UI. In Tauri, the adapter emits
 - `QueryGroupRepository` — Persistence port for the Query Group evaluation core.
 - `ReleaseRepository` — Persistence port for [`Release`] — one change point's state written
+- `SendRepository` — Persistence port for [`ReleaseSend`] — one release put on a
 - `SeriesRepository` — Persistence port for the series axis — the [`Strategy`] rules
 - `SessionRepository` — Persistence port for the [`Session`] entity — the Dialog-modality
 - `SnapshotRepository` — Persistence port for [`Snapshot`] — the immutable content-addressed
@@ -7091,6 +7154,60 @@ projection instead of full `Asset` entities.
 ## Constants
 
 - `RETRIEVAL_K_CEILING` — Ceiling on [`RetrievalQuery::k`], honoured by every retriever.
+
+
+<!-- asterism_core/domain__send.md -->
+# asterism-core::domain::send
+
+`ReleaseSend` — the record that a release was put on a destination's
+host.
+
+```text
+  Release ── snapshot ── DispatchJob
+     ▲                        ▲
+     └──── ReleaseSend ───────┘
+              act
+              destination
+```
+
+# Why it hangs off a release and not off a change point
+
+What travels is the stamped set, and the stamped set is what a
+release left behind: [`Release::files`](crate::domain::release::Release::files)
+names every copy by asset and by path. A send anchored one node
+higher would have to freeze and stamp a second time to know what its
+bytes were, and the two stamped sets would then differ by whenever
+the second pass ran.
+
+# Two sends of one release are two records
+
+Nothing here keys on the release, and nothing refuses a second send:
+a re-submission after a rejection is the case this record exists to
+hold, and a store that collapsed the two would answer "when did this
+go out" with one of the dates.
+
+# What a send does not carry
+
+What became of the put. The dispatch it names is where that lives —
+its state, and the attempt record naming each file and what the
+server answered — and nothing in this process would maintain a
+second copy: the runner does not know what a send is, which is the
+same reason
+[`OutboundStamping`](crate::application_support::OutboundStamping)
+is a port rather than a call.
+
+# Why the type is not called `Send`
+
+`Send` is a trait in the prelude, and traits and structs share the
+type namespace. A `struct Send` here would shadow the bound in every
+module that imported it, so `Send + Sync` on the ports beside it
+would stop naming the auto trait. The record's own word is in the
+module name, the id, the repository and the verb; only the struct
+carries the qualifier.
+
+## Types
+
+- `ReleaseSend` — One release, put on a destination's host.
 
 
 <!-- asterism_core/domain__series.md -->
@@ -7847,6 +7964,7 @@ Design notes:
 - `Progress` — Job progress payload; the `ProgressEmitter` forwards it to the UI.
 - `RegisterNote` — Short annotation about the asset's register / tone; the presentation
 - `ReleaseId` — Surrogate id for a `Release` — one change point's state written
+- `SendId` — Surrogate id for a `ReleaseSend` — one release put on a
 - `SessionId` — Session identifier attached to a dialogue asset — after the
 - `SnapshotId` — Surrogate id for a `Snapshot` — the immutable, content-addressed
 - `SourceKind` — Ingest source slug for an asset (open slug).
@@ -8586,6 +8704,12 @@ rather than written: a `{{...}}` substitution over the dispatch
 configured the same way will, and a grammar with two spellings is
 worse than either spelling on its own.
 
+[`redact`] is here on the same terms without being part of a
+grammar: an adapter that resolves a credential has to take it back
+out of what it wrote down, the rule for doing so is one rule, and a
+reader of an attempt record should meet one token for it whichever
+adapter wrote the record.
+
 ## Why not in the SDK
 
 `asterism-dispatch-sdk` is the port. It publishes the `Exporter`
@@ -8636,6 +8760,7 @@ impl<A: TemplateAdapter + ResponsePath> MyExporter<A> {
 ## Modules
 
 - [`jsonpath`](jsonpath.md): A JSONPath subset — enough to steer a state machine and pluck out
+- [`redact`](redact.md): Taking a credential back out of what an adapter wrote down.
 - [`template`](template.md): `{{...}}` substitution over a dispatch — the other half of what a
 
 
@@ -8692,6 +8817,43 @@ same reason the substitution grammar is.
 
 - `first` — The first value the expression selects, or `None`.
 - `many` — Every value the expression selects, in document order.
+
+
+<!-- asterism_exporter_common/redact.md -->
+# asterism-exporter-common::redact
+
+Taking a credential back out of what an adapter wrote down.
+
+An exporter records the call it made — the request as sent, the
+backend's answer, the text of an error — and every one of those
+reaches the dispatch row, which is handed back on every read of the
+dispatch. A credential that travelled in any of them would be
+readable by anything that can list dispatches, so the recorded copy
+passes through here first.
+
+# What a scrub can and cannot reach
+
+It removes a value the adapter was *told* is a credential. A token a
+profile built out of its own params and interpolated into a URL or a
+body is not one of those: the adapter never learned it was a secret,
+and no amount of searching here would find it. The way out of that is
+for the profile to name the credential — which is what the adapters'
+own `secret_ref`-style blocks are for, and what their docs say.
+
+# Why an empty value is left alone
+
+Replacing the empty substring would rewrite every string it is asked
+about. A variable set to the empty string is a profile pointing at
+nothing rather than a secret to hide, and an unset one never reaches
+here — an adapter fails at resolution.
+
+## Types
+
+- `Redaction` — The credentials one call was made with, so they can be taken back out
+
+## Constants
+
+- `REDACTED` — What a redacted value is replaced by wherever an adapter writes down
 
 
 <!-- asterism_exporter_common/template.md -->
@@ -9191,6 +9353,291 @@ agreeing to.
 ## Types
 
 - `SecretGrammar` — [`CommonExportAdapter`] plus the `{{secret}}` root.
+
+
+<!-- asterism_exporter_transfer/index.md -->
+# asterism-exporter-transfer 0.1.1
+
+# asterism-exporter-transfer
+
+One adapter for the one channel every stock agency sanctions for a
+batch: the files on the agency's host over SFTP, FTPS or FTP, with a
+CSV sidecar beside them. The scheme in the profile's endpoint chooses
+which — one crate for all of them, the way
+[`asterism_exporter_http`] is one crate for hosted and self-hosted
+job APIs, because a host, a credential and a directory layout are the
+whole of what differs. [`Scheme`] is the list.
+
+## What it sends, and what it does not
+
+**The bytes are a release's stamped copies, named by path.** They
+reach this adapter in [`RESERVED_KEY`]`.files`, which the send writes
+and a profile may not — `asterism_core::application::send_service` is
+where that is argued and where the refusal lives. Nothing here reads
+`input.source_locator`: the inputs are the library rows the copies
+were made from, and they are what the sidecar's columns are rendered
+against, not where the bytes come from.
+
+A profile that names no file list is refused. There is no second
+meaning for it — an adapter that fell back to the inputs would send
+the library's own unstamped originals.
+
+## Params schema
+
+`CreateDispatchCommand.params_json` deserialises into
+[`TransferDispatchParams`]:
+
+```json
+{
+  "endpoint": "sftp://stock.example.com:22/incoming/2026-09",
+  "auth": {
+    "user":               "contributor",
+    "secret_ref":         "AGENCY_SFTP_PASSWORD",
+    "key_ref":            "AGENCY_SFTP_KEY",
+    "key_passphrase_ref": "AGENCY_SFTP_KEY_PASSPHRASE"
+  },
+  "host_key": { "fingerprint": "SHA256:0000000000000000000000000000000000000000000" },
+  "allow_insecure": false,
+  "remote_name_template": "{{item.name}}",
+  "sidecar": {
+    "filename": "metadata.csv",
+    "columns": [
+      { "header": "Filename", "template": "{{item.remote_name}}" },
+      { "header": "Title",    "template": "{{item.card.title?}}" }
+    ]
+  }
+}
+```
+
+- `endpoint` — `<scheme>://<host>[:<port>][/<dir>]`. The scheme
+  chooses the protocol, and the schemes are `sftp`, `ftps`, `ftp` and
+  `file`; [`Scheme`] is where each says what it costs, and
+  [`transport::read_endpoint`] has the grammar and the reason an
+  endpoint carries no account.
+- `auth` — the account, and the *names* of the environment variables
+  the credential is read from. Absent means the server takes an
+  anonymous login, which is the FTP shape and not much else.
+- `host_key` — what the far side's key has to be. Required for
+  `sftp://`. The other schemes authenticate their host through TLS or
+  not at all, so a well-formed `host_key` beside one of them is
+  ignored — but a malformed one is refused whichever scheme it sits
+  with, because it is read before the scheme is consulted and naming
+  neither or both of its two forms is a profile that has not decided.
+- `allow_insecure` — permission to speak `ftp://`, where the
+  credential and the bytes cross the network in the clear.
+- `remote_name_template` — what each file is called on the far side.
+  Absent means the copy's own basename.
+- `sidecar` — the CSV that goes beside the files. Its columns are the
+  agency's, and the tree carries no agency's column set: the
+  disclosure keyword an agency reads (Freepik's `_ai_generated`) is a
+  column somebody's profile chose, exactly like every other one.
+
+`schema/transfer_params.example.json` is the runnable version of this
+shape, and the tests at the bottom of this file are what keep it
+honest.
+
+### Templates
+
+The `{{...}}` grammar is the shared one, documented where it is
+defined: [`asterism_exporter_common::template`]. What this adapter
+binds `{{item}}` to is [`FileRow::item`] — one file's row plus the
+card of the input it came from — and it binds it in the same shape
+for `remote_name_template` and for every sidecar column.
+
+## Where a credential lives
+
+In an environment variable, named by the profile and resolved per
+call, for the reason `asterism_exporter_http`'s crate doc gives at
+length: params are persisted unedited and handed back on every read
+of the dispatch, so a value reachable by `{{params.…}}` is readable
+by anything that can list dispatches. `key_ref` is the same rule one
+step along — it names a variable holding the key's *location*, so
+neither the key nor the path to it is on a row. The path is scrubbed
+alongside the password and the passphrase rather than trusted to stay
+out of a message: [`Credentials::secrets`] is that list.
+
+## Two refusals that happen before anything is sent
+
+**`ftp://` needs `allow_insecure`.** The default answer to a
+credential over cleartext is no, and a profile that means it says so
+in one field.
+
+**An SFTP host is the host the profile names.** The fingerprint or
+the `known_hosts` entry is checked as the connection opens, and a key
+that does not match ends the dispatch with nothing put. There is no
+prompt: a dispatch runs in a worker with nobody in front of it, and
+"accept and remember" is a decision that would be made by the
+absence of anyone to make it.
+
+Both are recorded on the attempt before the error is returned, so a
+reader of the dispatch sees which refusal it was rather than a
+message alone — and so is every other answer given between reading
+the params and the first put attempted, down to a blob that did not
+parse. [`refuse`] is the one arm those leave through. On either side
+of that span the shape is different and deliberately so: an action
+this adapter does not take is the SDK's own variant and is answered
+before anything is read, and a put that failed is one row among the
+per-file ones below.
+
+## The call is recorded per file
+
+[`AttemptRecord`] carries what was sent, under what name, and what
+the server answered for each file and for the sidecar — with the
+credential redacted, and the environment variable *names* kept so a
+reader can tell which profile was in play. A put that failed part way
+through leaves a record of every file either way: the run failed with
+the first error, and what actually landed is a question only the
+record can answer.
+
+The redaction is applied once per exit rather than per message,
+wherever a record or an error leaves this crate, and it looks for
+everything [`Credentials::secrets`] names —
+[`Redaction`](asterism_exporter_common::Redaction) is what it is for.
+
+## Lifecycle
+
+The whole transfer happens inside [`dispatch`](TransferExporter::dispatch),
+the way `asterism-exporter-file`'s writes do: `poll` answers
+[`DispatchState::Done`] at once, and `harvest` returns no
+[`Derived`](asterism_dispatch_sdk::Derived). Nothing was made. A copy
+on somebody else's host is the same content that left, and minting an
+asset for it would put a second row in the library for every file
+sent.
+
+## Modules
+
+- [`ftp`](ftp.md): `ftps://` and `ftp://` — one client, two answers about TLS.
+- [`local`](local.md): `file://` — a directory on this machine as a destination.
+- [`sftp`](sftp.md): `sftp://` — SSH's file transfer subsystem.
+- [`transport`](transport.md): The port between the exporter and the wire.
+
+
+<!-- asterism_exporter_transfer/ftp.md -->
+# asterism-exporter-transfer::ftp
+
+`ftps://` and `ftp://` — one client, two answers about TLS.
+
+`suppaftp` fixes the TLS stream as a type parameter at construction,
+so a plain connection cannot be upgraded later and the two are
+different types all the way down. [`FtpWire`] is that pair, and every
+verb below matches on it.
+
+# What each scheme costs
+
+`ftps://` negotiates TLS on the control connection before the
+credential is sent and asks for the data connections to be protected
+too, so the files are encrypted as well as the login. `ftp://`
+protects neither, which is why nothing reaches this module under that
+scheme unless the profile said so — the refusal is in
+`crate::check_scheme`, where the message can name the field.
+
+# Roots
+
+The Mozilla set, compiled in. The alternative is the platform's own
+store, which would make what a send trusts a property of the machine
+it ran on; this workspace already made that choice for its HTTP
+client, and this is the same choice rather than a second one.
+
+## Functions
+
+- `open` — Opens an FTP or FTPS session on the host the endpoint names.
+
+
+<!-- asterism_exporter_transfer/local.md -->
+# asterism-exporter-transfer::local
+
+`file://` — a directory on this machine as a destination.
+
+Why it exists is on [`Scheme::File`](crate::transport::Scheme::File):
+everything above the transport trait needs a far side a test can read
+back, and an SFTP server inside a test answers for the server rather
+than for this adapter.
+
+It is a destination a profile may name, not a stub. What it does is
+what the others do — reach the directory, put the files, put the
+sidecar — with the filesystem as the wire, so a send to it lands the
+same bytes under the same names in the same order.
+
+## Functions
+
+- `open` — Opens the directory the endpoint names.
+
+
+<!-- asterism_exporter_transfer/sftp.md -->
+# asterism-exporter-transfer::sftp
+
+`sftp://` — SSH's file transfer subsystem.
+
+Two crates carry it: `russh` speaks the transport and the
+authentication, `russh-sftp` is the subsystem on one of its channels.
+
+# The host is checked before anything else happens
+
+`russh` asks its handler about the host's key while the connection is
+being established, before a credential is sent and long before a
+file is. [`HostCheck`] answers that question and nothing else: it
+compares the fingerprint the profile named, or looks the host up in
+the `known_hosts` file the profile named, and records what was
+offered so the refusal can say both halves.
+
+Why the answer is recorded rather than returned as an error: the
+handler's error type has to be one `russh` can build from its own,
+and a mismatch is this adapter's word rather than the library's. So
+the handler says no, the connection fails, and the reason is read
+back out of the slot the handler wrote it into. Without that, every
+refusal would arrive as `russh`'s generic rejection and a reader
+could not tell a wrong key from a closed port.
+
+## Functions
+
+- `open` — Opens an SFTP session on the host the endpoint names.
+
+
+<!-- asterism_exporter_transfer/transport.md -->
+# asterism-exporter-transfer::transport
+
+The port between the exporter and the wire.
+
+One trait with three verbs — reach the directory, put a file in it,
+close — and one trait that opens a connection to reach it with.
+Everything above this line is the same whichever protocol carries the
+bytes: which files go, under what names, in what order, what the
+sidecar says and what the attempt record ends up holding.
+
+# Why the split is here and not at the exporter
+
+A protocol needs a server to talk to, and an SFTP server in a unit
+test is a second implementation of the thing under test. Behind this
+trait the exporter's own decisions are exercised against a far side
+held in memory, which is a map of what it was asked to put; the
+protocol implementations answer for the protocol and nothing else.
+
+# What a refusal is, and what a failure is
+
+[`TransportError::Refused`] is the answer before any byte moved: a
+scheme the profile did not opt into, a host whose key is not the one
+named, a credential the server would not take.
+[`TransportError::Failed`] is what the far end said about something
+that was attempted. The exporter records both, and the difference is
+what a reader needs: a refusal means nothing arrived, a failure means
+some of it may have.
+
+## Functions
+
+- `read_endpoint` — Reads a profile's endpoint into a [`Target`].
+
+## Types
+
+- `Credentials` — What the far side is asked to accept as proof of who is calling.
+- `HostKey` — How the far side's identity is checked.
+- `Scheme` — The protocols this adapter speaks.
+- `Target` — Where a send is going, as the profile's endpoint describes it.
+- `TransportError` — What went wrong.
+
+## Traits
+
+- `Connector` — What opens one.
+- `Transport` — An open connection to one destination.
 
 
 <!-- asterism_importer/index.md -->
@@ -11154,6 +11601,7 @@ this crate.
 - [`sqlite::repo::persona_theme`](sqlite__repo__persona_theme.md): SQLite adapter for the `PersonaThemeRepository` port.
 - [`sqlite::repo::query_group`](sqlite__repo__query_group.md): SQLite adapter for `QueryGroupRepository` — the persistence half of
 - [`sqlite::repo::release`](sqlite__repo__release.md): SQLite adapter for the `ReleaseRepository` port.
+- [`sqlite::repo::send`](sqlite__repo__send.md): SQLite adapter for the `SendRepository` port.
 - [`sqlite::repo::series`](sqlite__repo__series.md): SQLite adapter for the `SeriesRepository` port — the series axis's
 - [`sqlite::repo::session`](sqlite__repo__session.md): SQLite adapter for the [`SessionRepository`] port.
 - [`sqlite::repo::snapshot`](sqlite__repo__snapshot.md): SQLite adapter for the `SnapshotRepository` port.
@@ -13669,6 +14117,25 @@ type exists to refuse, and a row is where they would come back.
 - `SqliteReleaseRepository` — SQLite adapter for `ReleaseRepository`.
 
 
+<!-- asterism_infra/sqlite__repo__send.md -->
+# asterism-infra::sqlite::repo::send
+
+SQLite adapter for the `SendRepository` port.
+
+`forge_send` holds where a release went, when, and by whose hand. It
+is written once and read; nothing here updates a row, for the reason
+[`asterism_core::domain::send`] gives.
+
+Why this is not on `SqliteForge` is the same answer the release
+adapter beside it gives, and [`super::release`] is where it is
+written. What it borrows is the same thing, and for the same reason:
+[`ActRow`], because an act is three columns wherever it appears.
+
+## Types
+
+- `SqliteSendRepository` — SQLite adapter for `SendRepository`.
+
+
 <!-- asterism_infra/sqlite__repo__series.md -->
 # asterism-infra::sqlite::repo::series
 
@@ -15205,6 +15672,7 @@ other.
 - `list_forge_lines` — Every line, without its history.
 - `list_forge_pursuit_children` — Work opened from this work.
 - `list_forge_pursuits_of_line` — Every piece of work against a line, open and ended alike.
+- `list_forge_release_sends` — Every time one release went out, most recent first.
 - `list_forge_releases_of_change_point` — Every time one change point was written out, most recent first.
 - `list_forge_strategies` — Every rule a line can be pointed at, built from the rules this
 - `list_forge_threads_about` — Conversations about one thing in the forge — the work as a whole,
@@ -15293,6 +15761,7 @@ other.
 - `say_in_forge_thread` — Says something.
 - `search_asset_ids` — The same retrieval as `search_assets`, reduced to the rank order.
 - `search_assets` — Full-text / fuzzy search.
+- `send_forge_release` — Puts a release's stamped copies on the host its profile describes.
 - `set_default_material_layer` — Chooses the band the panel shows, and the one a new mark lands in.
 - `set_forge_line_strategy` — Points the line at a different rule, from here on.
 - `set_persona_profile` — Upserts the persona's identity signal.

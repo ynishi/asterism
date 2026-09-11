@@ -56,13 +56,14 @@ asterism-importer-image = { path = "../asterism-importer-image" }
 rusqlite = { workspace = true }
 
 [dependencies]
-asterism-core           = { path = "../asterism-core" }
-asterism-infra          = { path = "../asterism-infra" }
-asterism-contract       = { path = "../asterism-contract", features = ["json-schema"] }
-asterism-dispatch-sdk   = { path = "../asterism-dispatch-sdk" }
-asterism-exporter-comfy = { path = "../asterism-exporter-comfy" }
-asterism-exporter-file  = { path = "../asterism-exporter-file" }
-asterism-exporter-http  = { path = "../asterism-exporter-http" }
+asterism-core              = { path = "../asterism-core" }
+asterism-infra             = { path = "../asterism-infra" }
+asterism-contract          = { path = "../asterism-contract", features = ["json-schema"] }
+asterism-dispatch-sdk      = { path = "../asterism-dispatch-sdk" }
+asterism-exporter-comfy    = { path = "../asterism-exporter-comfy" }
+asterism-exporter-file     = { path = "../asterism-exporter-file" }
+asterism-exporter-http     = { path = "../asterism-exporter-http" }
+asterism-exporter-transfer = { path = "../asterism-exporter-transfer" }
 
 # Reads `<asterism_home>/.env` at the composition root so a profile
 # that names a credential (`auth.secret_ref`) can find it without the

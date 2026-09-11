@@ -63,11 +63,6 @@
       "docs": "Schema for the `GET /status/{id}`-shaped poll call."
     },
     {
-      "path": "asterism_exporter_http::REDACTED",
-      "kind": "constant",
-      "docs": "What a redacted value is replaced by in the recorded request."
-    },
-    {
       "path": "asterism_exporter_http::RecordedRequest",
       "kind": "struct",
       "docs": "One recorded HTTP request."

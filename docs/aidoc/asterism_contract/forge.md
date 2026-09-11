@@ -45,6 +45,7 @@ showing how a line got where it is.
 - `ForgeResolvedDto` — What `resolve` did.
 - `ForgeRevisionDto` — One correction to something said.
 - `ForgeRoundDto` — One round of work — what it asks the line to say, and who asked.
+- `ForgeSendDto` — One release, sent.
 - `ForgeStampHalfDto` — One half of a stamp: what happened, and what there is to say about
 - `ForgeStrategyDto` — A rule a line can be pointed at.
 - `ForgeThreadDto` — A conversation, whole.
@@ -56,5 +57,6 @@ showing how a line got where it is.
 - `RenameForgeLineCommand` — Renames a line. The name is the line's own description, so this is
 - `RenameForgeThreadCommand` — Renames a conversation, or takes its name off.
 - `SayInForgeThreadCommand` — Says something in a conversation.
+- `SendReleaseCommand` — Puts a release's stamped copies on a destination's host.
 - `SetForgeLineStrategyCommand` — Points a line at a different rule.
 

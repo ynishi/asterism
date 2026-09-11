@@ -392,6 +392,10 @@ export type ForgeStampHalfDto = { state: string; detail: string | null; };
 
 export type ReleaseChangePointCommand = { line_id: string; change_point_id: string; persona_id: string; output_dir: string; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
 
+export type ForgeSendDto = { id: string; release_id: string; destination: string; dispatch_id: string; at_ms: number; actor_kind: string; actor_id: string; };
+
+export type SendReleaseCommand = { release_id: string; destination: string; profile_json: string; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
 export type RenameTagCommand = { tag_id: string; name: string; };
 
 export type DeleteTagCommand = { tag_id: string; };
