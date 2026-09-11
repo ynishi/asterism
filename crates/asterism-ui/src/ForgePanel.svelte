@@ -47,12 +47,13 @@
   import ForgeTalk from "./ForgeTalk.svelte";
   import TabStrip from "./TabStrip.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
+  import { releaseCatalog } from "./lib/stores/release.svelte";
   import { detailRequest } from "./lib/stores/detail-request.svelte";
   import { gridSelection } from "./lib/stores/grid-selection.svelte";
   import { thumbCatalog } from "./lib/stores/thumb.svelte";
   import { confirmCatalog } from "./lib/stores/confirm.svelte";
   import { promptCatalog } from "./lib/stores/prompt.svelte";
-  import type { ForgeLineDto } from "./bindings";
+  import type { ForgeChangePointDto, ForgeLineDto } from "./bindings";
   import { axes } from "./lib/forge-projection";
 
   let tab = $state<"contents" | "work" | "history">("contents");
@@ -198,6 +199,84 @@
     if (card.media === "image" || card.media === "video") return "";
     return card.cover ?? (card.media === "none" ? "no preview" : card.media);
   }
+
+  // What a release of this point would be scoped to, or null when
+  // nothing on screen can say.
+  //
+  // A freeze belongs to one persona and refuses a set spanning two, so
+  // the write needs one named. The line does not carry an owner —
+  // grouping and access are outside the forge — and the only thing here
+  // that knows a persona is a card the library answered for. So this
+  // reads the cards already loaded for what the point moved, and says
+  // null rather than guessing when the point moved no content or the
+  // cards have not arrived.
+  //
+  // Not `activeFilter.activePersona`: that is a grid filter and is null
+  // whenever the grid is showing everything, which is the ordinary
+  // state. Handing the write whichever persona happened to be filtered
+  // would scope a freeze by something the reader never connected to it.
+  function personaFor(point: ForgeChangePointDto): string | null {
+    for (const row of point.table) {
+      if (row.content_asset_id === null) continue;
+      const card = forgeCatalog.cards[row.content_asset_id];
+      if (card !== undefined) return card.persona_id;
+    }
+    return null;
+  }
+
+  async function writeOut(point: ForgeChangePointDto): Promise<void> {
+    const persona = personaFor(point);
+    if (current === null || persona === null) return;
+    try {
+      await releaseCatalog.writeOut(current.id, point.id, persona);
+    } catch {
+      // `mutate` has put the refusal on screen already. The chain stays
+      // where it was.
+    }
+  }
+
+  // What the chain's own rows refer to, and which of its points have
+  // been written out.
+  //
+  // Both are reads over what the history tab is drawing, so they sit in
+  // one effect over the chain rather than at the sites that load it. The
+  // cards are what `personaFor` answers from, and the release counts are
+  // what the row shows at rest — `ensureReleasesOf` asks only about
+  // points it is missing, so this is safe on every pass.
+  $effect(() => {
+    const chain = forgeCatalog.history.data;
+    const lineId = forgeCatalog.selected;
+    if (chain === null || lineId === null) return;
+    void forgeCatalog.ensureCards(
+      chain.changes.flatMap((point) =>
+        point.table.map((row) => row.content_asset_id),
+      ),
+    );
+    void releaseCatalog.ensureReleasesOf(
+      lineId,
+      chain.changes.map((point) => point.id),
+    );
+  });
+
+  // Where the next release would go, so the button can say so before it
+  // is pressed. One read, when the panel opens.
+  $effect(() => {
+    if (forgeCatalog.open && !releaseCatalog.outputDir.answered) {
+      void releaseCatalog.outputDir.load(undefined);
+    }
+  });
+
+  // Closing the forge ends the question here too. The release drawer is
+  // an overlay over this one and is reached from a row in the chain, so
+  // leaving it standing over a closed forge would leave somebody
+  // reading a release whose line is no longer selected. One effect
+  // rather than a call beside each of the three closes in the markup,
+  // for the reason the store gives about clears written at call sites.
+  $effect(() => {
+    if (!forgeCatalog.open && releaseCatalog.openId !== null) {
+      releaseCatalog.close();
+    }
+  });
 
 </script>
 
@@ -539,6 +618,52 @@
                   })}
               >say something</button>
 
+              <!-- The next verb on the same row. A change point is what
+                   a release names — it freezes the state the line was
+                   left in and writes those files out — so the row that
+                   says what landed is where somebody asks for it to
+                   leave.
+
+                   "write out…", not "release": the ellipsis because it
+                   opens the drawer that owns everything afterwards, and
+                   the words because the notice above this panel already
+                   spends "released" on a discard. `ReleaseView` is the
+                   drawer.
+
+                   Disabled when nothing here can say which persona the
+                   frozen set belongs to. A freeze is scoped to one
+                   persona and refuses a mixed set, and this screen only
+                   knows a persona through the cards it has already read
+                   for the entries on the line — a point that moved only
+                   names carries no content to read one from. Saying so
+                   is better than sending the write off to be refused
+                   for a reason nobody could have seen. -->
+              <button
+                class="write-out"
+                disabled={personaFor(point) === null}
+                title={personaFor(point) === null
+                  ? "Nothing here says which persona these files belong to"
+                  : `Write this change point out into ${releaseCatalog.outputDir.data || "the release directory"}`}
+                onclick={() => writeOut(point)}
+              >write out…</button>
+
+              {#if (releaseCatalog.byPoint[point.id]?.length ?? 0) > 0}
+                <!-- A count that opens the newest. Two releases of one
+                     change point are two records and the model keeps
+                     them apart, so this says how many there are rather
+                     than implying there is one. -->
+                <button
+                  class="talk-about"
+                  onclick={() =>
+                    releaseCatalog.open(releaseCatalog.byPoint[point.id][0].id)}
+                >
+                  {releaseCatalog.byPoint[point.id].length}
+                  {releaseCatalog.byPoint[point.id].length === 1
+                    ? "release"
+                    : "releases"}
+                </button>
+              {/if}
+
               {#if openPoint === point.id}
                 <!-- One line per entry the point moved, phrased from
                      the axes rather than read off a verb: the model
@@ -860,6 +985,23 @@
     opacity: 0.7;
     padding: 0 0 0.2rem 1.2rem;
     text-decoration: underline;
+  }
+  /* The outward verb, drawn like the conversation beside it but with a
+     frame: it writes files onto a disk, and a control that does that
+     should not look exactly like one that opens a thread. */
+  .write-out {
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 0.2rem;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.72rem;
+    margin-left: 0.6rem;
+    padding: 0.05rem 0.4rem;
+  }
+  .write-out:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
   }
   .verbs {
     display: flex;

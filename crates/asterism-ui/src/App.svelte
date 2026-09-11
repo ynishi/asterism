@@ -36,6 +36,7 @@
   import SettingsPreferences from "./SettingsPreferences.svelte";
   import SharedLinesPanel from "./SharedLinesPanel.svelte";
   import ForgePanel from "./ForgePanel.svelte";
+  import ReleaseView from "./ReleaseView.svelte";
   import SidebarSearch from "./SidebarSearch.svelte";
   import TagList from "./TagList.svelte";
   import { baseName } from "./lib/basename";
@@ -6440,6 +6441,13 @@
 <SharedLinesPanel />
 
 <ForgePanel />
+
+<!-- One release, and what became of every copy it wrote. Opened from a
+     change point in the forge's history tab and mounted here rather
+     than inside that panel, so it comes up *over* the drawer and
+     closing it leaves the chain where it was — the arrangement
+     SnapshotView below has, for the same reason. -->
+<ReleaseView onFlash={(msg, ms) => dispatchCatalog.flash(msg, ms)} />
 
 <SnapshotView
   onPromptName={(title, placeholder) => customPrompt(title, placeholder, "")}

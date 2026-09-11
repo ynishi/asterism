@@ -41,6 +41,7 @@
 use std::path::Path;
 
 use asterism_contract::forge::{TransferProfileDto, TransferProfileListDto};
+use asterism_core::error::DomainError;
 
 /// What a profile file is called.
 const PROFILE_SUFFIX: &str = ".json";
@@ -97,6 +98,37 @@ pub fn list(dir: &Path) -> TransferProfileListDto {
         directory,
         profiles,
     }
+}
+
+/// One profile's text, by the name the listing gave it.
+///
+/// The listing is a summary built to be rendered — scheme, host,
+/// directory — and a send needs the profile whole, `auth` block
+/// included. Rather than putting every file's contents into every
+/// listing, the one being sent with is read when it is chosen.
+///
+/// `name` is a single component of the directory this resolves, and the
+/// refusal below is what makes that true rather than assumed: a name
+/// carrying a separator or a parent hop would turn a read of a known
+/// directory into a read of any path this process can reach, which is a
+/// different command from the one this is.
+pub fn read_body(dir: &Path, name: &str) -> Result<String, DomainError> {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+        || name == ".."
+        || name == "."
+    {
+        return Err(DomainError::Validation(format!(
+            "a profile is named by one file in the profile directory, and {name:?} is not"
+        )));
+    }
+    let path = dir.join(format!("{name}{PROFILE_SUFFIX}"));
+    std::fs::read_to_string(&path).map_err(|err| match err.kind() {
+        std::io::ErrorKind::NotFound => DomainError::not_found("transfer profile", name),
+        _ => DomainError::Infra(anyhow::anyhow!("cannot read {}: {err}", path.display())),
+    })
 }
 
 /// One file, read and validated.
@@ -216,6 +248,45 @@ mod tests {
         let listed = list(tmp.path());
         let names: Vec<&str> = listed.profiles.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["agency"]);
+    }
+
+    /// The whole file comes back, because a send needs the `auth`
+    /// block the summary leaves out.
+    #[test]
+    fn a_profile_is_read_whole_by_name() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write(tmp.path(), "agency.json", &example_profile());
+        let body = read_body(tmp.path(), "agency").expect("the file is there");
+        assert_eq!(body, example_profile());
+        assert!(body.contains("auth"), "the send needs the account block");
+    }
+
+    /// A name is one file in the directory this resolved, and the
+    /// refusal is what makes that true. Without it a read of a known
+    /// directory becomes a read of any path this process can reach.
+    #[test]
+    fn a_name_that_leaves_the_directory_is_refused() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write(tmp.path(), "agency.json", &example_profile());
+        for hop in ["../secrets", "..", ".", "sub/agency", "a\\b", ""] {
+            let refused = read_body(tmp.path(), hop);
+            assert!(
+                matches!(refused, Err(DomainError::Validation(_))),
+                "{hop:?} was not refused: {refused:?}"
+            );
+        }
+    }
+
+    /// A name nothing answers to is not found rather than empty — an
+    /// empty profile would be sent with.
+    #[test]
+    fn a_profile_that_is_not_there_is_not_found() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let refused = read_body(tmp.path(), "never-written");
+        assert!(
+            matches!(refused, Err(DomainError::NotFound { .. })),
+            "{refused:?}"
+        );
     }
 
     /// Nothing creates this directory, so its absence is the ordinary

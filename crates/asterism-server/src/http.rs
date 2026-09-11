@@ -675,6 +675,10 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
             get(list_transfer_profiles),
         )
         .route(
+            "/asterism/forge/transfer-profiles/{name}",
+            get(read_transfer_profile),
+        )
+        .route(
             "/asterism/forge/release-output-dir",
             get(release_output_dir),
         )
@@ -4197,6 +4201,21 @@ async fn list_transfer_profiles(
 ) -> ApiResult<TransferProfileListDto> {
     let dir = crate::release_dirs::resolved_profile_dir(&ctx.app_setting_service).await?;
     Ok(Json(crate::transfer_profiles::list(&dir)))
+}
+
+/// `GET /asterism/forge/transfer-profiles/{name}` — one profile's text,
+/// whole.
+///
+/// The listing is a summary; a send needs the `auth` block it leaves
+/// out. `name` is one file in the resolved directory and
+/// [`transfer_profiles::read_body`](crate::transfer_profiles::read_body)
+/// refuses anything that would leave it.
+async fn read_transfer_profile(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(name): Path<String>,
+) -> ApiResult<String> {
+    let dir = crate::release_dirs::resolved_profile_dir(&ctx.app_setting_service).await?;
+    Ok(Json(crate::transfer_profiles::read_body(&dir, &name)?))
 }
 
 /// `GET /asterism/forge/release-output-dir` — where the next release

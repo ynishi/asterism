@@ -4862,6 +4862,25 @@ pub async fn list_transfer_profiles(
     Ok(asterism_server::transfer_profiles::list(&dir))
 }
 
+/// One destination profile's text, whole.
+///
+/// [`list_transfer_profiles`] answers with a summary built to be
+/// rendered — scheme, host, directory — and a send needs the profile as
+/// it stands, `auth` block included. Read when a profile is chosen
+/// rather than carried in the listing, so choosing is what fetches one.
+///
+/// `name` is one file in the resolved profile directory, and
+/// `transfer_profiles::read_body` refuses a name that would leave it.
+#[tauri::command]
+pub async fn read_transfer_profile(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<String, UiError> {
+    let dir =
+        asterism_server::release_dirs::resolved_profile_dir(&state.app_setting_service).await?;
+    Ok(asterism_server::transfer_profiles::read_body(&dir, &name)?)
+}
+
 /// Where the next release writes its copies.
 ///
 /// [`release_forge_change_point`] takes the directory as an argument,
