@@ -747,6 +747,71 @@ async fn a_profile_that_writes_the_sends_own_key_is_refused() {
 ///
 /// What it adds over the suite above is the protocol: the same send,
 /// through the same `Transport`, with `russh` on the other side of it.
+/// A send hangs off a release and a release goes when its line is
+/// dropped, so a line one of whose releases has been sent still drops.
+///
+/// `forge_send.release_id` is `RESTRICT` and SQLite checks that at the
+/// statement, so a `discard` that deleted the releases without taking
+/// the sends first would be refused by the database rather than leaving
+/// a stray row — the line would become undroppable, pinned by a record
+/// of where its files went. `Lines::discard` is where what a drop takes
+/// is decided, and this is that sentence held to the adapter.
+#[tokio::test]
+async fn a_line_whose_release_was_sent_can_still_be_dropped() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (core, router) = harness(tmp.path()).await;
+    let out = tmp.path().join("outbound");
+    let (release, _) = a_release(&core, &router, tmp.path(), 1, &out).await;
+    let release_id = release["id"].as_str().expect("a release id").to_string();
+    let line_id = release["line_id"].as_str().expect("a line id").to_string();
+
+    let send = ok(
+        &router,
+        post(
+            &format!("/asterism/forge/releases/{release_id}/sends"),
+            serde_json::json!({
+                "destination": "adobe-stock",
+                "profile_json": profile(&tmp.path().join("agency")),
+            }),
+        ),
+    )
+    .await;
+    let send_id = send["id"].as_str().expect("a send id").to_string();
+
+    ok(
+        &router,
+        post(
+            &format!("/asterism/forge/lines/{line_id}/archive"),
+            serde_json::json!({}),
+        ),
+    )
+    .await;
+    let (status, dropped) = call(
+        &router,
+        post(
+            &format!("/asterism/forge/lines/{line_id}/discard"),
+            serde_json::json!({}),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a sent release must not pin its line: {dropped}"
+    );
+
+    // The send went with the release, and the release with the line.
+    let (status, _) = call(
+        &router,
+        get(&format!("/asterism/forge/releases/{release_id}/sends")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "the release went");
+    let (status, _) = call(&router, get(&format!("/asterism/forge/lines/{line_id}"))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "the line went");
+    assert!(!send_id.is_empty());
+}
+
 #[tokio::test]
 #[ignore = "needs an SFTP host named by ASTERISM_TEST_SFTP_ENDPOINT"]
 async fn sftp_against_a_named_endpoint() {
