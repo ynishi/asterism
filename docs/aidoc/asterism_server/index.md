@@ -15,5 +15,7 @@ library.
 - [`http`](http.md): HTTP transport — axum router.
 - [`mcp`](mcp.md): MCP transport — the third adapter over the same application services.
 - [`mcp_proxy`](mcp_proxy.md): MCP stdio proxy — the lifecycle-aware entry point MCP clients spawn.
+- [`release_dirs`](release_dirs.md): The two registered directories the release surface uses, resolved.
 - [`state`](state.md): Backend context for the standalone server. Thin wrapper over the
+- [`transfer_profiles`](transfer_profiles.md): The destination profiles a send can be aimed with, listed from disk.
 

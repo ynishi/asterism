@@ -879,3 +879,74 @@ pub struct SendReleaseCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
 }
+
+// -----------------------------------------------------------------
+// Destination profiles — the files a send is aimed with.
+// -----------------------------------------------------------------
+
+/// One destination profile, as the transport's own parser reads it.
+///
+/// What a profile is, why it is a file rather than a row, and why one
+/// that does not parse is listed rather than dropped are all the
+/// listing's — this crate names no Asterism crate and so cannot link at
+/// it, which is why nothing here restates the argument.
+///
+/// **Either the endpoint fields are present or [`error`](Self::error)
+/// is — never both, never neither.** That is this type's own rule and
+/// the reason it has four optional fields rather than an enum: the wire
+/// is JSON a TypeScript client reads, and a tagged union would put a
+/// discriminant in front of every row for a distinction the fields
+/// already make.
+///
+/// The account and the environment variables its credential is named in
+/// are **not** here, and that is the point rather than an omission: a
+/// summary built to be rendered is the last place a secret should pass
+/// through.
+/// # Absent is written as `null`, not left out
+///
+/// None of the four optional fields carries `skip_serializing_if`, and
+/// that is deliberate rather than an omission. `schema-bridge` projects
+/// an `Option<String>` as `string | null`, so a field dropped from the
+/// payload arrives in TypeScript as `undefined` while the binding says
+/// it cannot be — and `error !== null` is then true for a profile that
+/// has no error at all. That is not hypothetical: it landed on this
+/// branch, and every profile in the picker came up refused and
+/// unpickable because of it. The wire says `null` so that the type the
+/// frontend is compiled against is the type it receives.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TransferProfileDto {
+    /// The file's own name, without the `.json`. What a person picks by.
+    pub name: String,
+    /// Where the file is, so somebody can go and edit it.
+    pub path: String,
+    /// The endpoint's scheme — `sftp`, `ftps`, `ftp` or `file`. Null
+    /// when the profile did not parse.
+    #[serde(default)]
+    pub scheme: Option<String>,
+    /// The host the bytes go to. Empty for `file://`, which names none,
+    /// and null when the profile did not parse.
+    #[serde(default)]
+    pub host: Option<String>,
+    /// The directory they land in. Null when the profile did not
+    /// parse.
+    #[serde(default)]
+    pub directory: Option<String>,
+    /// Why this file cannot be sent with, as the parser said it. Null
+    /// when it can.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Every destination profile this machine holds, and where they live.
+///
+/// The directory travels with the list because it is the answer to the
+/// question an empty list raises. It is resolved from a registered
+/// setting against the profile home, which is a thing no frontend can
+/// work out for itself.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TransferProfileListDto {
+    /// The directory that was read.
+    pub directory: String,
+    /// What was in it, by name.
+    pub profiles: Vec<TransferProfileDto>,
+}

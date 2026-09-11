@@ -193,6 +193,30 @@ pub const SETTING_REGISTRY: &[SettingDef] = &[
         range: None,
         summary: "ComfyUI base URL prefilled when composing a dispatch.",
     },
+    // The two directories the release surface writes into and reads
+    // from. Both default to the empty string, which means the
+    // resolver's default rather than a key nobody filled in: a default
+    // here is a `&'static str` and neither path is a constant, because
+    // the profile home is resolved at run time. `asterism-server`'s
+    // `release_dirs` carries that argument and the resolution; whoever
+    // uses one of these resolves it there, and a value a person sets is
+    // used as typed.
+    SettingDef {
+        key: "release.output_dir",
+        kind: SettingValueKind::Text,
+        default_json: "\"\"",
+        env_var: None,
+        range: None,
+        summary: "Directory a change point is written out into; empty is releases/ under the profile home.",
+    },
+    SettingDef {
+        key: "send.profile_dir",
+        kind: SettingValueKind::Text,
+        default_json: "\"\"",
+        env_var: None,
+        range: None,
+        summary: "Directory destination profiles are read from; empty is transfer/ under the profile home.",
+    },
 ];
 
 /// A registry-backed key. Construction is the membership check, so any

@@ -159,11 +159,33 @@ class DispatchCatalog {
     }
   }
 
-  async pollDispatch(id: string): Promise<void> {
+  // `onTick` is handed every answer this poll gets, terminal included,
+  // before the status line is written. It exists so a surface watching
+  // one run re-reads *its own* record on this cadence instead of
+  // starting a second timer beside this one: the release drawer asks
+  // the release for its file rows and a send's row for what the host
+  // answered, and both are written by the runner rather than by
+  // anything here. Two loops would be two ideas of when the run
+  // finished, and a reload would land on whichever was ahead.
+  //
+  // A throw from it is swallowed on purpose — a watcher's failed read
+  // is not this poll's to report, and it must not end the loop that is
+  // still tracking the run.
+  async pollDispatch(
+    id: string,
+    onTick?: (dto: DispatchDto) => void | Promise<void>,
+  ): Promise<void> {
     for (let i = 0; i < 60; i++) {
       await new Promise((r) => window.setTimeout(r, 1500));
       try {
         const dto = await api<DispatchDto>("get_dispatch", { id });
+        if (onTick) {
+          try {
+            await onTick(dto);
+          } catch (err) {
+            console.warn("[dispatchCatalog] a poll watcher failed", err);
+          }
+        }
         if (dto.state === "done") {
           this.set(`Done · produced ${dto.output_asset_ids.length} asset(s)`);
           break;

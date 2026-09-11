@@ -1113,6 +1113,16 @@
       "docs": "Points a line at a different rule."
     },
     {
+      "path": "asterism_contract::forge::TransferProfileDto",
+      "kind": "struct",
+      "docs": "One destination profile, as the transport's own parser reads it.\n\nWhat a profile is, why it is a file rather than a row, and why one\nthat does not parse is listed rather than dropped are all the\nlisting's — this crate names no Asterism crate and so cannot link at\nit, which is why nothing here restates the argument.\n\n**Either the endpoint fields are present or [`error`](Self::error)\nis — never both, never neither.** That is this type's own rule and\nthe reason it has four optional fields rather than an enum: the wire\nis JSON a TypeScript client reads, and a tagged union would put a\ndiscriminant in front of every row for a distinction the fields\nalready make.\n\nThe account and the environment variables its credential is named in\nare **not** here, and that is the point rather than an omission: a\nsummary built to be rendered is the last place a secret should pass\nthrough.\n# Absent is written as `null`, not left out\n\nNone of the four optional fields carries `skip_serializing_if`, and\nthat is deliberate rather than an omission. `schema-bridge` projects\nan `Option<String>` as `string | null`, so a field dropped from the\npayload arrives in TypeScript as `undefined` while the binding says\nit cannot be — and `error !== null` is then true for a profile that\nhas no error at all. That is not hypothetical: it landed on this\nbranch, and every profile in the picker came up refused and\nunpickable because of it. The wire says `null` so that the type the\nfrontend is compiled against is the type it receives."
+    },
+    {
+      "path": "asterism_contract::forge::TransferProfileListDto",
+      "kind": "struct",
+      "docs": "Every destination profile this machine holds, and where they live.\n\nThe directory travels with the list because it is the answer to the\nquestion an empty list raises. It is resolved from a registered\nsetting against the profile home, which is a thing no frontend can\nwork out for itself."
+    },
+    {
       "path": "asterism_contract::query",
       "kind": "module",
       "docs": "Query DTOs — inputs for read-side operations.\n\n`viewer_subject` is the raw input for visibility enforcement:\n`None` means the owner view (everything visible), and `Some(subject)`\nmeans a restricted subject view (persona view, and so on)."

@@ -192,6 +192,102 @@ pub fn params_example_json() -> &'static str {
     include_str!("../schema/transfer_params.example.json")
 }
 
+/// What a stored destination profile says, once this adapter has read
+/// it.
+///
+/// Three facts and no more, because this is what a picker puts in front
+/// of somebody choosing between profiles: which protocol carries the
+/// bytes, whose host they land on, and where they land. The account and
+/// the variables its credential is named in stay in the file — see
+/// [`read_profile`] for why none of them is here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileFacts {
+    /// The endpoint's scheme, as an endpoint spells it.
+    pub scheme: &'static str,
+    /// The host the bytes go to. Empty for [`Scheme::File`], which
+    /// names no host.
+    pub host: String,
+    /// The directory they land in, as the endpoint's path.
+    pub directory: String,
+}
+
+/// Reads a destination profile with the parser that will send it.
+///
+/// A profile is this adapter's params minus the one key the send writes
+/// — so it cannot be deserialised as it stands, and the refusal a
+/// caller would get for that says the file is missing a field it is
+/// never supposed to have. This puts an empty [`RESERVED_KEY`] block in
+/// first and then runs `serde_json::from_value` over the result, which
+/// is the same call [`TransferExporter::dispatch`] makes, over the same
+/// struct. A profile this accepts and the send then refuses on its
+/// shape is therefore not a state these two can be in.
+///
+/// What it runs is **the send's profile-only checks, in the send's
+/// order**: the endpoint is read, the host key is checked for naming
+/// one thing rather than neither or both, `ftp://` without the opt-in
+/// and `sftp://` without a host key are refused, and
+/// [`check_remote_name`] answers for `sidecar.filename`.
+///
+/// Not a prefix of the send, which is worth saying because it reads
+/// like one. `dispatch` resolves credentials straight after the scheme
+/// check, and `plan_send` refuses an empty file list before it reaches
+/// the sidecar's name — so this skips over both and picks up the next
+/// check a profile can answer for on its own. What is left out is what
+/// a profile's own text cannot decide.
+///
+/// **Credentials**, which are bound to the environment. `auth` names
+/// variables rather than holding values, and reading them here would
+/// put a resolved secret one step away from a list that exists to be
+/// rendered; a variable that is not set is the dispatch's refusal to
+/// make, at the moment somebody asked for the send.
+///
+/// **The template plan**, which is bound to an item.
+/// `remote_name_template` and every sidecar column render against a
+/// file of the release and the card it was copied from, so whether they
+/// resolve is a question about a release, and there is no release in
+/// hand when a directory is listed.
+///
+/// Those two are the gaps, and both are on the profile's own text only
+/// in the sense that the text is where the mistake is written: a
+/// profile naming an unset variable, or a template that does not
+/// resolve, is listed as usable here and refused by the send.
+///
+/// The template gap could in principle be narrowed — an unterminated
+/// `{{` is a syntax error no item could fix — but
+/// [`asterism_exporter_common::render`] is the only way in and it
+/// resolves keys as it scans, so there is no syntax-only entry point to
+/// call. Adding one would widen that crate's surface for a check this
+/// one caller wants; the gap is stated instead.
+///
+/// The error is the sentence to show beside the file. A profile that
+/// does not parse is still listed — a file whose error nobody can see
+/// is a file somebody edits blind — so this returns the reason rather
+/// than dropping the row.
+pub fn read_profile(profile: &Value) -> Result<ProfileFacts, String> {
+    let Value::Object(fields) = profile else {
+        return Err("a transfer profile is a JSON object of this adapter's params".into());
+    };
+    if fields.contains_key(RESERVED_KEY) {
+        return Err(format!(
+            "a transfer profile carries the release's file list under {RESERVED_KEY:?}, \
+             which the send writes and a profile may not set"
+        ));
+    }
+    let mut whole = fields.clone();
+    whole.insert(RESERVED_KEY.to_string(), serde_json::json!({ "files": [] }));
+    let params: TransferDispatchParams = serde_json::from_value(Value::Object(whole))
+        .map_err(|err| format!("invalid transfer params: {err}"))?;
+    let target = read_endpoint(&params.endpoint).map_err(|err| err.to_string())?;
+    let host_key = host_key_of(&params).map_err(|err| err.to_string())?;
+    check_scheme(&target, &params, host_key.as_ref()).map_err(|err| err.to_string())?;
+    check_remote_name(&params.sidecar.filename).map_err(|err| err.to_string())?;
+    Ok(ProfileFacts {
+        scheme: target.scheme.as_str(),
+        host: target.host,
+        directory: target.dir,
+    })
+}
+
 /// Params schema for [`SLUG`] dispatch calls.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TransferDispatchParams {
@@ -1559,6 +1655,127 @@ mod tests {
             exporter.poll(ctx, &stranger).await,
             Err(ExporterError::HandleMismatch { .. })
         ));
+    }
+
+    /// The shipped example with the send's own block taken back out,
+    /// which is what a profile on disk looks like.
+    fn example_profile() -> Value {
+        let mut whole: Value = serde_json::from_str(params_example_json())
+            .expect("schema/transfer_params.example.json is JSON");
+        whole
+            .as_object_mut()
+            .expect("the example is an object")
+            .remove(RESERVED_KEY);
+        whole
+    }
+
+    /// The example is the thing a first profile gets copied from, so a
+    /// picker that refused it would refuse the documentation.
+    #[test]
+    fn the_shipped_example_reads_as_a_profile() {
+        let facts = read_profile(&example_profile()).expect("the example is a usable profile");
+        assert_eq!(facts.scheme, "sftp");
+        assert_eq!(facts.host, "stock.example.com");
+        assert_eq!(facts.directory, "/incoming/2026-09");
+    }
+
+    /// The one word a profile may not use, refused by the name it is
+    /// refused under so the sentence tells an author which key to drop.
+    #[test]
+    fn a_profile_that_sets_the_reserved_key_is_refused() {
+        let mut profile = example_profile();
+        profile
+            .as_object_mut()
+            .unwrap()
+            .insert(RESERVED_KEY.to_string(), serde_json::json!({ "files": [] }));
+        let refused = read_profile(&profile).expect_err("the send writes that key");
+        assert!(refused.contains(RESERVED_KEY), "{refused}");
+    }
+
+    /// A missing field is the parse error, carried out whole rather
+    /// than flattened to "invalid".
+    #[test]
+    fn a_profile_missing_a_required_field_carries_the_parse_error() {
+        let mut profile = example_profile();
+        profile.as_object_mut().unwrap().remove("sidecar");
+        let refused = read_profile(&profile).expect_err("sidecar is not optional");
+        assert!(refused.contains("sidecar"), "{refused}");
+    }
+
+    /// The sidecar's own name is a path segment, and the picker says so
+    /// rather than leaving it to the send.
+    ///
+    /// This is the check the first version of `read_profile` left out
+    /// while its doc claimed to go as far as the send goes: a profile
+    /// naming `"../x.csv"` was listed as usable and refused the moment
+    /// it was chosen. It needs no file list, which is why it belongs on
+    /// this side of the line and the template plan does not.
+    #[test]
+    fn reading_a_profile_refuses_a_sidecar_filename_that_is_not_one_segment() {
+        for bad in ["../escape.csv", "nested/metadata.csv", "..", ""] {
+            let mut profile = example_profile();
+            profile.as_object_mut().unwrap()["sidecar"]["filename"] = serde_json::json!(bad);
+            let refused =
+                read_profile(&profile).expect_err("a sidecar filename is one path segment");
+            assert!(
+                refused.contains("one path segment"),
+                "{bad:?} gave {refused}"
+            );
+        }
+    }
+
+    /// The two refusals `check_scheme` makes are the picker's as well.
+    /// A list that blessed either of these would be offering a profile
+    /// the send refuses the moment it is chosen.
+    #[test]
+    fn the_refusals_made_before_a_connection_opens_are_made_here_too() {
+        let mut unopted = example_profile();
+        let fields = unopted.as_object_mut().unwrap();
+        fields.insert(
+            "endpoint".into(),
+            serde_json::json!("ftp://host.example/in"),
+        );
+        fields.remove("host_key");
+        let refused = read_profile(&unopted).expect_err("ftp:// needs the opt-in");
+        assert!(refused.contains("allow_insecure"), "{refused}");
+
+        let mut keyless = example_profile();
+        keyless.as_object_mut().unwrap().remove("host_key");
+        let refused = read_profile(&keyless).expect_err("sftp:// names a host key");
+        assert!(refused.contains("host_key"), "{refused}");
+    }
+
+    /// `file://` names no host, and the picker says so with an empty
+    /// one rather than inventing a word for it.
+    #[test]
+    fn a_file_profile_names_a_directory_and_no_host() {
+        let mut profile = example_profile();
+        let fields = profile.as_object_mut().unwrap();
+        fields.insert("endpoint".into(), serde_json::json!("file:///tmp/outbox"));
+        fields.remove("host_key");
+        let facts = read_profile(&profile).expect("a directory on this machine is a destination");
+        assert_eq!(facts.scheme, "file");
+        assert_eq!(facts.host, "");
+        assert_eq!(facts.directory, "/tmp/outbox");
+    }
+
+    /// **Nothing resolved from the environment reaches the list.** The
+    /// profile names a variable that is certainly not set, and reading
+    /// it is still fine: a credential is the dispatch's to resolve, at
+    /// the moment somebody asked for the send, and a picker that
+    /// resolved one would be holding a secret in order to render a row.
+    #[test]
+    fn a_credential_is_not_resolved_to_read_a_profile() {
+        let mut profile = example_profile();
+        profile.as_object_mut().unwrap().insert(
+            "auth".into(),
+            serde_json::json!({
+                "user": "contributor",
+                "secret_ref": "ASTERISM_TEST_VARIABLE_THAT_IS_NOT_SET",
+            }),
+        );
+        let facts = read_profile(&profile).expect("the variable is the dispatch's to read");
+        assert_eq!(facts.scheme, "sftp");
     }
 
     /// The shipped example is what `asterism-server schema print

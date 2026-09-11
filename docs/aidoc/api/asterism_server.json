@@ -123,6 +123,41 @@
       "docs": "The stdio-facing MCP server that relays to the app's `/mcp`."
     },
     {
+      "path": "asterism_server::release_dirs",
+      "kind": "module",
+      "docs": "The two registered directories the release surface uses, resolved.\n\n[`release.output_dir`] names where a change point is written out to\nand [`send.profile_dir`] names where destination profiles are read\nfrom. Both are\n[`Text`](asterism_core::domain::app_setting::SettingValueKind::Text)\nkeys in\n[`SETTING_REGISTRY`](asterism_core::domain::app_setting::SETTING_REGISTRY),\nand both default to the empty string.\n\n# Why the empty string, and why this module exists\n\nA registry default is a `&'static str`, and neither of these paths\nis a constant: the profile home is resolved at run time from\n`$ASTERISM_HOME` and `$ASTERISM_PROFILE`, differs between two\nprocesses of the same build, and is verified against a marker on the\nway out. There is nothing to write into the registry, so the empty\nstring is what it writes, and it means the leaf this module gives\nthat key under the profile home — `releases/` or `transfer/`.\n\nThat convention needs exactly one reader, or it becomes two\nresolvers that disagree the first time somebody changes the leaf\nname. This module is it: callers ask it rather than joining a path\nof their own, and the frontend is handed the answer rather than\nderiving it — it cannot read the environment at all, and a second\ncopy of the rule in TypeScript is the copy nobody would edit.\n\n# A value somebody set is used as typed\n\nOnly the empty case reaches the profile home. A path a person put in\nthe settings screen is taken as it stands and never joined onto\nanything, because a setting that silently became a subdirectory of\nitself is a value that cannot be pointed anywhere.\n\n[`release.output_dir`]: asterism_core::domain::app_setting::SETTING_REGISTRY\n[`send.profile_dir`]: asterism_core::domain::app_setting::SETTING_REGISTRY"
+    },
+    {
+      "path": "asterism_server::release_dirs::OUTPUT_DIR_KEY",
+      "kind": "constant",
+      "docs": "The registry key naming where a release writes its copies."
+    },
+    {
+      "path": "asterism_server::release_dirs::PROFILE_DIR_KEY",
+      "kind": "constant",
+      "docs": "The registry key naming where destination profiles are read from."
+    },
+    {
+      "path": "asterism_server::release_dirs::output_dir",
+      "kind": "function",
+      "docs": "Where the next release writes its copies.\n\n`setting` is the resolved value of [`OUTPUT_DIR_KEY`]; empty is the\nprofile home's own `releases/`."
+    },
+    {
+      "path": "asterism_server::release_dirs::profile_dir",
+      "kind": "function",
+      "docs": "Where destination profiles are read from.\n\n`setting` is the resolved value of [`PROFILE_DIR_KEY`]; empty is the\nprofile home's own `transfer/`."
+    },
+    {
+      "path": "asterism_server::release_dirs::resolved_output_dir",
+      "kind": "function",
+      "docs": "Where the next release writes its copies, read from the registry.\n\nThe whole resolution — which key, its JSON string taken apart, and\nthe empty case — in one call, so a transport asks a question rather\nthan assembling the answer, and none of them spells the key."
+    },
+    {
+      "path": "asterism_server::release_dirs::resolved_profile_dir",
+      "kind": "function",
+      "docs": "Where destination profiles are read from, read from the registry."
+    },
+    {
       "path": "asterism_server::state",
       "kind": "module",
       "docs": "Backend context for the standalone server. Thin wrapper over the\nshared [`crate::core_init::init_core`] (`ReadOnly` mode): assembles a\n[`ServerCtx`] from the returned `CoreCtx`.\n\nThe server shares the SQLite file with the Tauri UI process under\nWAL; the `busy_timeout = 5000` pragma is applied by `sqlite::open`.\nProgress updates go to stderr via `LogEmitter` — there is no UI event\nbus in this process."
@@ -141,6 +176,21 @@
       "path": "asterism_server::state::init",
       "kind": "function",
       "docs": "Initialises the backend in read-only mode and returns the shared\ncontext. The tantivy writer lock and the job worker stay with the\nTauri UI process; the server only enqueues jobs and serves reads."
+    },
+    {
+      "path": "asterism_server::transfer_profiles",
+      "kind": "module",
+      "docs": "The destination profiles a send can be aimed with, listed from disk.\n\nA profile is one JSON file in the directory\n[`release_dirs::profile_dir`](crate::release_dirs::profile_dir)\nresolves, holding the transfer exporter's params minus the one key\nthe send writes. Files rather than rows, and a list rather than an\neditor: the app reads this directory, validates what is in it and\nlets somebody choose, and never writes to it. What an agency's\nintake asks for moves on that agency's schedule, so the columns a\nsidecar carries live in the file, and nothing in this tree knows any\nof them.\n\n# The parser is the sender's\n\n[`asterism_exporter_transfer::read_profile`] is what answers for\neach file, and how far it mirrors the send — and the two things past\nthat which stay the dispatch's — is stated there. A list that\nblessed a profile the send then refused on its shape would be the\nfailure this listing exists to prevent, so the two do not get\nseparate opinions.\n\nThat is also why this module sits in `asterism-server`: it is the\ncrate that already builds the exporter registry, so it can name the\ntransfer crate's parser without the desktop crate taking a\ndependency on an adapter it does not otherwise know about.\n\n# A file that does not parse is listed, with its reason\n\nDropping it would leave somebody editing a file the app has stopped\nmentioning, wondering why it never appears. It is listed, carrying\nthe parser's own sentence, and it cannot be picked.\n\n# A directory that is not there is empty rather than broken\n\nNothing creates this directory: the first profile is written by\nhand, and until then there is nothing to read. \"No profiles\" and \"no\ndirectory\" are the same answer to the only question the screen asks,\nand the directory travels with the list so the answer says where to\nput one. A directory that exists and cannot be read is a different\nmatter and is reported as itself."
+    },
+    {
+      "path": "asterism_server::transfer_profiles::list",
+      "kind": "function",
+      "docs": "Every profile in `dir`, by name.\n\nNever fails. Every way this can go wrong is a sentence about one\nfile or about the directory, and both belong on the list a person is\nlooking at rather than in place of it."
+    },
+    {
+      "path": "asterism_server::transfer_profiles::read_body",
+      "kind": "function",
+      "docs": "One profile's text, by the name the listing gave it.\n\nThe listing is a summary built to be rendered — scheme, host,\ndirectory — and a send needs the profile whole, `auth` block\nincluded. Rather than putting every file's contents into every\nlisting, the one being sent with is read when it is chosen.\n\n`name` is a single component of the directory this resolves, and the\nrefusal below is what makes that true rather than assumed: a name\ncarrying a separator or a parent hop would turn a read of a known\ndirectory into a read of any path this process can reach, which is a\ndifferent command from the one this is."
     }
   ]
 }

@@ -145,7 +145,7 @@ use asterism_contract::forge::{
     ForgeSendDto, ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand,
     OpenForgeThreadCommand, PushForgeRoundCommand, ReleaseChangePointCommand,
     RenameForgeLineCommand, RenameForgeThreadCommand, SayInForgeThreadCommand, SendReleaseCommand,
-    SetForgeLineStrategyCommand,
+    SetForgeLineStrategyCommand, TransferProfileListDto,
 };
 use asterism_contract::query::{
     DiagLevel, GetAssetDetailQuery, ListAssetsQuery, ListDiagQuery, ListEventsQuery,
@@ -664,6 +664,23 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route(
             "/asterism/forge/releases/{id}/sends",
             post(send_forge_release).get(list_forge_release_sends),
+        )
+        // The two directories the release surface uses, and what is in
+        // one of them. Beside the verbs rather than under
+        // `/asterism/settings`: the settings routes answer what a key
+        // is set to, and these answer where that leaves the files —
+        // which is a different question the moment the key is empty.
+        .route(
+            "/asterism/forge/transfer-profiles",
+            get(list_transfer_profiles),
+        )
+        .route(
+            "/asterism/forge/transfer-profiles/{name}",
+            get(read_transfer_profile),
+        )
+        .route(
+            "/asterism/forge/release-output-dir",
+            get(release_output_dir),
         )
         .with_state(ctx)
 }
@@ -4170,4 +4187,44 @@ async fn list_forge_release_sends(
         .of_release(&forge_release_id(&id, "release id")?)
         .await?;
     Ok(Json(found.iter().map(forge_send_to_dto).collect()))
+}
+
+/// `GET /asterism/forge/transfer-profiles` — every destination profile
+/// this machine holds, and the directory they were read from.
+///
+/// A read of the filesystem rather than of the database;
+/// [`transfer_profiles`](crate::transfer_profiles) is where profiles
+/// are described and is why this answers with a list rather than
+/// refusing.
+async fn list_transfer_profiles(
+    State(ctx): State<Arc<ServerCtx>>,
+) -> ApiResult<TransferProfileListDto> {
+    let dir = crate::release_dirs::resolved_profile_dir(&ctx.app_setting_service).await?;
+    Ok(Json(crate::transfer_profiles::list(&dir)))
+}
+
+/// `GET /asterism/forge/transfer-profiles/{name}` — one profile's text,
+/// whole.
+///
+/// [`transfer_profiles::read_body`](crate::transfer_profiles::read_body)
+/// says why the listing is not enough to send with, and what `name` may
+/// be.
+async fn read_transfer_profile(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(name): Path<String>,
+) -> ApiResult<String> {
+    let dir = crate::release_dirs::resolved_profile_dir(&ctx.app_setting_service).await?;
+    Ok(Json(crate::transfer_profiles::read_body(&dir, &name)?))
+}
+
+/// `GET /asterism/forge/release-output-dir` — where the next release
+/// writes its copies.
+///
+/// The caller of a release names the directory, and
+/// [`release_dirs`](crate::release_dirs) is what turns the registered
+/// setting into one. Its own route because that resolution reads the
+/// environment, which nothing outside this process can do.
+async fn release_output_dir(State(ctx): State<Arc<ServerCtx>>) -> ApiResult<String> {
+    let dir = crate::release_dirs::resolved_output_dir(&ctx.app_setting_service).await?;
+    Ok(Json(dir.display().to_string()))
 }

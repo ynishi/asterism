@@ -13,4 +13,6 @@ pub mod core_init;
 pub mod http;
 pub mod mcp;
 pub mod mcp_proxy;
+pub mod release_dirs;
 pub mod state;
+pub mod transfer_profiles;

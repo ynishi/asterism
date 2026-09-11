@@ -23,6 +23,11 @@
       "docs": "What the far side's host key has to be.\n\nExactly one of the two. Both would be two answers to one question,\nand neither is the profile not having decided."
     },
     {
+      "path": "asterism_exporter_transfer::ProfileFacts",
+      "kind": "struct",
+      "docs": "What a stored destination profile says, once this adapter has read\nit.\n\nThree facts and no more, because this is what a picker puts in front\nof somebody choosing between profiles: which protocol carries the\nbytes, whose host they land on, and where they land. The account and\nthe variables its credential is named in stay in the file — see\n[`read_profile`] for why none of them is here."
+    },
+    {
       "path": "asterism_exporter_transfer::RESERVED_KEY",
       "kind": "constant",
       "docs": "The params key the send writes the release's file list under.\n\nSpelled here and in `asterism_core::application::send_service`, which\nis the writer and where the argument for a reserved key is. The two\ncrates cannot see each other — the core takes no exporter dependency\n— so the word is agreed the way `\"file\"` and `\"write\"` already are\nbetween that layer and `asterism-exporter-file`."
@@ -91,6 +96,11 @@
       "path": "asterism_exporter_transfer::params_example_json",
       "kind": "function",
       "docs": "Canonical example JSON for [`TransferDispatchParams`] — streamed by\n`asterism-server schema print exporter:transfer:params`."
+    },
+    {
+      "path": "asterism_exporter_transfer::read_profile",
+      "kind": "function",
+      "docs": "Reads a destination profile with the parser that will send it.\n\nA profile is this adapter's params minus the one key the send writes\n— so it cannot be deserialised as it stands, and the refusal a\ncaller would get for that says the file is missing a field it is\nnever supposed to have. This puts an empty [`RESERVED_KEY`] block in\nfirst and then runs `serde_json::from_value` over the result, which\nis the same call [`TransferExporter::dispatch`] makes, over the same\nstruct. A profile this accepts and the send then refuses on its\nshape is therefore not a state these two can be in.\n\nWhat it runs is **the send's profile-only checks, in the send's\norder**: the endpoint is read, the host key is checked for naming\none thing rather than neither or both, `ftp://` without the opt-in\nand `sftp://` without a host key are refused, and\n[`check_remote_name`] answers for `sidecar.filename`.\n\nNot a prefix of the send, which is worth saying because it reads\nlike one. `dispatch` resolves credentials straight after the scheme\ncheck, and `plan_send` refuses an empty file list before it reaches\nthe sidecar's name — so this skips over both and picks up the next\ncheck a profile can answer for on its own. What is left out is what\na profile's own text cannot decide.\n\n**Credentials**, which are bound to the environment. `auth` names\nvariables rather than holding values, and reading them here would\nput a resolved secret one step away from a list that exists to be\nrendered; a variable that is not set is the dispatch's refusal to\nmake, at the moment somebody asked for the send.\n\n**The template plan**, which is bound to an item.\n`remote_name_template` and every sidecar column render against a\nfile of the release and the card it was copied from, so whether they\nresolve is a question about a release, and there is no release in\nhand when a directory is listed.\n\nThose two are the gaps, and both are on the profile's own text only\nin the sense that the text is where the mistake is written: a\nprofile naming an unset variable, or a template that does not\nresolve, is listed as usable here and refused by the send.\n\nThe template gap could in principle be narrowed — an unterminated\n`{{` is a syntax error no item could fix — but\n[`asterism_exporter_common::render`] is the only way in and it\nresolves keys as it scans, so there is no syntax-only entry point to\ncall. Adding one would widen that crate's surface for a check this\none caller wants; the gap is stated instead.\n\nThe error is the sentence to show beside the file. A profile that\ndoes not parse is still listed — a file whose error nobody can see\nis a file somebody edits blind — so this returns the reason rather\nthan dropping the row."
     },
     {
       "path": "asterism_exporter_transfer::sftp",

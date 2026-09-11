@@ -47,12 +47,13 @@
   import ForgeTalk from "./ForgeTalk.svelte";
   import TabStrip from "./TabStrip.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
+  import { releaseCatalog } from "./lib/stores/release.svelte";
   import { detailRequest } from "./lib/stores/detail-request.svelte";
   import { gridSelection } from "./lib/stores/grid-selection.svelte";
   import { thumbCatalog } from "./lib/stores/thumb.svelte";
   import { confirmCatalog } from "./lib/stores/confirm.svelte";
   import { promptCatalog } from "./lib/stores/prompt.svelte";
-  import type { ForgeLineDto } from "./bindings";
+  import type { ForgeChangePointDto, ForgeLineDto } from "./bindings";
   import { axes } from "./lib/forge-projection";
 
   let tab = $state<"contents" | "work" | "history">("contents");
@@ -199,6 +200,103 @@
     return card.cover ?? (card.media === "none" ? "no preview" : card.media);
   }
 
+  // What a release of this point would be scoped to, or null when
+  // nothing on screen can say.
+  //
+  // A freeze belongs to one persona and refuses a set spanning two, so
+  // the write needs one named. The line does not carry an owner —
+  // grouping and access are outside the forge — and what knows a
+  // persona here is a card the library answered for. So this reads the
+  // cards already loaded for what the point moved, and says null rather
+  // than guessing when the point moved no content or no card has
+  // arrived.
+  //
+  // **It keeps looking past a row it cannot answer from.** A change
+  // point's rows are not all content — one may move a name alone, and a
+  // card for one that does carry content may not have landed yet — so a
+  // row that cannot say is skipped rather than taken as the answer.
+  // Reading the first row's card and stopping would disable the verb on
+  // a point whose first row happens to be a rename.
+  //
+  // What it does **not** do is check that the rest agree. A point whose
+  // content spans two personas answers with the first, and the freeze
+  // refuses the set — which is the backend keeping its own rule, the
+  // same division `releaseCatalog.send` argues for at the send button.
+  //
+  // Not `activeFilter.activePersona`: that is a grid filter and is null
+  // whenever the grid is showing everything, which is the ordinary
+  // state. Handing the write whichever persona happened to be filtered
+  // would scope a freeze by something the reader never connected to it.
+  function personaFor(point: ForgeChangePointDto): string | null {
+    for (const row of point.table) {
+      if (row.content_asset_id === null) continue;
+      const card = forgeCatalog.cards[row.content_asset_id];
+      if (card !== undefined) return card.persona_id;
+    }
+    return null;
+  }
+
+  async function writeOut(point: ForgeChangePointDto): Promise<void> {
+    const persona = personaFor(point);
+    if (current === null || persona === null) return;
+    try {
+      await releaseCatalog.writeOut(current.id, point.id, persona);
+    } catch {
+      // Swallowed because the refusal is already on screen, by
+      // whichever of the two routes raised it: `mutate` puts a
+      // backend's refusal there, and the store puts its own there
+      // before it ever invokes anything when the output directory
+      // could not be read. Neither leaves this to the caller, which is
+      // why there is nothing to do here but keep the chain where it
+      // was.
+    }
+  }
+
+  // What the chain's own rows refer to, and which of its points have
+  // been written out.
+  //
+  // Both are reads over what the history tab is drawing, so they sit in
+  // one effect over the chain rather than at the sites that load it. The
+  // cards are what `personaFor` answers from, and the release counts are
+  // what the row shows at rest — `ensureReleasesOf` asks only about
+  // points it is missing, so this is safe on every pass.
+  $effect(() => {
+    const chain = forgeCatalog.history.data;
+    const lineId = forgeCatalog.selected;
+    if (chain === null || lineId === null) return;
+    void forgeCatalog.ensureCards(
+      chain.changes.flatMap((point) =>
+        point.table.map((row) => row.content_asset_id),
+      ),
+    );
+    void releaseCatalog.ensureReleasesOf(
+      lineId,
+      chain.changes.map((point) => point.id),
+    );
+  });
+
+  // Where the next release would go, so the button can say so before it
+  // is pressed. One read, when the panel opens.
+  $effect(() => {
+    if (forgeCatalog.open && !releaseCatalog.outputDir.answered) {
+      void releaseCatalog.outputDir.load(undefined);
+    }
+  });
+
+  // Closing the forge ends the question here too. The release drawer is
+  // an overlay over this one and is reached from a row in the chain, so
+  // leaving it standing over a closed forge would leave somebody
+  // reading a release whose line is no longer selected. One effect
+  // rather than a call beside each close, for the reason the store
+  // gives about clears written at call sites — and the panel is not the
+  // only thing that closes it, so a call at each of *these* sites would
+  // miss the others anyway.
+  $effect(() => {
+    if (!forgeCatalog.open && releaseCatalog.openId !== null) {
+      releaseCatalog.close();
+    }
+  });
+
 </script>
 
 <!-- One tile, two lists. What is on the line and what it let go are
@@ -284,11 +382,20 @@
              in. The only place these ids are ever named — after the
              write nothing can derive them again — with a dismiss,
              because a notice that cannot be cleared is one a person
-             stops reading. -->
+             stops reading.
+
+             **"No longer held", not "released back to the library".**
+             What a discard ends is the line's claim on those assets —
+             `Line::holds` is the set "the layer holding the bytes may
+             not let go of while this line exists", and the bytes
+             themselves never moved. The old wording said they came
+             back from somewhere, and it spent the screen's only copy
+             of "release" on the verb that does not write anything out:
+             the change point rows below now carry one that does, and
+             one word cannot mean both on one screen. -->
         <p class="released">
           Discarded. {forgeCatalog.released.length}
-          {forgeCatalog.released.length === 1 ? "asset" : "assets"} released back
-          to the library.
+          {forgeCatalog.released.length === 1 ? "asset" : "assets"} no longer held.
           <button type="button" onclick={() => (forgeCatalog.released = null)}>
             dismiss
           </button>
@@ -529,6 +636,49 @@
                     changePointId: point.id,
                   })}
               >say something</button>
+
+              <!-- The next verb on the same row. A change point is what
+                   a release names — it freezes the state the line was
+                   left in and writes those files out — so the row that
+                   says what landed is where somebody asks for it to
+                   leave.
+
+                   "write out…", not "release": the ellipsis because it
+                   opens the drawer that owns everything afterwards, and
+                   the words because the notice above this panel already
+                   spends "released" on a discard. `ReleaseView` is the
+                   drawer.
+
+                   Disabled when nothing here can say which persona the
+                   frozen set belongs to — `personaFor` says how it
+                   answers and when it cannot. Saying so is better than
+                   sending the write off to be refused for a reason
+                   nobody could have seen. -->
+              <button
+                class="write-out"
+                disabled={personaFor(point) === null}
+                title={personaFor(point) === null
+                  ? "Nothing here says which persona these files belong to"
+                  : `Write this change point out into ${releaseCatalog.outputDir.data || "the release directory"}`}
+                onclick={() => writeOut(point)}
+              >write out…</button>
+
+              {#if (releaseCatalog.byPoint[point.id]?.length ?? 0) > 0}
+                <!-- A count that opens the newest. Two releases of one
+                     change point are two records and the model keeps
+                     them apart, so this says how many there are rather
+                     than implying there is one. -->
+                <button
+                  class="talk-about"
+                  onclick={() =>
+                    releaseCatalog.open(releaseCatalog.byPoint[point.id][0].id)}
+                >
+                  {releaseCatalog.byPoint[point.id].length}
+                  {releaseCatalog.byPoint[point.id].length === 1
+                    ? "release"
+                    : "releases"}
+                </button>
+              {/if}
 
               {#if openPoint === point.id}
                 <!-- One line per entry the point moved, phrased from
@@ -851,6 +1001,23 @@
     opacity: 0.7;
     padding: 0 0 0.2rem 1.2rem;
     text-decoration: underline;
+  }
+  /* The outward verb, drawn like the conversation beside it but with a
+     frame: it writes files onto a disk, and a control that does that
+     should not look exactly like one that opens a thread. */
+  .write-out {
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 0.2rem;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.72rem;
+    margin-left: 0.6rem;
+    padding: 0.05rem 0.4rem;
+  }
+  .write-out:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
   }
   .verbs {
     display: flex;

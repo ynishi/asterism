@@ -98,7 +98,7 @@ use asterism_contract::forge::{
     ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand,
     OpenForgeThreadCommand, PushForgeRoundCommand, ReleaseChangePointCommand,
     RenameForgeLineCommand, RenameForgeThreadCommand, SayInForgeThreadCommand, SendReleaseCommand,
-    SetForgeLineStrategyCommand,
+    SetForgeLineStrategyCommand, TransferProfileListDto,
 };
 use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
@@ -4840,4 +4840,54 @@ pub async fn list_forge_release_sends(
         .of_release(&forge_release_id(&release_id, "release id")?)
         .await?;
     Ok(found.iter().map(forge_send_to_dto).collect())
+}
+
+/// Every destination profile this machine holds, and where they were
+/// read from.
+///
+/// Profiles are JSON files in a directory a registered setting names,
+/// each validated with the transport's own parser —
+/// `asterism_exporter_transfer::read_profile` says how far that goes
+/// and what it leaves to the dispatch.
+/// `asterism_server::transfer_profiles` does the listing; this command
+/// resolves the directory and hands it over.
+///
+/// A read, so it names no surface. The write it feeds is
+/// [`send_forge_release`], which does.
+#[tauri::command]
+pub async fn list_transfer_profiles(
+    state: State<'_, AppState>,
+) -> Result<TransferProfileListDto, UiError> {
+    let dir =
+        asterism_server::release_dirs::resolved_profile_dir(&state.app_setting_service).await?;
+    Ok(asterism_server::transfer_profiles::list(&dir))
+}
+
+/// One destination profile's text, whole.
+///
+/// `transfer_profiles::read_body` says why the listing beside this one
+/// is not enough to send with, and what `name` may be; this command
+/// resolves the directory and hands it over.
+#[tauri::command]
+pub async fn read_transfer_profile(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<String, UiError> {
+    let dir =
+        asterism_server::release_dirs::resolved_profile_dir(&state.app_setting_service).await?;
+    Ok(asterism_server::transfer_profiles::read_body(&dir, &name)?)
+}
+
+/// Where the next release writes its copies.
+///
+/// [`release_forge_change_point`] takes the directory as an argument
+/// and the screen calling it cannot work one out, because resolving it
+/// reads the environment and checks a marker — neither of which a
+/// webview can do. `asterism_server::release_dirs` is what resolves it.
+/// So the screen asks.
+#[tauri::command]
+pub async fn release_output_dir(state: State<'_, AppState>) -> Result<String, UiError> {
+    let dir =
+        asterism_server::release_dirs::resolved_output_dir(&state.app_setting_service).await?;
+    Ok(dir.display().to_string())
 }

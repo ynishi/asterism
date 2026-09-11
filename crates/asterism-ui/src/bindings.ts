@@ -396,6 +396,10 @@ export type ForgeSendDto = { id: string; release_id: string; destination: string
 
 export type SendReleaseCommand = { release_id: string; destination: string; profile_json: string; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
 
+export type TransferProfileDto = { name: string; path: string; scheme: string | null; host: string | null; directory: string | null; error: string | null; };
+
+export type TransferProfileListDto = { directory: string; profiles: { name: string; path: string; scheme: string | null; host: string | null; directory: string | null; error: string | null; }[]; };
+
 export type RenameTagCommand = { tag_id: string; name: string; };
 
 export type DeleteTagCommand = { tag_id: string; };

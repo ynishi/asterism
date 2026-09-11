@@ -486,6 +486,9 @@ pub fn run() {
             commands::list_forge_releases_of_change_point,
             commands::send_forge_release,
             commands::list_forge_release_sends,
+            commands::list_transfer_profiles,
+            commands::read_transfer_profile,
+            commands::release_output_dir,
             // Lines a team hosts. Their own block for the reason they
             // get their own panel: the source is a server, not this
             // machine (#148 decision 16).

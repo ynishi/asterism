@@ -102,7 +102,7 @@ use asterism_contract::forge::{
     ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand,
     OpenForgeThreadCommand, PushForgeRoundCommand, ReleaseChangePointCommand,
     RenameForgeLineCommand, RenameForgeThreadCommand, SayInForgeThreadCommand, SendReleaseCommand,
-    SetForgeLineStrategyCommand,
+    SetForgeLineStrategyCommand, TransferProfileDto, TransferProfileListDto,
 };
 use asterism_contract::query::{
     GetAssetDetailQuery, GetJobStatusQuery, ListAssetsQuery, ListEventsQuery,
@@ -333,6 +333,8 @@ fn main() {
         ReleaseChangePointCommand,
         ForgeSendDto,
         SendReleaseCommand,
+        TransferProfileDto,
+        TransferProfileListDto,
         // Tag administration. Delete and merge answer with a result
         // shape saying what the write moved; rename answers with the
         // tag, so it has none.
