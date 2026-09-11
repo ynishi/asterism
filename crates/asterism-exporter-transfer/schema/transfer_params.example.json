@@ -7,7 +7,7 @@
     "key_passphrase_ref": "AGENCY_SFTP_KEY_PASSPHRASE"
   },
   "host_key": {
-    "fingerprint": "SHA256:ldyiXa1JQakitNU5tErauu8DvWQ1dZ7aXu+rm7KQuog"
+    "fingerprint": "SHA256:0000000000000000000000000000000000000000000"
   },
   "allow_insecure": false,
   "remote_name_template": "{{item.name}}",

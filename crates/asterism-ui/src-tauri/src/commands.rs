@@ -4735,15 +4735,10 @@ mod teams_error_tests {
 /// files exist — see
 /// [`ForgeReleaseDto::files`](asterism_contract::forge::ForgeReleaseDto::files).
 ///
-/// Two things differ from the HTTP surface, and both are what every
-/// forge command here does. The ids are arguments rather than path
-/// segments, which is what the command's own `line_id` and
-/// `change_point_id` fields exist for. And the write is the owner's:
-/// this surface is the owner's own, so the attribution is
-/// [`AttributionContext::owner_surface`] and the command's
-/// `author_kind` / `author_subject` / `operator_ai` are not read —
-/// those carry a remote caller's assertion, which is a claim this
-/// process is in no position to receive from itself.
+/// The ids are arguments rather than path segments, which is what the
+/// command's own `line_id` and `change_point_id` fields exist for, and
+/// the write is the owner's — see
+/// [`AttributionContext::owner_surface`].
 #[tauri::command]
 pub async fn release_forge_change_point(
     state: State<'_, AppState>,
@@ -4804,14 +4799,9 @@ pub async fn list_forge_releases_of_change_point(
 /// Answers with the send as it was recorded, which is before the
 /// transfer has run — the dispatch it names is what carries the bytes.
 ///
-/// Two things differ from the HTTP surface, and both are what every
-/// forge command here does. The id is an argument rather than a path
-/// segment, which is what the command's own `release_id` field exists
-/// for. And the write is the owner's: this surface is the owner's own,
-/// so the attribution is [`AttributionContext::owner_surface`] and the
-/// command's `author_kind` / `author_subject` / `operator_ai` are not
-/// read — those carry a remote caller's assertion, which is a claim
-/// this process is in no position to receive from itself.
+/// The id is an argument rather than a path segment, which is what the
+/// command's own `release_id` field exists for, and the write is the
+/// owner's — see [`AttributionContext::owner_surface`].
 #[tauri::command]
 pub async fn send_forge_release(
     state: State<'_, AppState>,

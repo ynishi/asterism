@@ -48,7 +48,7 @@ const ANONYMOUS: (&str, &str) = ("anonymous", "anonymous@");
 ///
 /// A macro rather than a trait object: the two are one generic type at
 /// two parameters and the methods are inherent, so a trait would have to
-/// restate every signature this module uses in order to name four of
+/// restate every signature this module uses in order to name any of
 /// them.
 macro_rules! with_wire {
     ($wire:expr, $session:ident => $call:expr) => {
