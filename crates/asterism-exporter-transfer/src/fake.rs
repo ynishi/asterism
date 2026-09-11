@@ -93,12 +93,19 @@ pub struct FakeConnector {
     /// The fingerprint this far side offers, so a profile naming
     /// another one is refused the way a real host's would be.
     offers: Option<String>,
+    /// What this far side says instead of opening, for the arm where a
+    /// server refuses the login in its own words.
+    refuses: Option<String>,
 }
 
 impl FakeConnector {
     /// A far side that accepts whatever host key it is asked for.
     pub fn accepting(far: Arc<Fake>) -> Arc<Self> {
-        Arc::new(Self { far, offers: None })
+        Arc::new(Self {
+            far,
+            offers: None,
+            refuses: None,
+        })
     }
 
     /// A far side that offers this fingerprint and nothing else.
@@ -106,6 +113,20 @@ impl FakeConnector {
         Arc::new(Self {
             far,
             offers: Some(fingerprint.to_string()),
+            refuses: None,
+        })
+    }
+
+    /// A far side that will not open, and says so in its own words.
+    ///
+    /// The words are the point: a server composes its own refusal and
+    /// commonly quotes what it was sent, so this is the arm that says
+    /// whether the scrub reaches text this crate did not write.
+    pub fn refusing_to_open(far: Arc<Fake>, answer: &str) -> Arc<Self> {
+        Arc::new(Self {
+            far,
+            offers: None,
+            refuses: Some(answer.to_string()),
         })
     }
 }
@@ -125,6 +146,9 @@ impl Connector for FakeConnector {
                 expected: expected.clone(),
                 offered: offered.clone(),
             });
+        }
+        if let Some(answer) = &self.refuses {
+            return Err(TransportError::Refused(answer.clone()));
         }
         Ok(Box::new(FakeTransport {
             far: Arc::clone(&self.far),

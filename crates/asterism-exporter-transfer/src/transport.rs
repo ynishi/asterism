@@ -82,10 +82,16 @@ impl Scheme {
 /// What the far side is asked to accept as proof of who is calling.
 ///
 /// Values, resolved per call from the environment variables the profile
-/// named. Nothing here is ever written to a row: the profile carries the
-/// names and the attempt record repeats the names, and
-/// [`Redaction`](asterism_exporter_common::Redaction) takes the values
-/// back out of anything an implementation composed from them.
+/// named. What reaches a row is the *names*: the profile carries them
+/// and the attempt record repeats them, so a reader can tell which
+/// profile was in play without the value being anywhere.
+///
+/// [`user`](Self::user) is the exception and is on the attempt record on
+/// purpose — an account name is what a reader needs to know which login
+/// was refused, and it is not a secret. Everything
+/// [`secrets`](Self::secrets) returns is taken back out by
+/// [`Redaction`](asterism_exporter_common::Redaction) before any record
+/// or error text is written down.
 #[derive(Debug, Clone, Default)]
 pub struct Credentials {
     /// The account name on the far side.
@@ -100,11 +106,24 @@ pub struct Credentials {
 
 impl Credentials {
     /// Every secret value this call was made with, for the scrub.
+    ///
+    /// The key's *location* is one of them. It is not a credential, but
+    /// the profile names it the same way a credential is named — an
+    /// environment variable, so that neither the key nor the path to it
+    /// sits on a row — and a server or an io error that echoes the path
+    /// would put it there anyway. Scrubbing it makes that promise hold
+    /// by this list rather than by no message happening to carry it.
     pub fn secrets(&self) -> Vec<String> {
-        [self.password.clone(), self.key_passphrase.clone()]
-            .into_iter()
-            .flatten()
-            .collect()
+        [
+            self.password.clone(),
+            self.key_passphrase.clone(),
+            self.key_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
     }
 }
 

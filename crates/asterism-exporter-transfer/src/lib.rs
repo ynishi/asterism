@@ -3,10 +3,10 @@
 //! One adapter for the one channel every stock agency sanctions for a
 //! batch: the files on the agency's host over SFTP, FTPS or FTP, with a
 //! CSV sidecar beside them. The scheme in the profile's endpoint chooses
-//! which — one crate for three protocols, the way
+//! which — one crate for all of them, the way
 //! [`asterism_exporter_http`] is one crate for hosted and self-hosted
 //! job APIs, because a host, a credential and a directory layout are the
-//! whole of what differs.
+//! whole of what differs. [`Scheme`] is the list.
 //!
 //! ## What it sends, and what it does not
 //!
@@ -50,14 +50,19 @@
 //! ```
 //!
 //! - `endpoint` — `<scheme>://<host>[:<port>][/<dir>]`. The scheme
-//!   chooses the protocol; see [`transport::read_endpoint`] for the
-//!   grammar and for why an endpoint carries no account.
+//!   chooses the protocol, and the schemes are `sftp`, `ftps`, `ftp` and
+//!   `file`; [`Scheme`] is where each says what it costs, and
+//!   [`transport::read_endpoint`] has the grammar and the reason an
+//!   endpoint carries no account.
 //! - `auth` — the account, and the *names* of the environment variables
 //!   the credential is read from. Absent means the server takes an
 //!   anonymous login, which is the FTP shape and not much else.
 //! - `host_key` — what the far side's key has to be. Required for
-//!   `sftp://` and meaningless for the rest, which authenticate their
-//!   host through TLS or not at all.
+//!   `sftp://`. The other schemes authenticate their host through TLS or
+//!   not at all, so a well-formed `host_key` beside one of them is
+//!   ignored — but a malformed one is refused whichever scheme it sits
+//!   with, because it is read before the scheme is consulted and naming
+//!   neither or both of its two forms is a profile that has not decided.
 //! - `allow_insecure` — permission to speak `ftp://`, where the
 //!   credential and the bytes cross the network in the clear.
 //! - `remote_name_template` — what each file is called on the far side.
@@ -87,7 +92,9 @@
 //! of the dispatch, so a value reachable by `{{params.…}}` is readable
 //! by anything that can list dispatches. `key_ref` is the same rule one
 //! step along — it names a variable holding the key's *location*, so
-//! neither the key nor the path to it is on a row.
+//! neither the key nor the path to it is on a row. The path is scrubbed
+//! alongside the password and the passphrase rather than trusted to stay
+//! out of a message: [`Credentials::secrets`] is that list.
 //!
 //! ## Two refusals that happen before anything is sent
 //!
@@ -104,7 +111,9 @@
 //!
 //! Both are recorded on the attempt before the error is returned, so a
 //! reader of the dispatch sees which refusal it was rather than a
-//! message alone.
+//! message alone — and so is every other answer this adapter gives
+//! without a handle, down to a params blob that did not parse. [`refuse`]
+//! is the one arm they all leave through.
 //!
 //! ## The call is recorded per file
 //!
@@ -115,6 +124,13 @@
 //! through leaves a record of every file either way: the run failed with
 //! the first error, and what actually landed is a question only the
 //! record can answer.
+//!
+//! The redaction is applied once per exit rather than per message, at
+//! the two places a record or an error leaves this crate, and it looks
+//! for everything [`Credentials::secrets`] names. That matters most on
+//! the arms nothing here composed: a server that refuses a login
+//! commonly echoes what it was sent, and that text is what the dispatch
+//! row would otherwise keep.
 //!
 //! ## Lifecycle
 //!
@@ -285,16 +301,18 @@ impl FileRow {
     /// card through `{{item.card.…}}` rather than through a second set
     /// of top-level names, so a field the DTO grows is reachable the day
     /// it lands and cannot collide with a field of the row.
-    pub fn item(&self, index: usize, remote_name: &str, card: Option<&AssetCardDto>) -> Value {
+    ///
+    /// The card is not optional: a row naming no input of this dispatch
+    /// is refused before anything is planned, for the reason
+    /// [`plan_send`] gives.
+    pub fn item(&self, index: usize, remote_name: &str, card: &AssetCardDto) -> Value {
         serde_json::json!({
             "asset_id": self.asset_id,
             "path": self.path,
             "name": self.name,
             "remote_name": remote_name,
             "index": index,
-            "card": card
-                .map(|card| serde_json::to_value(card).unwrap_or(Value::Null))
-                .unwrap_or(Value::Null),
+            "card": serde_json::to_value(card).unwrap_or(Value::Null),
         })
     }
 }
@@ -386,20 +404,39 @@ impl Exporter for TransferExporter {
                 action: ctx.action.into(),
             });
         }
-        let params: TransferDispatchParams = serde_json::from_value(ctx.params.clone())
-            .map_err(|e| ExporterError::BackendRejected(format!("invalid transfer params: {e}")))?;
+        // Nothing is resolved yet, so there is nothing for a scrub to
+        // look for: every refusal down to `resolve_credentials` is about
+        // text the profile itself supplied. The scrub becomes real the
+        // moment a credential exists, and from there every exit of this
+        // function goes through it.
+        let bare = Redaction::none();
+        let params: TransferDispatchParams = match serde_json::from_value(ctx.params.clone()) {
+            Ok(params) => params,
+            Err(e) => {
+                return Err(refuse(
+                    &ctx,
+                    &bare,
+                    None,
+                    TransportError::Refused(format!("invalid transfer params: {e}")),
+                ));
+            }
+        };
+        let described = Some(&params);
 
-        let target = read_endpoint(&params.endpoint).map_err(|e| refuse(&ctx, &params, e))?;
-        let host_key = host_key_of(&params).map_err(|e| refuse(&ctx, &params, e))?;
-        check_scheme(&target, &params, host_key.as_ref()).map_err(|e| refuse(&ctx, &params, e))?;
-        let credentials = resolve_credentials(params.auth.as_ref())?;
+        let target =
+            read_endpoint(&params.endpoint).map_err(|e| refuse(&ctx, &bare, described, e))?;
+        let host_key = host_key_of(&params).map_err(|e| refuse(&ctx, &bare, described, e))?;
+        check_scheme(&target, &params, host_key.as_ref())
+            .map_err(|e| refuse(&ctx, &bare, described, e))?;
+        let credentials = resolve_credentials(params.auth.as_ref())
+            .map_err(|e| refuse(&ctx, &bare, described, e))?;
         let scrub = Redaction::of(credentials.secrets());
 
         // Every name and every cell is settled before the connection
         // opens. A template that does not resolve is a profile mistake,
         // and finding it out with a session open would leave a
         // half-filled directory behind on somebody's host.
-        let plan = plan_send(&ctx, &params).map_err(|e| scrub.error(refuse(&ctx, &params, e)))?;
+        let plan = plan_send(&ctx, &params).map_err(|e| refuse(&ctx, &scrub, described, e))?;
 
         let mut wire = match self
             .connector
@@ -407,10 +444,10 @@ impl Exporter for TransferExporter {
             .await
         {
             Ok(wire) => wire,
-            Err(err) => return Err(scrub.error(refuse(&ctx, &params, err))),
+            Err(err) => return Err(refuse(&ctx, &scrub, described, err)),
         };
         if let Err(err) = wire.ensure_dir().await {
-            return Err(scrub.error(refuse(&ctx, &params, err)));
+            return Err(refuse(&ctx, &scrub, described, err));
         }
 
         let mut sent = Vec::with_capacity(plan.len());
@@ -522,10 +559,27 @@ fn plan_send(
              and this one lists no file"
         )));
     }
+    check_remote_name(&params.sidecar.filename)?;
     let env = TemplateEnv::pre_handle(ctx, ctx.params);
     let mut plan = Vec::with_capacity(params.release.files.len());
     for (index, row) in params.release.files.iter().enumerate() {
-        let card = ctx.inputs.iter().find(|card| card.id == row.asset_id);
+        // A row has to name one of this dispatch's own inputs. That is
+        // what ties the bytes to the snapshot the run is over: without
+        // it any readable path on this machine, written into a file list
+        // by hand, would be put on somebody's host by an adapter that
+        // had no way to know it was not a release's copy.
+        let card = ctx
+            .inputs
+            .iter()
+            .find(|card| card.id == row.asset_id)
+            .ok_or_else(|| {
+                TransportError::Refused(format!(
+                    "the file list names asset {:?}, which is not one of this \
+                     dispatch's inputs; a send's bytes are the copies made from \
+                     the snapshot it runs over",
+                    row.asset_id
+                ))
+            })?;
         let remote_name = match &params.remote_name_template {
             None => row.name.clone(),
             Some(template) => {
@@ -535,6 +589,7 @@ fn plan_send(
                     .map_err(|e| TransportError::Refused(e.to_string()))?
             }
         };
+        check_remote_name(&remote_name)?;
         let item = row.item(index, &remote_name, card);
         let item_env = env.with_item(&item);
         let mut cells = Vec::with_capacity(params.sidecar.columns.len());
@@ -552,6 +607,25 @@ fn plan_send(
         });
     }
     Ok(plan)
+}
+
+/// What a file may be called on the far side: one path segment.
+///
+/// Stated here rather than in each [`Transport`], because the reason is
+/// the same wherever the bytes are going and it is about the name rather
+/// than the protocol. A `remote_name_template` that rendered a separator
+/// would land the bytes outside the directory the endpoint named — a
+/// different destination from the one the send recorded — and a name
+/// that rendered empty would ask three protocols three different
+/// questions.
+fn check_remote_name(name: &str) -> Result<(), TransportError> {
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
+        return Err(TransportError::Refused(format!(
+            "a file's name on the far side is one path segment, and this is \
+             not: {name:?}"
+        )));
+    }
+    Ok(())
 }
 
 /// Sends one file, answering with what the far side said if it refused.
@@ -599,26 +673,37 @@ fn account_note(auth: Option<&AuthSchema>) -> Value {
 
 /// Records a refusal and turns it into what `dispatch` returns.
 ///
-/// The record is written on the arm that returns an error, which is the
-/// arm a reader has the most questions about: no handle is produced, so
-/// without it the endpoint, the scheme and the reason would leave with
-/// the error and the row would keep one message.
+/// Every arm of `dispatch` that returns without a handle comes through
+/// here, which is what makes the crate doc's two promises hold as one
+/// mechanism rather than as a rule each arm has to remember. The record
+/// is written because this is the arm a reader has the most questions
+/// about: no handle is produced, so without it the endpoint, the account
+/// and the reason would leave with the error and the row would keep one
+/// message. The scrub is applied to both halves, because a refusal
+/// composed by the far side is the likeliest text to carry back
+/// something it was sent.
+///
+/// `params` is absent only when the blob did not deserialise, which is
+/// the one refusal that happens before there is a profile to describe.
 fn refuse(
     ctx: &DispatchContext<'_>,
-    params: &TransferDispatchParams,
+    scrub: &Redaction,
+    params: Option<&TransferDispatchParams>,
     why: TransportError,
 ) -> ExporterError {
     let message = why.to_string();
     ctx.attempt.record(AttemptRecord::new(
         SLUG,
-        serde_json::json!({
-            "endpoint": params.endpoint,
-            "account": account_note(params.auth.as_ref()),
+        scrub.json(serde_json::json!({
+            "endpoint": params.map(|params| params.endpoint.as_str()),
+            "account": params
+                .map(|params| account_note(params.auth.as_ref()))
+                .unwrap_or(Value::Null),
             "refused": message,
             "files": [],
-        }),
+        })),
     ));
-    ExporterError::BackendRejected(message)
+    scrub.error(ExporterError::BackendRejected(message))
 }
 
 /// What the profile said the host's key would be.
@@ -666,7 +751,7 @@ fn check_scheme(
 /// refusal rather than an empty credential: an anonymous login shaped
 /// like an authenticated one is a worse place to learn about it than the
 /// dispatch that will not start.
-fn resolve_credentials(auth: Option<&AuthSchema>) -> Result<Credentials, ExporterError> {
+fn resolve_credentials(auth: Option<&AuthSchema>) -> Result<Credentials, TransportError> {
     let Some(auth) = auth else {
         return Ok(Credentials::default());
     };
@@ -682,12 +767,15 @@ fn resolve_credentials(auth: Option<&AuthSchema>) -> Result<Credentials, Exporte
 }
 
 /// One environment variable, by the name a profile field gave.
-fn from_env(name: Option<&str>, field: &str) -> Result<Option<String>, ExporterError> {
+///
+/// A `Refused`, so it joins every other answer given before a byte moved
+/// and reaches the attempt record the way they do.
+fn from_env(name: Option<&str>, field: &str) -> Result<Option<String>, TransportError> {
     let Some(name) = name else {
         return Ok(None);
     };
     std::env::var(name).map(Some).map_err(|_| {
-        ExporterError::BackendRejected(format!(
+        TransportError::Refused(format!(
             "{field} names environment variable {name:?}, which is not set"
         ))
     })
@@ -790,6 +878,15 @@ mod tests {
             author_subject: None,
             operator_ai: None,
         }
+    }
+
+    /// The inputs a send over `copies(dir, names)` runs with: one card
+    /// per row, under the id that row names. A row naming no input is
+    /// refused, so a test that reaches the plan supplies these.
+    fn inputs_for(names: &[&str]) -> Vec<AssetCardDto> {
+        (0..names.len())
+            .map(|nth| card(&format!("asset-{nth}"), None))
+            .collect()
     }
 
     /// A directory of stamped copies, and the file list a send would
@@ -1005,7 +1102,7 @@ mod tests {
         let recorded = Recorded::default();
         let exporter = TransferExporter::with_connector(FakeConnector::accepting(far.clone()));
 
-        run(&exporter, &params, &[], &recorded)
+        run(&exporter, &params, &inputs_for(&["one.png"]), &recorded)
             .await
             .expect("the send");
 
@@ -1028,7 +1125,7 @@ mod tests {
         let exporter =
             TransferExporter::with_connector(FakeConnector::offering(far.clone(), "SHA256:other"));
 
-        let refused = run(&exporter, &params, &[], &recorded)
+        let refused = run(&exporter, &params, &inputs_for(&["one.png"]), &recorded)
             .await
             .expect_err("the host is not the one named");
 
@@ -1071,9 +1168,14 @@ mod tests {
         let recorded = Recorded::default();
         let exporter = TransferExporter::with_connector(FakeConnector::accepting(far.clone()));
 
-        let failed = run(&exporter, &params, &[], &recorded)
-            .await
-            .expect_err("the far side said no to one of them");
+        let failed = run(
+            &exporter,
+            &params,
+            &inputs_for(&["one.png", "two.png", "three.png"]),
+            &recorded,
+        )
+        .await
+        .expect_err("the far side said no to one of them");
 
         assert!(
             failed.to_string().contains("550 quota exceeded"),
@@ -1123,7 +1225,7 @@ mod tests {
         let recorded = Recorded::default();
         let exporter = TransferExporter::with_connector(FakeConnector::accepting(far.clone()));
 
-        let failed = run(&exporter, &params, &[], &recorded)
+        let failed = run(&exporter, &params, &inputs_for(&["one.png"]), &recorded)
             .await
             .expect_err("the far side said no");
 
@@ -1140,8 +1242,68 @@ mod tests {
         assert!(!failed.to_string().contains("hunter2"), "{failed}");
     }
 
+    /// The arm nothing here composed: a server that will not take the
+    /// login answers in its own words and commonly quotes what it was
+    /// sent. Neither the password nor the key's location may reach the
+    /// row through it, and that is the scrub's job rather than the
+    /// server's.
+    #[tokio::test]
+    async fn a_refused_login_leaves_neither_the_password_nor_the_key_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let files = copies(tmp.path(), &["one.png"]);
+        let key = tmp.path().join("agency.ed25519");
+        let key_path = key.display().to_string();
+        // SAFETY: both variables are this test's own names, and nothing
+        // else in this binary reads or writes them.
+        unsafe {
+            std::env::set_var("ASTERISM_TEST_TRANSFER_REFUSED_PASSWORD", "hunter2");
+            std::env::set_var("ASTERISM_TEST_TRANSFER_REFUSED_KEY", &key_path);
+        }
+        let params = profile(
+            "file:///unused",
+            files,
+            serde_json::json!({
+                "auth": {
+                    "user": "contributor",
+                    "secret_ref": "ASTERISM_TEST_TRANSFER_REFUSED_PASSWORD",
+                    "key_ref": "ASTERISM_TEST_TRANSFER_REFUSED_KEY"
+                }
+            }),
+        );
+        let recorded = Recorded::default();
+        let exporter = TransferExporter::with_connector(FakeConnector::refusing_to_open(
+            Fake::shared(),
+            &format!("530 login incorrect for hunter2 using key {key_path}"),
+        ));
+
+        let refused = run(&exporter, &params, &inputs_for(&["one.png"]), &recorded)
+            .await
+            .expect_err("the far side would not take the login");
+
+        let payload = recorded.payload().to_string();
+        assert!(!payload.contains("hunter2"), "{payload}");
+        assert!(!payload.contains(&key_path), "{payload}");
+        assert!(
+            payload.contains(asterism_exporter_common::REDACTED),
+            "{payload}"
+        );
+        assert!(
+            payload.contains("ASTERISM_TEST_TRANSFER_REFUSED_KEY"),
+            "the names stay, so a reader can tell which profile was in \
+             play: {payload}"
+        );
+        assert!(
+            payload.contains("contributor"),
+            "the account is on the record on purpose: {payload}"
+        );
+        let message = refused.to_string();
+        assert!(!message.contains("hunter2"), "{message}");
+        assert!(!message.contains(&key_path), "{message}");
+    }
+
     /// A variable the profile names and the environment does not have
-    /// is a refusal, not an anonymous login.
+    /// is a refusal, not an anonymous login — and the row says so rather
+    /// than keeping the message alone.
     #[tokio::test]
     async fn a_credential_the_environment_does_not_have_stops_the_dispatch() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1164,6 +1326,131 @@ mod tests {
             .expect_err("the credential is not there");
 
         assert!(refused.to_string().contains("secret_ref"), "{refused}");
+        assert!(
+            recorded.payload()["refused"]
+                .as_str()
+                .expect("the refusal is on the record")
+                .contains("ASTERISM_TEST_NO_SUCH_VARIABLE")
+        );
+    }
+
+    /// A file list is only allowed to name this dispatch's own inputs.
+    /// Without that, a hand-written list reaching this adapter through
+    /// the generic dispatch route would put any readable local path on
+    /// somebody's host.
+    #[tokio::test]
+    async fn a_row_naming_no_input_of_this_dispatch_is_refused() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let secret = tmp.path().join("not-a-release-copy.png");
+        std::fs::write(&secret, b"bytes").expect("a file nothing released");
+        let params = profile(
+            "file:///unused",
+            vec![serde_json::json!({
+                "asset_id": "an-asset-this-dispatch-does-not-have",
+                "path": secret.display().to_string(),
+                "name": "not-a-release-copy.png",
+            })],
+            serde_json::json!({}),
+        );
+        let far = Fake::shared();
+        let recorded = Recorded::default();
+        let exporter = TransferExporter::with_connector(FakeConnector::accepting(far.clone()));
+
+        let refused = run(&exporter, &params, &inputs_for(&["one.png"]), &recorded)
+            .await
+            .expect_err("the row names nothing this dispatch is over");
+
+        assert!(refused.to_string().contains("inputs"), "{refused}");
+        assert!(far.order().is_empty(), "nothing was put");
+        assert!(!*far.directory_made.lock().unwrap(), "nothing was opened");
+    }
+
+    /// A name that walked out of the directory would land the bytes
+    /// somewhere the send did not record, and the refusal is above the
+    /// transport so every protocol gets it.
+    #[tokio::test]
+    async fn a_remote_name_that_is_not_one_segment_is_refused() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let files = copies(tmp.path(), &["one.png"]);
+        let params = profile(
+            "file:///unused",
+            files,
+            serde_json::json!({ "remote_name_template": "../escaped-{{item.index}}.png" }),
+        );
+        let far = Fake::shared();
+        let recorded = Recorded::default();
+        let exporter = TransferExporter::with_connector(FakeConnector::accepting(far.clone()));
+
+        let refused = run(&exporter, &params, &inputs_for(&["one.png"]), &recorded)
+            .await
+            .expect_err("a remote name is one path segment");
+
+        assert!(
+            refused.to_string().contains("one path segment"),
+            "{refused}"
+        );
+        assert!(far.order().is_empty(), "nothing was put");
+        assert!(!*far.directory_made.lock().unwrap(), "nothing was opened");
+    }
+
+    /// The same rule answers for the sidecar, which is put beside the
+    /// files by a name the profile gave.
+    #[tokio::test]
+    async fn a_sidecar_filename_that_is_not_one_segment_is_refused() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let files = copies(tmp.path(), &["one.png"]);
+        let params = profile(
+            "file:///unused",
+            files,
+            serde_json::json!({
+                "sidecar": {
+                    "filename": "../metadata.csv",
+                    "columns": [{ "header": "Filename", "template": "{{item.remote_name}}" }]
+                }
+            }),
+        );
+        let recorded = Recorded::default();
+        let exporter = TransferExporter::with_connector(FakeConnector::accepting(Fake::shared()));
+
+        let refused = run(&exporter, &params, &inputs_for(&["one.png"]), &recorded)
+            .await
+            .expect_err("a sidecar name is one path segment");
+
+        assert!(
+            refused.to_string().contains("one path segment"),
+            "{refused}"
+        );
+    }
+
+    /// Every answer this adapter gives without a handle reaches the row,
+    /// including the two that happen before there is a profile or a
+    /// credential to describe.
+    #[tokio::test]
+    async fn a_params_blob_that_does_not_parse_is_recorded() {
+        let recorded = Recorded::default();
+        let exporter = TransferExporter::with_connector(FakeConnector::accepting(Fake::shared()));
+
+        let refused = run(
+            &exporter,
+            &serde_json::json!({ "endpoint": "file:///unused" }),
+            &[],
+            &recorded,
+        )
+        .await
+        .expect_err("a profile without a sidecar or a file list is not one");
+
+        assert!(refused.to_string().contains("invalid transfer params"));
+        let payload = recorded.payload();
+        assert!(
+            payload["refused"]
+                .as_str()
+                .expect("the refusal is on the record")
+                .contains("invalid transfer params")
+        );
+        assert!(
+            payload["endpoint"].is_null(),
+            "nothing was parsed, so nothing is described: {payload}"
+        );
     }
 
     /// A profile with no file list has nothing this adapter would send,
@@ -1223,7 +1510,9 @@ mod tests {
         let params = profile("file:///unused", files, serde_json::json!({}));
         let recorded = Recorded::default();
         let exporter = TransferExporter::with_connector(FakeConnector::accepting(Fake::shared()));
-        let handle = run(&exporter, &params, &[], &recorded).await.expect("send");
+        let handle = run(&exporter, &params, &inputs_for(&["one.png"]), &recorded)
+            .await
+            .expect("send");
 
         let ctx = DispatchContext {
             inputs: &[],

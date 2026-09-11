@@ -36,16 +36,12 @@ impl Transport for LocalTransport {
             .map_err(|e| TransportError::Refused(format!("reach {}: {e}", self.dir.display())))
     }
 
+    /// Writes one file into that directory.
+    ///
+    /// `name` is one path segment — `crate::check_remote_name` is where
+    /// that is stated and refused, above this trait so that all three
+    /// transports get the same answer.
     async fn put(&mut self, name: &str, bytes: &[u8]) -> Result<(), TransportError> {
-        // A name is one path segment. A profile whose
-        // `remote_name_template` renders a separator would otherwise
-        // write outside the directory the endpoint named, which is a
-        // different destination from the one the send recorded.
-        if name.contains('/') || name.contains('\\') || name == ".." {
-            return Err(TransportError::Failed(format!(
-                "a remote name is one path segment, and this is not: {name:?}"
-            )));
-        }
         tokio::fs::write(self.dir.join(name), bytes)
             .await
             .map_err(|e| TransportError::Failed(format!("put {name}: {e}")))
@@ -74,18 +70,5 @@ mod tests {
         wire.close().await.expect("close");
 
         assert_eq!(std::fs::read(dir.join("one.png")).unwrap(), b"bytes");
-    }
-
-    /// A name that walked out of the directory would land the bytes
-    /// somewhere the send did not record.
-    #[tokio::test]
-    async fn a_name_that_is_not_one_segment_is_refused() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let target = read_endpoint(&format!("file://{}", tmp.path().display())).expect("endpoint");
-        let mut wire = open(&target).await.expect("open");
-        wire.ensure_dir().await.expect("the directory");
-
-        assert!(wire.put("../escaped.png", b"bytes").await.is_err());
-        assert!(wire.put("nested/one.png", b"bytes").await.is_err());
     }
 }
