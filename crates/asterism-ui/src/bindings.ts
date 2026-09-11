@@ -430,6 +430,8 @@ export type ConflictResolution = 'folded' | 'kept';
 
 export type OnDuplicate = 'ask' | 'fold' | 'separate';
 
+export type OccurredSource = 'exif' | 'mtime' | 'record' | 'import' | 'unknown';
+
 export type ObservationDto = { stream: string; id: string; occurred_at_ms: number; env: string; event: string; attrs_json: string | null; correlation_id: string | null; };
 
 export type ListObservationsQuery = { stream: string | null; since_ms: number | null; until_ms: number | null; limit: number; };
@@ -441,6 +443,8 @@ export type SortOrder = 'alpha' | 'ordered' | 'updated';
 export type SortSpec = { target: 'occurred_at' | 'created_at' | 'updated_at' | 'persona' | 'modality' | 'tag' | 'group' | 'cover' | 'rating' | 'duration' | 'file_size' | 'pixels'; order: 'alpha' | 'ordered' | 'updated'; reverse: boolean; collation: string | null; };
 
 export type TagMatch = 'any' | 'all';
+
+export type DayOfYear = { month: number; day: number; };
 
 export type TeamLedgerPageDto = { events: { seq: number; event_id: string; team_id: string; actor_kind: string; actor_user_id: string; actor_display_name: string; occurred_at_ms: number; kind: string; subjects: { ref_type: string; value: string; }[]; payload_json: string; }[]; next_after: number | null; };
 

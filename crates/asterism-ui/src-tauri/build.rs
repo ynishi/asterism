@@ -62,7 +62,8 @@ use asterism_contract::command::{
     DetachTagCommand, DispatchRunCommand, EditAssetCommentCommand, EditChapterMarkCommand,
     EditMaterialMarkCommand, EmptyTrashResult, GroupMembershipEntry, LinkGroupCommand,
     MergeAssetsCommand, MergeGroupsCommand, MergeTagsCommand, MergeTagsResult, MoveDirCommand,
-    MoveGroupToDirCommand, OnDuplicate, OrganizeByLocationCommand, OrganizeByLocationResult,
+    MoveGroupToDirCommand, OccurredSource, OnDuplicate, OrganizeByLocationCommand,
+    OrganizeByLocationResult,
     PasteImageImportCommand, PatchSessionMetadataCommand, PostAssetCommentCommand,
     PostChapterMarkCommand, PostMaterialMarkCommand, PromoteSnapshotToGroupCommand,
     PromoteSnapshotToGroupResult, PromoteTagToGroupCommand, PromoteTagToGroupResult,
@@ -105,7 +106,7 @@ use asterism_contract::forge::{
     SetForgeLineStrategyCommand, TransferProfileDto, TransferProfileListDto,
 };
 use asterism_contract::query::{
-    GetAssetDetailQuery, GetJobStatusQuery, ListAssetsQuery, ListEventsQuery,
+    DayOfYear, GetAssetDetailQuery, GetJobStatusQuery, ListAssetsQuery, ListEventsQuery,
     ListObservationsQuery, RandomAssetsQuery, SearchAssetsQuery, TagMatch,
 };
 use asterism_contract::sort::{SortOrder, SortSpec, SortTarget};
@@ -356,6 +357,11 @@ fn main() {
         MergeGroupsCommand,
         ConflictResolution,
         OnDuplicate,
+        // Where an occurrence stamp came from — the closed set beside
+        // `OnDuplicate` for the same reason: a caller states it, and the
+        // set has to be discoverable to be stated. Already inlined in
+        // `AddAssetCommand`; named so a caller can hold one.
+        OccurredSource,
         // The observation stream, which `list_observations` serves over
         // IPC as well as HTTP.
         ObservationDto,
@@ -376,6 +382,10 @@ fn main() {
         SortOrder,
         SortSpec,
         TagMatch,
+        // The month-and-day of the day-of-year cut, inlined in
+        // `ListAssetsQuery` like the two above and named here on the
+        // same terms.
+        DayOfYear,
         // The team plane, as this app's own boundary carries it. What
         // the wire carries is what a member's client and a team server
         // say to each other; these are what a command hands a screen,

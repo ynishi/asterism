@@ -40,6 +40,7 @@
 // a callsite would be a second definition of what "5 MB" means.
 
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import type { DayOfYear } from "../../bindings";
 
 // Sort axes mirror the App.svelte types (kept in sync manually until
 // the sort UI is extracted). `SortTarget` picks the dimension,
@@ -213,8 +214,11 @@ export function isJumpSpan(v: string): v is JumpSpan {
   return (JUMP_SPANS as readonly string[]).includes(v);
 }
 
-// A month and a day with no year — `ListAssetsQuery.day_of_year`.
-export type DayOfYear = { month: number; day: number };
+// A month and a day with no year — `ListAssetsQuery.day_of_year`. The
+// wire type itself, re-exported so the picker and the chip name it
+// without reaching into the bindings; unlike `SortTarget` above there
+// is nothing the UI adds or omits.
+export type { DayOfYear };
 
 // Wire form of the calendar filter (`ListAssetsQuery` field names), so
 // the query builders spread it rather than restating the mapping — the
