@@ -655,7 +655,7 @@
     {
       "path": "asterism_ui::commands::list_transfer_profiles",
       "kind": "function",
-      "docs": "Every destination profile this machine holds, and where they were\nread from.\n\nProfiles are JSON files in a directory a registered setting names,\neach validated with the transport's own parser.\n`asterism_server::transfer_profiles` is the whole of it, and says\nhow far that validation goes; this command resolves the directory\nand hands it over.\n\nA read, so it names no surface. The write it feeds is\n[`send_forge_release`], which does."
+      "docs": "Every destination profile this machine holds, and where they were\nread from.\n\nProfiles are JSON files in a directory a registered setting names,\neach validated with the transport's own parser —\n`asterism_exporter_transfer::read_profile` says how far that goes\nand what it leaves to the dispatch.\n`asterism_server::transfer_profiles` does the listing; this command\nresolves the directory and hands it over.\n\nA read, so it names no surface. The write it feeds is\n[`send_forge_release`], which does."
     },
     {
       "path": "asterism_ui::commands::merge_assets",
@@ -855,7 +855,7 @@
     {
       "path": "asterism_ui::commands::release_output_dir",
       "kind": "function",
-      "docs": "Where the next release writes its copies.\n\n[`release_forge_change_point`] takes the directory as an argument,\nand the screen calling it cannot work one out: the setting behind it\nis empty by default, and empty means the profile home — which is\nresolved from the environment and checked against a marker, neither\nof which a webview can do. So it asks."
+      "docs": "Where the next release writes its copies.\n\n[`release_forge_change_point`] takes the directory as an argument\nand the screen calling it cannot work one out, because resolving it\nreads the environment and checks a marker — neither of which a\nwebview can do. `asterism_server::release_dirs` is what resolves it.\nSo the screen asks."
     },
     {
       "path": "asterism_ui::commands::remeasure_dims",

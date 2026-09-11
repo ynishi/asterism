@@ -14801,7 +14801,8 @@ is a constant: the profile home is resolved at run time from
 `$ASTERISM_HOME` and `$ASTERISM_PROFILE`, differs between two
 processes of the same build, and is verified against a marker on the
 way out. There is nothing to write into the registry, so the empty
-string is what it writes, and it means "the profile home's own".
+string is what it writes, and it means the leaf this module gives
+that key under the profile home — `releases/` or `transfer/`.
 
 That convention needs exactly one reader, or it becomes two
 resolvers that disagree the first time somebody changes the leaf
