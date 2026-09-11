@@ -284,11 +284,20 @@
              in. The only place these ids are ever named — after the
              write nothing can derive them again — with a dismiss,
              because a notice that cannot be cleared is one a person
-             stops reading. -->
+             stops reading.
+
+             **"No longer held", not "released back to the library".**
+             What a discard ends is the line's claim on those assets —
+             `Line::holds` is the set "the layer holding the bytes may
+             not let go of while this line exists", and the bytes
+             themselves never moved. The old wording said they came
+             back from somewhere, and it spent the screen's only copy
+             of "release" on the verb that does not write anything out:
+             the change point rows below now carry one that does, and
+             one word cannot mean both on one screen. -->
         <p class="released">
           Discarded. {forgeCatalog.released.length}
-          {forgeCatalog.released.length === 1 ? "asset" : "assets"} released back
-          to the library.
+          {forgeCatalog.released.length === 1 ? "asset" : "assets"} no longer held.
           <button type="button" onclick={() => (forgeCatalog.released = null)}>
             dismiss
           </button>

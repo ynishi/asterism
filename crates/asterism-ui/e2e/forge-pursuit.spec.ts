@@ -863,7 +863,7 @@ describe("a pursuit against a line", () => {
         return (
           !drawer.open.includes(LINE_NAME) &&
           !drawer.archived.includes(LINE_NAME) &&
-          drawer.released.startsWith("Discarded. 1 asset released")
+          drawer.released.startsWith("Discarded. 1 asset no longer held")
         );
       },
       () =>
@@ -1215,7 +1215,7 @@ describe("a pursuit against a line", () => {
         return (
           !drawer.open.includes(SECOND_LINE) &&
           !drawer.archived.includes(SECOND_LINE) &&
-          drawer.released.startsWith("Discarded. 3 assets released")
+          drawer.released.startsWith("Discarded. 3 assets no longer held")
         );
       },
       () =>
