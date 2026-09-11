@@ -184,6 +184,7 @@ other.
 - `list_team_device_tokens` — The device tokens this account holds, on whatever machines.
 - `list_thread_messages` — Lists the Messages of a Thread.
 - `list_threads` — Lists Threads under the given anchor, freshest first. Archived
+- `list_transfer_profiles` — Every destination profile this machine holds, and where they were
 - `merge_assets` — The manual merge verb: a person's ruling that a set of rows is one
 - `merge_groups` — Merges one manual group into another and deletes the source
 - `merge_tags` — Folds one tag channel into another and deletes the source — the
@@ -212,6 +213,7 @@ other.
 - `push_forge_round` — Writes a round.
 - `push_shared_round` — Writes a round into open work on a shared line.
 - `random_assets` — A random handful out of the current filter — the sidebar's
+- `read_transfer_profile` — One destination profile's text, whole.
 - `rebuild_edges` — Enqueues an incremental constellation-edge rebuild for the asset.
 - `rebuild_index` — Enqueues a batch `IndexRebuild` job and returns its task id — the
 - `rebuild_sessions` — Enqueues a `SessionRebuild` job. The precomputed rkyv snapshot
@@ -222,6 +224,7 @@ other.
 - `rehome_dropped_path` — Rehomes a dropped path into `$HOME/asterism/dropped/`
 - `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
 - `release_forge_change_point` — Freezes what a change point carried, copies it into a directory, and
+- `release_output_dir` — Where the next release writes its copies.
 - `remeasure_dims` — Re-reads artefacts and rewrites `width_px` / `height_px` — the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
 - `remove_team_member` — Removes a member from the team.

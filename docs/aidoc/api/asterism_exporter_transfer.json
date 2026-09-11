@@ -23,6 +23,11 @@
       "docs": "What the far side's host key has to be.\n\nExactly one of the two. Both would be two answers to one question,\nand neither is the profile not having decided."
     },
     {
+      "path": "asterism_exporter_transfer::ProfileFacts",
+      "kind": "struct",
+      "docs": "What a stored destination profile says, once this adapter has read\nit.\n\nThree facts and no more, because this is what a picker puts in front\nof somebody choosing between profiles: which protocol carries the\nbytes, whose host they land on, and where they land. The account and\nthe variables its credential is named in stay in the file — see\n[`read_profile`] for why none of them is here."
+    },
+    {
       "path": "asterism_exporter_transfer::RESERVED_KEY",
       "kind": "constant",
       "docs": "The params key the send writes the release's file list under.\n\nSpelled here and in `asterism_core::application::send_service`, which\nis the writer and where the argument for a reserved key is. The two\ncrates cannot see each other — the core takes no exporter dependency\n— so the word is agreed the way `\"file\"` and `\"write\"` already are\nbetween that layer and `asterism-exporter-file`."
@@ -91,6 +96,11 @@
       "path": "asterism_exporter_transfer::params_example_json",
       "kind": "function",
       "docs": "Canonical example JSON for [`TransferDispatchParams`] — streamed by\n`asterism-server schema print exporter:transfer:params`."
+    },
+    {
+      "path": "asterism_exporter_transfer::read_profile",
+      "kind": "function",
+      "docs": "Reads a destination profile with the parser that will send it.\n\nA profile is this adapter's params minus the one key the send writes\n— so it cannot be deserialised as it stands, and the refusal a\ncaller would get for that says the file is missing a field it is\nnever supposed to have. This puts an empty [`RESERVED_KEY`] block in\nfirst and then runs `serde_json::from_value` over the result, which\nis the same call [`TransferExporter::dispatch`] makes, over the same\nstruct. A profile this accepts and the send then refuses on its\nshape is therefore not a state these two can be in.\n\nIt goes as far as the send goes before a connection opens, and stops\nthere: the endpoint is read, the host key is checked for naming one\nthing rather than neither or both, and `ftp://` without the opt-in\nand `sftp://` without a host key are refused. What it does **not**\ndo is resolve credentials. `auth` names environment variables rather\nthan holding values, and reading them here would put a resolved\nsecret one step away from a list that exists to be rendered; a\nvariable that is not set is the dispatch's refusal to make, at the\nmoment somebody asked for the send.\n\nThe error is the sentence to show beside the file. A profile that\ndoes not parse is still listed — a file whose error nobody can see\nis a file somebody edits blind — so this returns the reason rather\nthan dropping the row."
     },
     {
       "path": "asterism_exporter_transfer::sftp",

@@ -653,6 +653,11 @@
       "docs": "Lists Threads under the given anchor, freshest first. Archived\nThreads are excluded unless `include_archived` is `true`."
     },
     {
+      "path": "asterism_ui::commands::list_transfer_profiles",
+      "kind": "function",
+      "docs": "Every destination profile this machine holds, and where they were\nread from.\n\nProfiles are JSON files in a directory a registered setting names,\nand each is validated with the transport's own parser — a list that\nblessed one the send then refused is the failure the listing exists\nto prevent. `asterism_server::transfer_profiles` is the whole of it;\nthis command resolves the directory and hands it over.\n\nA read, so it names no surface. The write it feeds is\n[`send_forge_release`], which does."
+    },
+    {
       "path": "asterism_ui::commands::merge_assets",
       "kind": "function",
       "docs": "The manual merge verb: a person's ruling that a set of rows is one\nthing, carried out. Not scoped to the queue — the caller declares\nthe whole set (keeper + discards + the members they saw on screen)\nand the verb folds the discards into the keeper.\n\n`command.dry_run: true` returns a preview and writes nothing;\n`false` commits the fold. Both branches return the same\n[`MergeAssetsDto`] shape (a run following a preview reads the\nanswer back on it); [`MergeAssetsDto::committed`] tells them apart.\n`refusals` and `warnings` ride on the response — a refused pair is\nnot an error but a decision the caller has to re-make, and a\nwarning is what a rule was protecting before the caller confirms."
@@ -793,6 +798,11 @@
       "docs": "A random handful out of the current filter — the sidebar's\n\"🎲 Random\".\n\nThe grid shows the picks in place of its listing, so nothing about\nthe answer is a page: it cannot be scrolled past `k`, and asking\nagain answers differently. That is the feature.\n\n**Not exposed over MCP on purpose.** The picks exist to give a person\nsomething to look at when they do not know what they are looking for;\nan agent asking for assets under a filter wants `asset_list`, which\nenumerates, counts, and can be paged."
     },
     {
+      "path": "asterism_ui::commands::read_transfer_profile",
+      "kind": "function",
+      "docs": "One destination profile's text, whole.\n\n[`list_transfer_profiles`] answers with a summary built to be\nrendered — scheme, host, directory — and a send needs the profile as\nit stands, `auth` block included. Read when a profile is chosen\nrather than carried in the listing, so choosing is what fetches one.\n\n`name` is one file in the resolved profile directory, and\n`transfer_profiles::read_body` refuses a name that would leave it."
+    },
+    {
       "path": "asterism_ui::commands::rebuild_edges",
       "kind": "function",
       "docs": "Enqueues an incremental constellation-edge rebuild for the asset.\nReturns the engine's task id."
@@ -841,6 +851,11 @@
       "path": "asterism_ui::commands::release_forge_change_point",
       "kind": "function",
       "docs": "Freezes what a change point carried, copies it into a directory, and\nstamps each copy on the way out.\n\nAnswers with the release as it was recorded, which is before its\nfiles exist — see\n[`ForgeReleaseDto::files`](asterism_contract::forge::ForgeReleaseDto::files).\n\nThe ids are arguments rather than path segments, which is what the\ncommand's own `line_id` and `change_point_id` fields exist for, and\nthe write is the owner's — see\n[`AttributionContext::owner_surface`]."
+    },
+    {
+      "path": "asterism_ui::commands::release_output_dir",
+      "kind": "function",
+      "docs": "Where the next release writes its copies.\n\n[`release_forge_change_point`] takes the directory as an argument,\nand the screen calling it cannot work one out: the setting behind it\nis empty by default, and empty means the profile home — which is\nresolved from the environment and checked against a marker, neither\nof which a webview can do. So it asks."
     },
     {
       "path": "asterism_ui::commands::remeasure_dims",

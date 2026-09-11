@@ -59,4 +59,6 @@ showing how a line got where it is.
 - `SayInForgeThreadCommand` — Says something in a conversation.
 - `SendReleaseCommand` — Puts a release's stamped copies on a destination's host.
 - `SetForgeLineStrategyCommand` — Points a line at a different rule.
+- `TransferProfileDto` — One destination profile, as the transport's own parser reads it.
+- `TransferProfileListDto` — Every destination profile this machine holds, and where they live.
 

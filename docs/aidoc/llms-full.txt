@@ -433,6 +433,8 @@ showing how a line got where it is.
 - `SayInForgeThreadCommand` — Says something in a conversation.
 - `SendReleaseCommand` — Puts a release's stamped copies on a destination's host.
 - `SetForgeLineStrategyCommand` — Points a line at a different rule.
+- `TransferProfileDto` — One destination profile, as the transport's own parser reads it.
+- `TransferProfileListDto` — Every destination profile this machine holds, and where they live.
 
 
 <!-- asterism_contract/query.md -->
@@ -14518,7 +14520,9 @@ library.
 - [`http`](http.md): HTTP transport — axum router.
 - [`mcp`](mcp.md): MCP transport — the third adapter over the same application services.
 - [`mcp_proxy`](mcp_proxy.md): MCP stdio proxy — the lifecycle-aware entry point MCP clients spawn.
+- [`release_dirs`](release_dirs.md): The two registered directories the release surface uses, resolved.
 - [`state`](state.md): Backend context for the standalone server. Thin wrapper over the
+- [`transfer_profiles`](transfer_profiles.md): The destination profiles a send can be aimed with, listed from disk.
 
 
 <!-- asterism_server/attribution.md -->
@@ -14777,6 +14781,59 @@ manual app quit + relaunch) does not strand the MCP session.
 - `McpProxy` — The stdio-facing MCP server that relays to the app's `/mcp`.
 
 
+<!-- asterism_server/release_dirs.md -->
+# asterism-server::release_dirs
+
+The two registered directories the release surface uses, resolved.
+
+[`release.output_dir`] names where a change point is written out to
+and [`send.profile_dir`] names where destination profiles are read
+from. Both are
+[`Text`](asterism_core::domain::app_setting::SettingValueKind::Text)
+keys in
+[`SETTING_REGISTRY`](asterism_core::domain::app_setting::SETTING_REGISTRY),
+and both default to the empty string.
+
+# Why the empty string, and why this module exists
+
+A registry default is a `&'static str`, and neither of these paths
+is a constant: the profile home is resolved at run time from
+`$ASTERISM_HOME` and `$ASTERISM_PROFILE`, differs between two
+processes of the same build, and is verified against a marker on the
+way out. There is nothing to write into the registry, so the empty
+string is what it writes, and it means "the profile home's own".
+
+That convention needs exactly one reader, or it becomes two
+resolvers that disagree the first time somebody changes the leaf
+name. This module is it. Both transports call in here rather than
+joining a path of their own, and the frontend is handed the answer
+rather than deriving it — it cannot read the environment at all, and
+a second copy of the rule in TypeScript is the copy nobody would
+edit.
+
+# A value somebody set is used as typed
+
+Only the empty case reaches the profile home. A path a person put in
+the settings screen is taken as it stands and never joined onto
+anything, because a setting that silently became a subdirectory of
+itself is a value that cannot be pointed anywhere.
+
+[`release.output_dir`]: asterism_core::domain::app_setting::SETTING_REGISTRY
+[`send.profile_dir`]: asterism_core::domain::app_setting::SETTING_REGISTRY
+
+## Functions
+
+- `output_dir` — Where the next release writes its copies.
+- `profile_dir` — Where destination profiles are read from.
+- `resolved_output_dir` — Where the next release writes its copies, read from the registry.
+- `resolved_profile_dir` — Where destination profiles are read from, read from the registry.
+
+## Constants
+
+- `OUTPUT_DIR_KEY` — The registry key naming where a release writes its copies.
+- `PROFILE_DIR_KEY` — The registry key naming where destination profiles are read from.
+
+
 <!-- asterism_server/state.md -->
 # asterism-server::state
 
@@ -14797,6 +14854,55 @@ bus in this process.
 ## Types
 
 - `ServerCtx` — Bundle of services that HTTP handlers share via `axum` state.
+
+
+<!-- asterism_server/transfer_profiles.md -->
+# asterism-server::transfer_profiles
+
+The destination profiles a send can be aimed with, listed from disk.
+
+A profile is one JSON file in the directory
+[`release_dirs::profile_dir`](crate::release_dirs::profile_dir)
+resolves, holding the transfer exporter's params minus the one key
+the send writes. Files rather than rows, and a list rather than an
+editor: the app reads this directory, validates what is in it and
+lets somebody choose, and never writes to it. What an agency's
+intake asks for moves on that agency's schedule, so the columns a
+sidecar carries live in the file, and nothing in this tree knows any
+of them.
+
+# The parser is the sender's
+
+[`asterism_exporter_transfer::read_profile`] is what answers for
+each file, which is the same `serde_json::from_value` over the same
+struct that `dispatch` runs, plus the refusals the send makes before
+a connection opens. A list that blessed a profile the send then
+refused would be the failure this listing exists to prevent, so the
+two do not get separate opinions. That is also why this module sits
+in `asterism-server`: it is the crate that already builds the
+exporter registry, so it can name the transfer crate's parser
+without the desktop crate taking a dependency on an adapter it does
+not otherwise know about.
+
+# A file that does not parse is listed, with its reason
+
+Dropping it would leave somebody editing a file the app has stopped
+mentioning, wondering why it never appears. It is listed, carrying
+the parser's own sentence, and it cannot be picked.
+
+# A directory that is not there is empty rather than broken
+
+Nothing creates this directory: the first profile is written by
+hand, and until then there is nothing to read. "No profiles" and "no
+directory" are the same answer to the only question the screen asks,
+and the directory travels with the list so the answer says where to
+put one. A directory that exists and cannot be read is a different
+matter and is reported as itself.
+
+## Functions
+
+- `list` — Every profile in `dir`, by name.
+- `read_body` — One profile's text, by the name the listing gave it.
 
 
 <!-- asterism_teams_client/index.md -->
@@ -15697,6 +15803,7 @@ other.
 - `list_team_device_tokens` — The device tokens this account holds, on whatever machines.
 - `list_thread_messages` — Lists the Messages of a Thread.
 - `list_threads` — Lists Threads under the given anchor, freshest first. Archived
+- `list_transfer_profiles` — Every destination profile this machine holds, and where they were
 - `merge_assets` — The manual merge verb: a person's ruling that a set of rows is one
 - `merge_groups` — Merges one manual group into another and deletes the source
 - `merge_tags` — Folds one tag channel into another and deletes the source — the
@@ -15725,6 +15832,7 @@ other.
 - `push_forge_round` — Writes a round.
 - `push_shared_round` — Writes a round into open work on a shared line.
 - `random_assets` — A random handful out of the current filter — the sidebar's
+- `read_transfer_profile` — One destination profile's text, whole.
 - `rebuild_edges` — Enqueues an incremental constellation-edge rebuild for the asset.
 - `rebuild_index` — Enqueues a batch `IndexRebuild` job and returns its task id — the
 - `rebuild_sessions` — Enqueues a `SessionRebuild` job. The precomputed rkyv snapshot
@@ -15735,6 +15843,7 @@ other.
 - `rehome_dropped_path` — Rehomes a dropped path into `$HOME/asterism/dropped/`
 - `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
 - `release_forge_change_point` — Freezes what a change point carried, copies it into a directory, and
+- `release_output_dir` — Where the next release writes its copies.
 - `remeasure_dims` — Re-reads artefacts and rewrites `width_px` / `height_px` — the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
 - `remove_team_member` — Removes a member from the team.
