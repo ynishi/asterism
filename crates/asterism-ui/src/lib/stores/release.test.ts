@@ -28,6 +28,7 @@ import { api } from "../api";
 import { mutate } from "../mutate";
 import { dispatchCatalog } from "./dispatch.svelte";
 import { releaseCatalog } from "./release.svelte";
+import { undoToastCatalog } from "./undo-toast.svelte";
 
 vi.mock("../api", () => ({ api: vi.fn() }));
 vi.mock("../mutate", () => ({ mutate: vi.fn() }));
@@ -113,6 +114,7 @@ beforeEach(() => {
   releaseCatalog.byPoint = {};
   releaseCatalog.dispatches = {};
   releaseCatalog.outputDir.reset();
+  undoToastCatalog.refusal = null;
 });
 
 describe("opening a release", () => {
@@ -237,6 +239,24 @@ describe("writing a change point out", () => {
     // Re-read rather than incremented: the count is the record's.
     expect(releaseCatalog.byPoint.c1).toHaveLength(2);
     expect(releaseCatalog.openId).toBe("r2");
+  });
+
+  /// **A directory nobody answered for is not a directory.** The read
+  /// falls back to the empty string, and sending that on had the
+  /// exporter refuse a path it could not write to *after* the release
+  /// row was already recorded — a dead release left behind by a
+  /// refusal the store could have made first.
+  it("refuses to write out when the directory could not be read", async () => {
+    apiMock.mockImplementation((async (cmd: string) => {
+      if (cmd === "release_output_dir") throw new Error("the backend said no");
+      throw new Error(`unexpected read: ${cmd}`);
+    }) as unknown as typeof api);
+
+    await expect(releaseCatalog.writeOut("L1", "c1", "p1")).rejects.toThrow();
+    // Nothing was written, so there is no release to be left behind.
+    expect(mutateMock).not.toHaveBeenCalled();
+    // And the refusal reached the screen rather than only the console.
+    expect(undoToastCatalog.refusal).not.toBeNull();
   });
 });
 

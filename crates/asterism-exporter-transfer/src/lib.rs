@@ -222,15 +222,32 @@ pub struct ProfileFacts {
 /// struct. A profile this accepts and the send then refuses on its
 /// shape is therefore not a state these two can be in.
 ///
-/// It goes as far as the send goes before a connection opens, and stops
-/// there: the endpoint is read, the host key is checked for naming one
-/// thing rather than neither or both, and `ftp://` without the opt-in
-/// and `sftp://` without a host key are refused. What it does **not**
-/// do is resolve credentials. `auth` names environment variables rather
-/// than holding values, and reading them here would put a resolved
-/// secret one step away from a list that exists to be rendered; a
-/// variable that is not set is the dispatch's refusal to make, at the
-/// moment somebody asked for the send.
+/// It mirrors the send up to and including the scheme check and the
+/// sidecar's filename: the endpoint is read, the host key is checked
+/// for naming one thing rather than neither or both, `ftp://` without
+/// the opt-in and `sftp://` without a host key are refused, and
+/// [`check_remote_name`] answers for `sidecar.filename` — a name with a
+/// separator in it is a profile that would be refused the moment it was
+/// chosen, and that check needs no file list to run.
+///
+/// Two things past that are the dispatch's and are **not** checked
+/// here, each for its own reason.
+///
+/// **Credentials.** `auth` names environment variables rather than
+/// holding values, and reading them here would put a resolved secret
+/// one step away from a list that exists to be rendered; a variable
+/// that is not set is the dispatch's refusal to make, at the moment
+/// somebody asked for the send.
+///
+/// **The template plan.** `remote_name_template` and every sidecar
+/// column render against a bound item — a file of the release, and the
+/// card it was copied from — so whether they resolve is a question
+/// about a release rather than about a profile, and there is no release
+/// in hand when a directory is listed. A profile whose templates do not
+/// render is therefore listed as usable and refused by the send, which
+/// is the one gap left between this and `dispatch` and is left open
+/// deliberately rather than answered with a guess against an empty
+/// item.
 ///
 /// The error is the sentence to show beside the file. A profile that
 /// does not parse is still listed — a file whose error nobody can see
@@ -253,6 +270,7 @@ pub fn read_profile(profile: &Value) -> Result<ProfileFacts, String> {
     let target = read_endpoint(&params.endpoint).map_err(|err| err.to_string())?;
     let host_key = host_key_of(&params).map_err(|err| err.to_string())?;
     check_scheme(&target, &params, host_key.as_ref()).map_err(|err| err.to_string())?;
+    check_remote_name(&params.sidecar.filename).map_err(|err| err.to_string())?;
     Ok(ProfileFacts {
         scheme: target.scheme.as_str(),
         host: target.host,
@@ -1672,6 +1690,28 @@ mod tests {
         profile.as_object_mut().unwrap().remove("sidecar");
         let refused = read_profile(&profile).expect_err("sidecar is not optional");
         assert!(refused.contains("sidecar"), "{refused}");
+    }
+
+    /// The sidecar's own name is a path segment, and the picker says so
+    /// rather than leaving it to the send.
+    ///
+    /// This is the check the first version of `read_profile` left out
+    /// while its doc claimed to go as far as the send goes: a profile
+    /// naming `"../x.csv"` was listed as usable and refused the moment
+    /// it was chosen. It needs no file list, which is why it belongs on
+    /// this side of the line and the template plan does not.
+    #[test]
+    fn reading_a_profile_refuses_a_sidecar_filename_that_is_not_one_segment() {
+        for bad in ["../escape.csv", "nested/metadata.csv", "..", ""] {
+            let mut profile = example_profile();
+            profile.as_object_mut().unwrap()["sidecar"]["filename"] = serde_json::json!(bad);
+            let refused =
+                read_profile(&profile).expect_err("a sidecar filename is one path segment");
+            assert!(
+                refused.contains("one path segment"),
+                "{bad:?} gave {refused}"
+            );
+        }
     }
 
     /// The two refusals `check_scheme` makes are the picker's as well.

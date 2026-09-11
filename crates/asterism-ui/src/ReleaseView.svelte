@@ -49,14 +49,22 @@
   // went. The control beside it copies that path.
   //
   // It copies rather than revealing in a file manager, and that is the
-  // settled answer to #280's open question rather than a stopgap. Three
-  // things decide it. Linux has no single file manager to reveal in, so
-  // a fallback has to exist on every platform that has one. Reaching one
-  // from the webview needs a capability this app's `default.json` does
-  // not grant and an npm package its lockfile does not carry — a change
-  // to the app's permission surface, bought for a convenience. And one
-  // behaviour everywhere is a behaviour the e2e can assert; a reveal is
-  // a window nothing can read. So the button says what it does.
+  // settled answer to #280's open question rather than a stopgap.
+  //
+  // Reaching a file manager is not the part that was impossible.
+  // `tauri-plugin-opener` is linked and initialised, and a Rust command
+  // already uses it for the sign-in browser hop, so a reveal command
+  // beside that one was available. What is not available is the *direct*
+  // route from the webview, which would need an npm package the
+  // lockfile does not carry and a capability `capabilities/default.json`
+  // does not grant.
+  //
+  // The Rust route was not taken for the other two reasons. Linux has
+  // no single file manager to reveal in, so a copy-path fallback has to
+  // exist wherever one does — and a control that reveals on two
+  // platforms and copies on the third is two behaviours to explain. And
+  // one behaviour everywhere is one the e2e can assert, where a reveal
+  // opens a window nothing can read. So the button says what it does.
   import { api } from "./lib/api";
   import { releaseCatalog, isTerminal } from "./lib/stores/release.svelte";
   import { readAttempt, attemptSummary } from "./lib/attempt-record";
@@ -121,10 +129,9 @@
 
   /// What the signed-manifest half says, in three readings.
   ///
-  /// `no_signing_identity` is the one this build produces on every file
-  /// — the composition root builds the disclosure writer unsigned — so
-  /// it is the one reading written out as a sentence rather than shown
-  /// as a token.
+  /// `no_signing_identity` is what a build with no certificate
+  /// configured produces on every file, so it is the one reading
+  /// written out as a sentence rather than shown as a token.
   function manifestReads(file: ForgeReleaseFileDto): string {
     if (file.manifest.state === "written") return "stamped";
     if (file.manifest.state === "skipped") {
@@ -166,8 +173,8 @@
   /// one — `TransferProfileDto` explains why it stopped leaving them
   /// out — and this is the belt: a strict comparison against `null` is
   /// what made every profile in this picker unpickable the first time,
-  /// and the check is in one place now rather than at each of the three
-  /// sites that ask.
+  /// and the check is in one place now rather than at each site that
+  /// asks.
   function usable(profile: { error: string | null }): boolean {
     return profile.error == null;
   }
@@ -194,9 +201,8 @@
     sending = true;
     try {
       // A picked profile is read from its file here rather than held in
-      // the list: the list carries a summary built to be rendered, and
-      // the send needs the profile whole — including the auth block the
-      // summary deliberately leaves out.
+      // the list; `transfer_profiles::read_body` says why the listing
+      // is not enough to send with.
       //
       // **Its own arm, because it is not a `mutate`.** This read goes
       // through `api`, which hands a failure back and says nothing —
@@ -413,7 +419,12 @@
           {/if}
           {#if record.files.length > 0}
             <ul class="rel-attempt-files" role="list">
-              {#each record.files as row (row.source)}
+              <!-- Keyed by position. `source` is the obvious key and is
+                   the wrong one: the parser defaults a missing field to
+                   the empty string, so a record from another build
+                   could hand two rows the same key. The order the run
+                   reported is what these rows are. -->
+              {#each record.files as row, at (at)}
                 <li>
                   <span class="rel-name" title={row.source}>{row.name}</span>
                   <span class={row.outcome === "sent" ? "ok" : "bad"}>
@@ -449,9 +460,10 @@
         Profiles in <code>{profiles.directory}</code>
       </p>
       {#if profiles.profiles.length === 0}
-        <!-- Nothing creates this directory, so an empty list is the
-             state before the first profile is written rather than a
-             failure. It says where one goes. -->
+        <!-- An empty list is a state rather than a failure, and the
+             directory above is what it explains — `transfer_profiles`
+             argues that. What this adds is where a first profile comes
+             from, which is the question a person standing here has. -->
         <p class="rel-empty">
           No profile here yet. A profile is one JSON file in that
           directory; <code>asterism-server schema print

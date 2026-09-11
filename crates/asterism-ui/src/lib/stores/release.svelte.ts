@@ -42,12 +42,13 @@
 //
 // No profile editing. A destination profile is a JSON file in a
 // directory, listed and validated by `list_transfer_profiles` and
-// chosen; the app never writes one. An agency's intake requirements
-// move on that agency's schedule, so a form over them would put
-// somebody else's policy in this tree on somebody else's schedule.
+// chosen; the app never writes one. `asterism-server`'s
+// `transfer_profiles` is where profiles are described and why they are
+// files rather than rows.
 import { api } from "../api";
 import { mutate } from "../mutate";
 import { dispatchCatalog } from "./dispatch.svelte";
+import { undoToastCatalog } from "./undo-toast.svelte";
 import { Resource } from "./_resource.svelte";
 import type {
   DispatchDto,
@@ -104,8 +105,8 @@ class ReleaseCatalog {
   /// The destination profiles this machine holds, and where from.
   ///
   /// The directory travels with the list because it is what an empty
-  /// list has to explain: nothing creates it, so the first profile is
-  /// written by hand and somebody has to be told where.
+  /// list has to explain; `asterism-server`'s `transfer_profiles` says
+  /// why a missing directory is an empty list rather than a failure.
   profiles = new Resource<void, TransferProfileListDto | null>(
     async () => api<TransferProfileListDto>("list_transfer_profiles", {}),
     null,
@@ -134,11 +135,8 @@ class ReleaseCatalog {
   /// asks for every point it is drawing and only the ones it is
   /// missing are fetched.
   ///
-  /// One read per change point, because that is the read there is —
-  /// releases are listed under the point they name and there is no
-  /// line-wide list. Adding one would be a command on the backend
-  /// surface for a count on a screen, which is a bigger change than
-  /// the screen is.
+  /// One read per change point, because that is the read there is:
+  /// releases are listed under the point they name.
   byPoint = $state<Record<string, ForgeReleaseDto[]>>({});
 
   /// Which line `byPoint` is about.
@@ -231,6 +229,25 @@ class ReleaseCatalog {
     personaId: string,
   ): Promise<void> {
     await this.outputDir.load(undefined);
+    // **A directory nobody answered for is not a directory.** `Resource`
+    // falls back to its initial value when a read fails, which here is
+    // the empty string — and sending that on would have the exporter
+    // refuse a path it cannot write to, after the release row had
+    // already been recorded. The refusal is the same either way; what
+    // differs is that this one leaves no release behind.
+    if (!this.outputDir.answered || this.outputDir.data.trim() === "") {
+      // Raised the way `mutate` raises one, because it is the same kind
+      // of answer: the thing the person asked for did not happen, and a
+      // refusal only the console hears is the defect `lib/mutate.ts`
+      // exists to prevent. It is not routed *through* `mutate` because
+      // nothing was invoked — there is no command to blame.
+      undoToastCatalog.refuse(
+        "Could not write this change point out.",
+        this.outputDir.error ??
+          "the directory to write into could not be read from the settings",
+      );
+      throw new Error("no output directory");
+    }
     const released = await mutate<ForgeReleaseDto>(
       "release_forge_change_point",
       {

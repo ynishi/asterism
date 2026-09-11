@@ -205,11 +205,23 @@
   //
   // A freeze belongs to one persona and refuses a set spanning two, so
   // the write needs one named. The line does not carry an owner —
-  // grouping and access are outside the forge — and the only thing here
-  // that knows a persona is a card the library answered for. So this
-  // reads the cards already loaded for what the point moved, and says
-  // null rather than guessing when the point moved no content or the
-  // cards have not arrived.
+  // grouping and access are outside the forge — and what knows a
+  // persona here is a card the library answered for. So this reads the
+  // cards already loaded for what the point moved, and says null rather
+  // than guessing when the point moved no content or no card has
+  // arrived.
+  //
+  // **It keeps looking past a row it cannot answer from.** A change
+  // point's rows are not all content — one may move a name alone, and a
+  // card for one that does carry content may not have landed yet — so a
+  // row that cannot say is skipped rather than taken as the answer.
+  // Reading the first row's card and stopping would disable the verb on
+  // a point whose first row happens to be a rename.
+  //
+  // What it does **not** do is check that the rest agree. A point whose
+  // content spans two personas answers with the first, and the freeze
+  // refuses the set — which is the backend keeping its own rule, the
+  // same division `releaseCatalog.send` argues for at the send button.
   //
   // Not `activeFilter.activePersona`: that is a grid filter and is null
   // whenever the grid is showing everything, which is the ordinary
@@ -270,8 +282,10 @@
   // an overlay over this one and is reached from a row in the chain, so
   // leaving it standing over a closed forge would leave somebody
   // reading a release whose line is no longer selected. One effect
-  // rather than a call beside each of the three closes in the markup,
-  // for the reason the store gives about clears written at call sites.
+  // rather than a call beside each close, for the reason the store
+  // gives about clears written at call sites — and the panel is not the
+  // only thing that closes it, so a call at each of *these* sites would
+  // miss the others anyway.
   $effect(() => {
     if (!forgeCatalog.open && releaseCatalog.openId !== null) {
       releaseCatalog.close();
@@ -631,13 +645,10 @@
                    drawer.
 
                    Disabled when nothing here can say which persona the
-                   frozen set belongs to. A freeze is scoped to one
-                   persona and refuses a mixed set, and this screen only
-                   knows a persona through the cards it has already read
-                   for the entries on the line — a point that moved only
-                   names carries no content to read one from. Saying so
-                   is better than sending the write off to be refused
-                   for a reason nobody could have seen. -->
+                   frozen set belongs to — `personaFor` says how it
+                   answers and when it cannot. Saying so is better than
+                   sending the write off to be refused for a reason
+                   nobody could have seen. -->
               <button
                 class="write-out"
                 disabled={personaFor(point) === null}

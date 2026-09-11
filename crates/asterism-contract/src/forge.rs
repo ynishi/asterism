@@ -886,20 +886,20 @@ pub struct SendReleaseCommand {
 
 /// One destination profile, as the transport's own parser reads it.
 ///
-/// A profile is a JSON file in a directory, not a row in a table: the
-/// app lists, validates and selects one, and never edits it. An
-/// agency's intake requirements move on that agency's schedule, so the
-/// columns a sidecar carries live in the file and nothing in the tree
-/// knows any of them.
+/// What a profile is, why it is a file rather than a row, and why one
+/// that does not parse is listed rather than dropped are all the
+/// listing's — this crate names no Asterism crate and so cannot link at
+/// it, which is why nothing here restates the argument.
 ///
-/// Either the endpoint fields are present or [`error`](Self::error) is
-/// — never both, never neither. A file that does not parse is still
-/// listed, because a file whose error nobody can see is one somebody
-/// edits blind; it simply cannot be picked.
+/// **Either the endpoint fields are present or [`error`](Self::error)
+/// is — never both, never neither.** That is this type's own rule and
+/// the reason it has four optional fields rather than an enum: the wire
+/// is JSON a TypeScript client reads, and a tagged union would put a
+/// discriminant in front of every row for a distinction the fields
+/// already make.
 ///
 /// The account and the environment variables its credential is named in
-/// are **not** here, and that is the point rather than an omission.
-/// Nothing resolved from the environment reaches a screen, and a
+/// are **not** here, and that is the point rather than an omission: a
 /// summary built to be rendered is the last place a secret should pass
 /// through.
 /// # Absent is written as `null`, not left out
@@ -909,10 +909,10 @@ pub struct SendReleaseCommand {
 /// an `Option<String>` as `string | null`, so a field dropped from the
 /// payload arrives in TypeScript as `undefined` while the binding says
 /// it cannot be — and `error !== null` is then true for a profile that
-/// has no error at all. That is not hypothetical: it shipped, and every
-/// profile in the picker came up refused and unpickable because of it.
-/// The wire says `null` so that the type the frontend is compiled
-/// against is the type it receives.
+/// has no error at all. That is not hypothetical: it landed on this
+/// branch, and every profile in the picker came up refused and
+/// unpickable because of it. The wire says `null` so that the type the
+/// frontend is compiled against is the type it receives.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct TransferProfileDto {
     /// The file's own name, without the `.json`. What a person picks by.

@@ -4192,10 +4192,10 @@ async fn list_forge_release_sends(
 /// `GET /asterism/forge/transfer-profiles` — every destination profile
 /// this machine holds, and the directory they were read from.
 ///
-/// A read of the filesystem rather than of the database, and
-/// [`transfer_profiles`](crate::transfer_profiles) says why profiles
-/// are files. A file that does not parse is a row carrying its reason,
-/// so this answers with a list rather than refusing.
+/// A read of the filesystem rather than of the database;
+/// [`transfer_profiles`](crate::transfer_profiles) is where profiles
+/// are described and is why this answers with a list rather than
+/// refusing.
 async fn list_transfer_profiles(
     State(ctx): State<Arc<ServerCtx>>,
 ) -> ApiResult<TransferProfileListDto> {
@@ -4206,10 +4206,9 @@ async fn list_transfer_profiles(
 /// `GET /asterism/forge/transfer-profiles/{name}` — one profile's text,
 /// whole.
 ///
-/// The listing is a summary; a send needs the `auth` block it leaves
-/// out. `name` is one file in the resolved directory and
 /// [`transfer_profiles::read_body`](crate::transfer_profiles::read_body)
-/// refuses anything that would leave it.
+/// says why the listing is not enough to send with, and what `name` may
+/// be.
 async fn read_transfer_profile(
     State(ctx): State<Arc<ServerCtx>>,
     Path(name): Path<String>,
@@ -4223,9 +4222,8 @@ async fn read_transfer_profile(
 ///
 /// The caller of a release names the directory, and
 /// [`release_dirs`](crate::release_dirs) is what turns the registered
-/// setting into one. Its own route because the setting is empty by
-/// default and empty means the profile home, which nothing outside this
-/// process can work out.
+/// setting into one. Its own route because that resolution reads the
+/// environment, which nothing outside this process can do.
 async fn release_output_dir(State(ctx): State<Arc<ServerCtx>>) -> ApiResult<String> {
     let dir = crate::release_dirs::resolved_output_dir(&ctx.app_setting_service).await?;
     Ok(Json(dir.display().to_string()))

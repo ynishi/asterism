@@ -32,13 +32,15 @@ and this project adheres to
   schedule and a form over it would put somebody else's policy in this tree. A
   profile that does not parse is listed with its reason and cannot be picked.
   **Nothing resolved from the environment reaches the screen**: a profile names
-  environment variables and the list shows the names. Two settings join the
+  environment variables to read a credential from, and the list carries neither
+  the values nor the names — it answers with the endpoint's scheme, host and
+  directory, and the account block stays in the file. Two settings join the
   preferences screen, `release.output_dir` and `send.profile_dir`, both empty by
-  default, which means the profile home's own directory. Progress is read back
-  off the records rather than held beside them, so a reload shows what a run
-  actually did. **The generative-AI declaration is still the contributor's
-  step** and the screen says so under the send button; no uploader anywhere
-  ticks that box, and this one names no agency.
+  default, which means `releases/` and `transfer/` under the profile home.
+  Progress is read back off the records rather than held beside them, so a
+  reload shows what a run actually did. **The generative-AI declaration is still
+  the contributor's step** and the screen says so under the send button; no
+  uploader anywhere ticks that box, and this one names no agency.
 
 - **A release can be sent to an agency's host** (#278, part of #13, split from
   #254). A release left a stamped set on a disk and stopped there. Sending one

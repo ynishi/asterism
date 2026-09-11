@@ -4846,10 +4846,10 @@ pub async fn list_forge_release_sends(
 /// read from.
 ///
 /// Profiles are JSON files in a directory a registered setting names,
-/// and each is validated with the transport's own parser — a list that
-/// blessed one the send then refused is the failure the listing exists
-/// to prevent. `asterism_server::transfer_profiles` is the whole of it;
-/// this command resolves the directory and hands it over.
+/// each validated with the transport's own parser.
+/// `asterism_server::transfer_profiles` is the whole of it, and says
+/// how far that validation goes; this command resolves the directory
+/// and hands it over.
 ///
 /// A read, so it names no surface. The write it feeds is
 /// [`send_forge_release`], which does.
@@ -4864,13 +4864,9 @@ pub async fn list_transfer_profiles(
 
 /// One destination profile's text, whole.
 ///
-/// [`list_transfer_profiles`] answers with a summary built to be
-/// rendered — scheme, host, directory — and a send needs the profile as
-/// it stands, `auth` block included. Read when a profile is chosen
-/// rather than carried in the listing, so choosing is what fetches one.
-///
-/// `name` is one file in the resolved profile directory, and
-/// `transfer_profiles::read_body` refuses a name that would leave it.
+/// `transfer_profiles::read_body` says why the listing beside this one
+/// is not enough to send with, and what `name` may be; this command
+/// resolves the directory and hands it over.
 #[tauri::command]
 pub async fn read_transfer_profile(
     state: State<'_, AppState>,

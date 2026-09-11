@@ -9,11 +9,9 @@
 //
 // # Why a module rather than a function in the drawer
 //
-// Two reasons, and only the second is about today. The rows are the
-// same rows for every dispatch, not only for a send, so
-// `DispatchHistoryPanel` is where they go next (#280 keeps that as its
-// own change, because wiring them there is a question about that panel
-// rather than about this record). And a parser is the half worth
+// Two reasons. The rows are the same rows for every dispatch rather
+// than only for a send, so nothing about them belongs to the screen
+// that happens to read them first. And a parser is the half worth
 // testing without a DOM: what it has to survive is a record written by
 // a build that is not this one.
 //

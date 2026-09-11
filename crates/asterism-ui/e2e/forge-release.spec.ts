@@ -9,9 +9,12 @@
 // `"release_forge_change_point"` with a shape its own author wrote down
 // twice. Whether a command of that name exists, takes those arguments
 // and answers with what `bindings.ts` claims is a question only a
-// webview spec against the real binary can ask. Three commands reached
-// that way here, and the two writes have never been pressed by anything
-// but a test harness.
+// webview spec against the real binary can ask. What this walk puts
+// through that question: `release_forge_change_point`,
+// `get_forge_release`, `list_forge_releases_of_change_point`,
+// `release_output_dir`, `list_transfer_profiles`,
+// `read_transfer_profile`, `send_forge_release`,
+// `list_forge_release_sends` and `get_dispatch`.
 //
 // # Why one long walk
 //
@@ -61,11 +64,11 @@
 //
 // # Why this one seeds its own asset
 //
-// It is the first spec whose subject reads an asset's *bytes*. Every
-// other one works on rows: `forge-pursuit.spec.ts` puts a card on a
-// line and never opens the file behind it, so a row pointing at nothing
-// passes it. A release copies those bytes and stamps the copy, so the
-// file has to be there.
+// Its subject reads an asset's *bytes*, where the forge specs beside it
+// work on rows: `forge-pursuit.spec.ts` puts a card on a line and never
+// opens the file behind it, so a row pointing at nothing passes it. A
+// release copies those bytes and stamps the copy, so the file has to be
+// there.
 //
 // It is not, for the fixtures already in this profile. The e2e home is
 // `workspace/runtime/e2e` under the *main* checkout — `workspace/` is a
@@ -130,14 +133,22 @@ const PACK_ID = "e2e-forge-release";
 const PERSONA_NAME = "Forge releases";
 const COVER = "e2e-forge-release-fixture";
 
-/// A real 1×1 PNG.
+/// A real 1×1 PNG: one fully transparent RGBA pixel.
+///
+/// **Where these bytes came from.** They are a PNG encoder's minimal
+/// output for a 1×1 RGBA image with every channel zero — signature,
+/// `IHDR`, a single-pixel `IDAT` and `IEND`, generated for this fixture
+/// and not taken from any test corpus or sample set. Nothing here is
+/// third-party material, so there is no licence or notice travelling
+/// with it; PUBLIC_DEVELOPMENT.md asks that a file which did not
+/// originate here say where it came from, and this one says that it
+/// originated here.
 ///
 /// A real container rather than a placeholder with a `.png` on it,
 /// because the whole point of the rows this spec reads is what the
 /// disclosure writer did to the copy — and it has to open the file to
-/// do anything at all. The bytes are decoded from base64 so the fixture
-/// is one line here rather than a binary in the tree, which is also a
-/// file this repository would then be redistributing.
+/// do anything at all. Held as base64 so the fixture is one constant
+/// rather than a binary the repository would be redistributing.
 const ONE_PIXEL_PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAE" +
   "hQGAhKmMIQAAAABJRU5ErkJggg==";
