@@ -227,10 +227,9 @@ fn to_day_filter(query: &ListAssetsQuery) -> Result<Option<DayFilter>, DomainErr
             DayAsk::DayOfYear { month, day }
         }
         (None, _) => {
-            // One end alone is a half-open ask; the other end is the
-            // calendar's own limit. `NaiveDate::MIN` / `MAX` are outside
-            // any zone's rule table, so the range is clamped to what the
-            // tz database can open rather than to the type's extremes.
+            // One end alone is a half-open ask. The two defaults are the
+            // wire's stated floor and ceiling (`ListAssetsQuery::day_from`
+            // / `day_until`), not this function's choice.
             let from = match &query.day_from {
                 Some(raw) => parse_day(raw, "day_from")?,
                 None => NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch"),

@@ -38,10 +38,13 @@
 //! the gap where a zone's rule skipped that midnight — and where that
 //! falls is the zone's rule for that year: a daylight-saving transition
 //! moves it without a line of code here noticing. What is deliberately
-//! not handled, and stated once so nobody looks for it: a day a zone
-//! repeats or shortens is still 24 hours from its start, and a date a
-//! zone skipped whole at the date line is a date its calendar does not
-//! have; nothing here corrects for either.
+//! not handled, and stated once so nobody looks for it: the window
+//! [`day_window`] opens for a day a zone repeats or shortens is still
+//! 24 hours from its start (a range cut takes midnight to midnight
+//! instead, and a zoned row is matched on its calendar day — neither
+//! reads this window's length), and a date a zone skipped whole at the
+//! date line is a date its calendar does not have; nothing here
+//! corrects for either.
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use chrono_tz::Tz;
@@ -317,8 +320,10 @@ pub fn local_date(zone: Tz, instant: DateTime<Utc>) -> NaiveDate {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DayAsk {
     /// Days from `from` (inclusive) to `until` (exclusive). Both are
-    /// real calendar dates by construction — `NaiveDate` cannot hold
-    /// 30 February — so [`day_window`] answers for both.
+    /// real calendar dates — `NaiveDate` cannot hold 30 February —
+    /// but [`day_window`] can still answer `None` for either: a date
+    /// the zone's own calendar lacks (Samoa's 30 December 2011), which
+    /// the range then does not open.
     Range {
         /// First day, inclusive.
         from: NaiveDate,
@@ -378,9 +383,10 @@ impl DayFilter {
                     }],
                     // Inverted or empty: nothing, on the terms the raw
                     // occurrence window sets (an empty page, not an
-                    // error). Neither end can fail to open — both are
-                    // real dates — so the `None` arms are unreachable
-                    // and fold into the same answer.
+                    // error). An end the zone's calendar lacks — a date
+                    // skipped at the date line, see `day_window` —
+                    // answers `None` and lands here too: the module doc
+                    // says that case is not corrected for.
                     _ => Vec::new(),
                 }
             }

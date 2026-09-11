@@ -168,6 +168,13 @@ pub struct ListAssetsQuery {
     /// viewer who is not there, which is the kind of wrong nobody
     /// reports. A string the calendar does not parse (`2026-02-30`) is
     /// a validation error for the reason `rating_max = 0` is.
+    ///
+    /// Either end alone is a filter: `day_until` without this field
+    /// asks for everything before that day. **The open start is
+    /// 1970-01-01.** A row whose resolved time falls before it is
+    /// reached by naming `day_from` — the floor is a stated bound, not
+    /// the calendar's edge, and a caller with older material writes the
+    /// date it means.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub day_from: Option<String>,
     /// Last calendar day of the range, **exclusive**, same form and
@@ -178,6 +185,10 @@ pub struct ListAssetsQuery {
     /// half-open range composes with the next one without overlap. An
     /// inverted pair is likewise not rejected and returns an empty
     /// page, matching that window rather than the rating band.
+    ///
+    /// Alone, it is "everything from the open start up to this day";
+    /// `day_from` alone is "this day onward", with the open end at
+    /// 2200-01-01. The exclusive reading holds either way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub day_until: Option<String>,
     /// One month-and-day across every year — "what happened on this
