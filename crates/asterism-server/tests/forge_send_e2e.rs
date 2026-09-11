@@ -736,26 +736,14 @@ async fn a_profile_that_writes_the_sends_own_key_is_refused() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
 }
 
-/// The SFTP half, against a host somebody named.
-///
-/// `#[ignore]`d because it needs one: set `ASTERISM_TEST_SFTP_ENDPOINT`
-/// to an `sftp://host[:port]/dir`, `ASTERISM_TEST_SFTP_USER`,
-/// `ASTERISM_TEST_SFTP_FINGERPRINT` to the host key's SHA-256
-/// fingerprint as OpenSSH spells one, and either
-/// `ASTERISM_TEST_SFTP_PASSWORD` or `ASTERISM_TEST_SFTP_KEY` (a path).
-/// Run it with `--ignored`.
-///
-/// What it adds over the suite above is the protocol: the same send,
-/// through the same `Transport`, with `russh` on the other side of it.
 /// A send hangs off a release and a release goes when its line is
 /// dropped, so a line one of whose releases has been sent still drops.
 ///
-/// `forge_send.release_id` is `RESTRICT` and SQLite checks that at the
-/// statement, so a `discard` that deleted the releases without taking
-/// the sends first would be refused by the database rather than leaving
-/// a stray row — the line would become undroppable, pinned by a record
-/// of where its files went. `Lines::discard` is where what a drop takes
-/// is decided, and this is that sentence held to the adapter.
+/// A send this drop did not take fails it at the COMMIT rather than
+/// leaving a stray row, which would make the line undroppable — pinned
+/// by a record of where its files went. `SqliteForge::discard` is where
+/// that mechanism is written down; `Lines::discard` is where what a drop
+/// takes is decided, and this is that sentence held to the adapter.
 #[tokio::test]
 async fn a_line_whose_release_was_sent_can_still_be_dropped() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -765,7 +753,7 @@ async fn a_line_whose_release_was_sent_can_still_be_dropped() {
     let release_id = release["id"].as_str().expect("a release id").to_string();
     let line_id = release["line_id"].as_str().expect("a line id").to_string();
 
-    let send = ok(
+    ok(
         &router,
         post(
             &format!("/asterism/forge/releases/{release_id}/sends"),
@@ -776,7 +764,6 @@ async fn a_line_whose_release_was_sent_can_still_be_dropped() {
         ),
     )
     .await;
-    let send_id = send["id"].as_str().expect("a send id").to_string();
 
     ok(
         &router,
@@ -800,7 +787,10 @@ async fn a_line_whose_release_was_sent_can_still_be_dropped() {
         "a sent release must not pin its line: {dropped}"
     );
 
-    // The send went with the release, and the release with the line.
+    // The release went, so asking for its sends is a refusal rather
+    // than an empty list — which is the only reachable evidence the
+    // send went with it, there being no route that reads one whose
+    // release is gone.
     let (status, _) = call(
         &router,
         get(&format!("/asterism/forge/releases/{release_id}/sends")),
@@ -809,9 +799,19 @@ async fn a_line_whose_release_was_sent_can_still_be_dropped() {
     assert_eq!(status, StatusCode::NOT_FOUND, "the release went");
     let (status, _) = call(&router, get(&format!("/asterism/forge/lines/{line_id}"))).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "the line went");
-    assert!(!send_id.is_empty());
 }
 
+/// The SFTP half, against a host somebody named.
+///
+/// `#[ignore]`d because it needs one: set `ASTERISM_TEST_SFTP_ENDPOINT`
+/// to an `sftp://host[:port]/dir`, `ASTERISM_TEST_SFTP_USER`,
+/// `ASTERISM_TEST_SFTP_FINGERPRINT` to the host key's SHA-256
+/// fingerprint as OpenSSH spells one, and either
+/// `ASTERISM_TEST_SFTP_PASSWORD` or `ASTERISM_TEST_SFTP_KEY` (a path).
+/// Run it with `--ignored`.
+///
+/// What it adds over the suite above is the protocol: the same send,
+/// through the same `Transport`, with `russh` on the other side of it.
 #[tokio::test]
 #[ignore = "needs an SFTP host named by ASTERISM_TEST_SFTP_ENDPOINT"]
 async fn sftp_against_a_named_endpoint() {
