@@ -23,6 +23,14 @@ tracks. Nothing to wire up; nothing said twice.
   tree. Commit, then run them; while editing, reach for
   `just rust-test-one <crate> <cargo args>…`, which passes a filter, `--lib`, or
   `--test <name>` straight through. A whole crate is not a small unit here.
+- A change under `crates/asterism-ui/src/` is not verified until a spec in
+  `crates/asterism-ui/e2e/` drives the surface it changed and `just ui-e2e` has
+  run, in that window, on this branch. Vitest answers for a store and the HTTP
+  e2e for a route; neither answers whether the panel does what it was handed,
+  and that is the question every screen change raises. Only what the OS draws —
+  the menu bar, native dialogs — is outside its reach.
+  [CONTRIBUTING.md](CONTRIBUTING.md#verification) says what the run owes and
+  what it leaves behind.
 - The three reviews are the `review` plugin, so a checkout is not how they reach
   this machine: `/plugin install review@asterism`, same marketplace as
   `prose-shape`. When it is not installed none of the three exist — then say the

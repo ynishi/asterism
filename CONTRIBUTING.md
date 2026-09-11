@@ -129,6 +129,21 @@ change edited — plus the crates `changed-packages` names for the tests that re
 another member's files, a list `cross-member-check` holds to the tree — not what
 depends on it. `main` closes that gap on every merge.
 
+**A change to the webview is owed `just ui-e2e`, and a spec.** The suite under
+`crates/asterism-ui/e2e/` builds the app with the `wdio` feature and drives a
+real window against the disposable `dev` profile; `wdio.conf.ts` says what it is
+for. It is the one gate CI does not run — `check.yml` says why — so a branch
+that edits `crates/asterism-ui/src/` has to run it here, and a change that adds
+or moves a surface adds or extends the spec that drives that surface before the
+run. Vitest answers for a store and the HTTP e2e for a route, and a screen
+change has reached a pull request with both green and this run never made (#283,
+before this paragraph); the question the change raises is whether the window
+does what it was handed, and only this suite can say. Its reach is the webview,
+which is nearly everything: what the OS draws — the menu bar, native file
+dialogs — is outside it and stays a thing a person looks at. The run leaves
+frames, and its own comment says where. Report it like every other run: which
+specs, and what they found.
+
 **Opening a pull request does not wait on a full local run**, and it does not
 wait on a full CI run either. A pull request runs `just check-changed`, which is
 `check` with the same two substitutions `pre-push` makes — so the hosted answer
@@ -269,19 +284,20 @@ agent, the loop that works is:
 
 ```text
 issue -> just worktree-new -> implement -> just check
-      -> just ui-e2e when the change has to be seen (it leaves frames)
+      -> a spec + just ui-e2e when the change touches the webview
       -> reviewer on the issue, pub-checker + doc-reviewer on the diff
       -> commit
       -> git fetch origin -> just pre-push
       -> write the PR body to a file -> hand over push/PR
 ```
 
-The `ui-e2e` step is conditional and the condition is whether the change has to
-be _looked at_ — a colour, a layout, anything a passing assertion does not
-answer for. It is the only recipe that produces something an agent can look at,
-and its own comment says what it leaves and where; the other two ways to see the
-app, `just dev` and `just dogfood`, open a window that needs a person in front
-of it.
+The `ui-e2e` step is owed by every change under `crates/asterism-ui/src/`, for
+the reason [Verification](#verification) gives, and it is not one run but two
+things: the spec that drives the surface the change touched, and the run. It is
+also the only recipe that produces something an agent can look at — a colour, a
+layout, anything a passing assertion does not answer for — and its own comment
+says what it leaves and where; the other two ways to see the app, `just dev` and
+`just dogfood`, open a window that needs a person in front of it.
 
 Three reviews run there and they do not overlap. `reviewer` answers whether the
 change does what its issue asked; `pub-checker` answers what may be published;
