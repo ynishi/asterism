@@ -211,6 +211,11 @@
         modality: activeFilter.activeModality,
         occurred_from_ms: null,
         occurred_until_ms: null,
+        // The calendar filter, written here as well as in
+        // `saveAsQueryGroup` for the reason the bands below are: a rule
+        // that dropped it would freeze a wider set than the filter the
+        // user is looking at while re-writing the group from it.
+        ...activeFilter.dayFilter(),
         tag_ids: Array.from(activeFilter.activeTagIds),
         tag_match: activeFilter.tagMatchAll ? "all" : "any",
         group_ids: Array.from(activeFilter.activeGroupIds),

@@ -8,7 +8,7 @@
 // current selection. `navigate` is never invoked because the shell
 // window has no session history the user relies on.
 //
-// Serialised axes (6 selection + 1 sort tuple):
+// Serialised axes:
 //   p    activePersona                     (string | null)
 //   m    activeModality                    (string | null)
 //   fmt  activeFormat                      (string | null)
@@ -19,12 +19,22 @@
 //   sm   searchFuzzy                       ("e" = exact; fuzzy dropped)
 //   tm   tagMatchAll                       ("all" = AND; OR dropped)
 //   v    viewMode                          (messages/sessions/groups)
+//   day  dayFrom..dayUntil                 (YYYY-MM-DD; an open end is empty)
+//   doy  dayOfYear                         (MM-DD)
+//   tz   dayTimeZone                       (IANA name; only beside day / doy)
 //   sort <target>:<order>[:r]              (default is dropped)
 //
 // `sm` / `tm` carry *how* a predicate reads, not what is selected, and a
 // deep link that drops them would reproduce the same chips against a
 // different domain. Both encode only their non-default value, so
 // an untouched filter still serialises to the empty string.
+//
+// `day` carries the dates rather than the date-and-span the picker
+// shows, because the dates are what the store holds and what the filter
+// selects by (`Filter.dayFrom`). That is what lets a link written under
+// a range the picker cannot draw reproduce it exactly. `tz` is written
+// whenever a day is, so the link reproduces the set and not only the
+// dates: the same days in another zone are a different set.
 //
 // Intentionally omitted:
 // - activeSessionId / activeSessionLabel — drill-in ephemeral, resets on
@@ -43,6 +53,7 @@ import {
   activeFilter,
   isSortOrder,
   isSortTarget,
+  viewerTimeZone,
   type SortTarget,
   type SortOrder,
   type ViewMode,
@@ -65,6 +76,15 @@ const SEARCH_MODE_EXACT = "e";
 const KEY_TAG_MATCH = "tm";
 const TAG_MATCH_ALL = "all";
 const KEY_VIEW = "v";
+// Calendar range, `<from>..<until>`; either side may be empty for an
+// open end. `..` rather than `-`, which the dates themselves contain.
+const KEY_DAY = "day";
+const DAY_SEP = "..";
+// Day of year, `MM-DD`.
+const KEY_DAY_OF_YEAR = "doy";
+// The zone the days are read in. Written only beside one of the two
+// above; read only then.
+const KEY_TIME_ZONE = "tz";
 const KEY_SORT = "sort";
 
 const DEFAULT_VIEW: ViewMode = "messages";
@@ -81,6 +101,22 @@ function isViewMode(v: string): v is ViewMode {
 // one of two places a sort axis arrives as an unchecked string (the other
 // is a stored Query Group rule), and a second copy of the vocabulary here
 // is what has to be remembered when the union changes.
+
+// A calendar date off the query string, in the one form the store
+// takes. Shape only — whether the calendar has the day is the store's
+// question on the way in and the backend's on the way out; here a
+// malformed half reads as an open end rather than failing the link.
+function parseIsoDay(raw: string | undefined): string | null {
+  if (raw === undefined) return null;
+  const s = raw.trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+function parseDayOfYear(raw: string | null): { month: number; day: number } | null {
+  if (!raw) return null;
+  const m = /^(\d{2})-(\d{2})$/.exec(raw.trim());
+  return m ? { month: Number(m[1]), day: Number(m[2]) } : null;
+}
 
 function splitCsv(raw: string | null): string[] {
   if (!raw) return [];
@@ -150,6 +186,32 @@ export function decodeFromSearch(rawSearch: string): void {
     activeFilter.viewMode = "messages";
   }
 
+  // The range wins over the day-of-year when a hand-edited link names
+  // both: the wire refuses the pair, and one cut applied is a grid that
+  // says what it is under, where a refused query is a grid that says
+  // nothing. A link with neither clears the filter — hydrate runs once
+  // over live singleton state, and a cold link must not inherit a day
+  // the session had picked.
+  const day = params.get(KEY_DAY);
+  const dayOfYear = parseDayOfYear(params.get(KEY_DAY_OF_YEAR));
+  if (day) {
+    const [rawFrom, rawUntil] = day.split(DAY_SEP);
+    activeFilter.dayFrom = parseIsoDay(rawFrom);
+    activeFilter.dayUntil = parseIsoDay(rawUntil);
+    activeFilter.dayOfYear = null;
+  } else {
+    activeFilter.dayFrom = null;
+    activeFilter.dayUntil = null;
+    activeFilter.dayOfYear = dayOfYear;
+  }
+  // The zone the link was written under, when it names one and a day
+  // is in force; the viewer's own otherwise. An unknown name is left to
+  // the backend to refuse (the query validates it and says so) rather
+  // than silently replaced here — a link with a typo should say so.
+  const zone = params.get(KEY_TIME_ZONE);
+  activeFilter.dayTimeZone =
+    activeFilter.hasDayFilter() && zone && zone.length > 0 ? zone : viewerTimeZone();
+
   const sort = params.get(KEY_SORT);
   if (sort) {
     const parts = sort.split(":");
@@ -194,6 +256,19 @@ export function encodeToSearch(): string {
 
   if (activeFilter.viewMode !== DEFAULT_VIEW) {
     params.set(KEY_VIEW, activeFilter.viewMode);
+  }
+
+  if (activeFilter.dayOfYear !== null) {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const { month, day } = activeFilter.dayOfYear;
+    params.set(KEY_DAY_OF_YEAR, `${pad(month)}-${pad(day)}`);
+  } else if (activeFilter.dayFrom !== null || activeFilter.dayUntil !== null) {
+    const from = activeFilter.dayFrom ?? "";
+    const until = activeFilter.dayUntil ?? "";
+    params.set(KEY_DAY, `${from}${DAY_SEP}${until}`);
+  }
+  if (activeFilter.hasDayFilter()) {
+    params.set(KEY_TIME_ZONE, activeFilter.dayTimeZone);
   }
 
   const sortIsDefault =

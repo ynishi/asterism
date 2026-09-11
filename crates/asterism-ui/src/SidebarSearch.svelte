@@ -2,10 +2,10 @@
   // SidebarSearch — extracted from App.svelte (2026-07-20 Phase C wave
   // 1). Owns the top-of-sidebar search input. The "Active filters"
   // header + chip band that used to live here moved to the grid-top
-  // `ActiveFilters.svelte` so every filter axis
-  // (Persona / Modality / label / Tags / Groups / Session / search)
-  // shows in one place next to the grid — this component no longer
-  // renders chips, only the search box.
+  // `ActiveFilters.svelte`, so every engaged filter axis shows in one
+  // place next to the grid it produces — that component's template is
+  // the list of which. This one no longer renders chips, only the
+  // search box.
   //
   // Everything it reads is pulled straight from the `activeFilter`
   // store; the two callback props route back to App.svelte's reload

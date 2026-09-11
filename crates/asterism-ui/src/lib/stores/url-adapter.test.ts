@@ -5,7 +5,7 @@
 // `window.location` wrappers over them and stay untested until a DOM env
 // is deliberately added.
 import { beforeEach, describe, expect, it } from "vitest";
-import { activeFilter } from "./filter.svelte";
+import { activeFilter, viewerTimeZone } from "./filter.svelte";
 import { decodeFromSearch, encodeToSearch } from "./url-adapter";
 
 function resetFilter() {
@@ -129,6 +129,72 @@ describe("encode → decode round trip", () => {
     expect(activeFilter.tagMatchAll).toBe(true);
     expect(activeFilter.searchText).toBe("stargazing");
     expect(Array.from(activeFilter.activeTagIds)).toEqual(["t1", "t2"]);
+  });
+
+  it("carries the day range and its zone through the URL", () => {
+    activeFilter.jumpTo("2026-03-14", "week");
+    const qs = encodeToSearch();
+    const params = new URLSearchParams(qs);
+    expect(params.get("day")).toBe("2026-03-09..2026-03-16");
+    expect(params.get("tz")).toBe(viewerTimeZone());
+    expect(params.get("doy")).toBeNull();
+
+    resetFilter();
+    expect(activeFilter.hasDayFilter()).toBe(false); // control
+
+    decodeFromSearch(qs);
+    expect(activeFilter.dayFrom).toBe("2026-03-09");
+    expect(activeFilter.dayUntil).toBe("2026-03-16");
+    expect(activeFilter.dayOfYear).toBeNull();
+    expect(activeFilter.jumpSpan()).toBe("week");
+  });
+
+  it("carries a day-of-year through the URL", () => {
+    activeFilter.jumpToDayOfYear("2024-02-29");
+    const qs = encodeToSearch();
+    expect(new URLSearchParams(qs).get("doy")).toBe("02-29");
+    expect(new URLSearchParams(qs).get("day")).toBeNull();
+
+    resetFilter();
+    decodeFromSearch(qs);
+    expect(activeFilter.dayOfYear).toEqual({ month: 2, day: 29 });
+    expect(activeFilter.dayFrom).toBeNull();
+  });
+
+  it("carries an open end as an empty half", () => {
+    // "Everything after this date" is a range the picker does not draw
+    // but the filter accepts, so the encoding has to survive it rather
+    // than collapse it to a whole day.
+    activeFilter.dayFrom = "2026-03-14";
+    activeFilter.dayUntil = null;
+    const qs = encodeToSearch();
+    expect(new URLSearchParams(qs).get("day")).toBe("2026-03-14..");
+
+    resetFilter();
+    decodeFromSearch(qs);
+    expect(activeFilter.dayFrom).toBe("2026-03-14");
+    expect(activeFilter.dayUntil).toBeNull();
+  });
+
+  it("reads the zone a link names, and the viewer's when it names none", () => {
+    // A link written in Tokyo and opened in London selects Tokyo's days
+    // — the zone is part of the set, not of the viewer.
+    decodeFromSearch("?day=2026-03-14..2026-03-15&tz=Asia/Tokyo");
+    expect(activeFilter.dayTimeZone).toBe("Asia/Tokyo");
+    expect(activeFilter.dayFilter().time_zone).toBe("Asia/Tokyo");
+    decodeFromSearch("?day=2026-03-14..2026-03-15");
+    expect(activeFilter.dayTimeZone).toBe(viewerTimeZone());
+    // A zone with no day is inert on the wire and is not kept here
+    // either, so a later pick is read where the viewer is.
+    decodeFromSearch("?tz=Asia/Tokyo");
+    expect(activeFilter.hasDayFilter()).toBe(false);
+    expect(activeFilter.dayTimeZone).toBe(viewerTimeZone());
+  });
+
+  it("clears the day filter on a link that names none", () => {
+    activeFilter.jumpTo("2026-03-14", "day");
+    decodeFromSearch("?p=persona-1");
+    expect(activeFilter.hasDayFilter()).toBe(false);
   });
 
   // A link written by the build before these keys existed has to decode
