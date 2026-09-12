@@ -1334,15 +1334,18 @@ pub async fn init_core_with(
     // Register the built-in exporters (`comfy` / `file` / `http`, the
     // last of them twice).
     //
-    // `http` is the one that needs an argument: a profile with a `fetch`
-    // block takes custody of the files its backend produces, and where
-    // they go is the profile-local application directory rather than
-    // anything the dispatch params could name — a params-supplied path
-    // would let a dispatch write outside the profile that ran it.
-    let comfy: Arc<dyn Exporter> = Arc::new(ComfyHttpExporter::new());
-    let file: Arc<dyn Exporter> = Arc::new(FileExporter::new());
+    // `comfy` and `http` are the ones that need an argument: both take
+    // custody of the files their backend produces, and where those go
+    // is the profile-local application directory rather than anything
+    // the dispatch params could name — a params-supplied path would let
+    // a dispatch write outside the profile that ran it. One root for
+    // both; the layout under it is keyed by dispatch id, so they cannot
+    // collide.
     let home = asterism_infra::paths::asterism_home()?;
-    let http: Arc<dyn Exporter> = Arc::new(HttpExporter::new(home.join("custody")));
+    let custody = home.join("custody");
+    let comfy: Arc<dyn Exporter> = Arc::new(ComfyHttpExporter::new(custody.clone()));
+    let file: Arc<dyn Exporter> = Arc::new(FileExporter::new());
+    let http: Arc<dyn Exporter> = Arc::new(HttpExporter::new(custody));
     let transfer: Arc<dyn Exporter> = Arc::new(TransferExporter::new());
 
     // A profile names an environment variable; this is where the

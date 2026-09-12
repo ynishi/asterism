@@ -96,6 +96,19 @@ impl<'a> TemplateEnv<'a> {
         }
     }
 
+    /// The value a placeholder key names, before it is turned into text.
+    ///
+    /// [`render`] always produces a string, which is what a template
+    /// *is*. An adapter whose document has typed leaves — a ComfyUI
+    /// graph, where `seed` is an integer input and `"123"` is a string
+    /// the backend has to coerce — reads the value through this instead
+    /// when the whole leaf is one placeholder, and keeps a number a
+    /// number. `None` means the key does not resolve; whether that is
+    /// an error is the caller's `?` to decide.
+    pub fn value(&self, key: &str) -> Option<Value> {
+        self.lookup(key)
+    }
+
     fn resolve(&self, key: &str, optional: bool) -> Result<String, ExporterError> {
         let value = self.lookup(key);
         match value {

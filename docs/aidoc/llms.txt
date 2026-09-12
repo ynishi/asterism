@@ -168,6 +168,7 @@
 ## asterism-exporter-common 0.1.1
 
 - [asterism-exporter-common overview](asterism_exporter_common/index.md): # asterism-exporter-common
+- [asterism-exporter-common::custody](asterism_exporter_common/custody.md): Where a produced file lands once we hold it.
 - [asterism-exporter-common::jsonpath](asterism_exporter_common/jsonpath.md): A JSONPath subset — enough to steer a state machine and pluck out
 - [asterism-exporter-common::redact](asterism_exporter_common/redact.md): Taking a credential back out of what an adapter wrote down.
 - [asterism-exporter-common::template](asterism_exporter_common/template.md): `{{...}}` substitution over a dispatch — the other half of what a
@@ -179,7 +180,6 @@
 ## asterism-exporter-http 0.1.1
 
 - [asterism-exporter-http overview](asterism_exporter_http/index.md): # asterism-exporter-http
-- [asterism-exporter-http::custody](asterism_exporter_http/custody.md): Where a produced file lands once we hold it.
 - [asterism-exporter-http::record](asterism_exporter_http/record.md): What the platform said, and — when it said nothing — why.
 - [asterism-exporter-http::secret](asterism_exporter_http/secret.md): The profile grammar this adapter uses: the shared one, plus
 

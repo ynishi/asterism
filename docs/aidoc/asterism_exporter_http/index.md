@@ -192,7 +192,6 @@ rather than written into it.
 
 ## Modules
 
-- [`custody`](custody.md): Where a produced file lands once we hold it.
 - [`record`](record.md): What the platform said, and — when it said nothing — why.
 - [`secret`](secret.md): The profile grammar this adapter uses: the shared one, plus
 
