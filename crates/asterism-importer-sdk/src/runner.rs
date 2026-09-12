@@ -29,7 +29,9 @@ use asterism_contract::command::{AddAssetBatchCommand, AddAssetCommand};
 use asterism_contract::digest;
 use futures::stream::{FuturesUnordered, StreamExt};
 
-use crate::{ApiClient, Progress, ScanMode, SourceParser, SourceScanner, spec_to_command};
+use crate::{
+    ApiClient, Progress, ScanMode, SourceError, SourceParser, SourceScanner, spec_to_command,
+};
 
 #[derive(Debug, Clone)]
 pub struct ImportOptions {
@@ -82,6 +84,9 @@ where
     let payload_is_whole_artefact = scanner.payload_is_whole_artefact();
     let mut stream = scanner.scan(mode).await?;
     let mut buffer: Vec<AddAssetCommand> = Vec::new();
+    // Set when a failure ends the scan early. Returned after the tail
+    // below has flushed and drained, never instead of it.
+    let mut ended_by: Option<SourceError> = None;
     let batch_size = options.batch_size.max(1);
     let upload_concurrency = options.upload_concurrency.max(1);
     let mut in_flight = FuturesUnordered::new();
@@ -89,28 +94,40 @@ where
     while let Some(next) = stream.next().await {
         let raw = match next {
             Ok(item) => item,
-            // What the classification buys, at the one site that used
-            // to ignore it. Every failure was recorded and stepped
-            // over, so a source that had gone away — a moved
-            // directory, a query naming a column that is not there —
-            // was handled as one unreadable file and the loop ran on
-            // through the rest of the stream reporting the same thing
-            // over and over. Only an item-local failure is stepped
-            // over now; anything else ends the run and says why.
+            // This loop used to have one arm: record the message, take
+            // the next item, whatever the failure was. Stopping
+            // therefore had to be done by the scanner — `SqliteScanner`
+            // returned from its reader thread after a source-level
+            // failure so the stream would end — which put the decision
+            // in each adapter rather than in the port, and left a
+            // scanner that did not stop indistinguishable from one with
+            // nothing more to say.
             //
-            // `Retry` ends it here too, and that is this runner's
+            // Now the classification decides, in one place.
+            //
+            // `Retry` ends the run here too, and that is this runner's
             // limitation rather than the class's meaning: there is no
             // backoff loop to hand it to yet. A caller that grows one
             // reads `disposition` and waits instead — which is why the
-            // wait rides on the error rather than being recomputed
-            // from its text.
+            // wait rides on the error rather than being recomputed from
+            // its text.
             Err(err) if err.is_item_local() => {
-                progress.record_err("<scan>", &err.to_string());
+                progress.record_err(err.locator().unwrap_or("<scan>"), &err.to_string());
                 continue;
             }
+            // Breaks rather than returns. Everything already scanned,
+            // parsed and mapped is in `buffer`, and up to
+            // `batch_size - 1` of it has not been sent; the tasks in
+            // `in_flight` are still running against a client this
+            // function owns. Returning here would drop the first and
+            // detach the second — work the source had already handed
+            // over, thrown away because something *after* it failed.
+            // The tail below sends what is held and waits for what is
+            // in the air, and the failure is returned once it has.
             Err(err) => {
-                progress.record_err("<scan>", &err.to_string());
-                return Err(anyhow::Error::new(err).context("scan ended"));
+                progress.record_err(err.locator().unwrap_or("<scan>"), &err.to_string());
+                ended_by = Some(err);
+                break;
             }
         };
         let raw_locator = raw.locator.clone();
@@ -194,6 +211,13 @@ where
         if let Err(err) = result {
             progress.record_err("<batch-task>", &err.to_string());
         }
+    }
+
+    if let Some(err) = ended_by {
+        return Err(anyhow::Error::new(err).context(format!(
+            "scan ended early; the {} record(s) already accepted were sent first",
+            progress.ok_count()
+        )));
     }
 
     Ok(ImportSummary {
@@ -363,6 +387,77 @@ mod tests {
         }
     }
 
+    /// A scanner that hands over `accepted` items and then fails, so a
+    /// test can say what happened to the items in front of the failure.
+    struct ThenFailsScanner {
+        accepted: usize,
+        err: std::sync::Mutex<Option<SourceError>>,
+    }
+
+    impl SourceScanner for ThenFailsScanner {
+        fn scan(&self, _mode: ScanMode) -> ScanFuture<'_> {
+            let err = self.err.lock().expect("the fixture's error").take();
+            let accepted = self.accepted;
+            Box::pin(async move {
+                let items = (0..accepted).map(|n| {
+                    Ok(RawItem {
+                        source_kind: "test".into(),
+                        locator: format!("/tmp/{n}.txt"),
+                        payload: b"held".to_vec(),
+                        occurred_at: Some(Utc::now()),
+                        extra: serde_json::json!({}),
+                    })
+                });
+                Ok(Box::pin(stream::iter(
+                    items.chain([Err(err.expect("scan is called once"))]),
+                )) as crate::scanner::ItemStream)
+            })
+        }
+    }
+
+    /// What the source handed over before it failed is not thrown away
+    /// because of the failure.
+    ///
+    /// The first shape of the early exit returned from the middle of
+    /// the loop, which left the buffered commands — up to
+    /// `batch_size - 1` of them, already scanned, parsed and mapped —
+    /// unsent, and the tasks already in flight detached from the client
+    /// this function owns. The run still ends; it flushes and drains
+    /// first, and says how much it sent on the way out.
+    #[tokio::test]
+    async fn work_accepted_before_the_failure_is_not_dropped_by_it() {
+        let scanner = ThenFailsScanner {
+            accepted: 3,
+            err: std::sync::Mutex::new(Some(SourceError::Config("token rejected".into()))),
+        };
+        let reported = run_import(
+            &scanner,
+            &NoteParser,
+            ScanMode::Enumerate,
+            // `batch_size` above the number accepted, so every one of
+            // them is still in the buffer when the failure arrives —
+            // which is the case the early return lost.
+            ImportOptions {
+                batch_size: 50,
+                ..dry("http://127.0.0.1:1")
+            },
+        )
+        .await
+        .expect_err("the run ends")
+        .chain()
+        .map(|e| e.to_string())
+        .collect::<Vec<_>>()
+        .join(": ");
+        assert!(
+            reported.contains("3 record(s) already accepted were sent first"),
+            "the run accounts for what it did with them: {reported}"
+        );
+        assert!(
+            reported.contains("token rejected"),
+            "and still names what ended it: {reported}"
+        );
+    }
+
     fn dry(server: &str) -> ImportOptions {
         let mut options = ImportOptions::new("persona-id");
         options.dry_run = true;
@@ -393,16 +488,16 @@ mod tests {
         );
     }
 
-    /// And the case this classification was introduced for: a source
-    /// that is not going to work ends the run instead of being stepped
-    /// over, so the item behind it is never reached.
+    /// Every class but the item-local one ends this run, and the run
+    /// says which failure did it rather than folding a source-level
+    /// refusal into a count of failed items.
     ///
-    /// Before the taxonomy every failure took the arm above, which is
-    /// why an import against a moved directory or a query naming a
-    /// column that does not exist reported its way through the whole
-    /// stream and exited 0.
+    /// `Transient` and `RateLimited` are in the list because *this*
+    /// runner ends on them, not because the classes mean that: they are
+    /// retried by a caller with a backoff loop, and this one has none
+    /// yet. When it grows one, this test splits.
     #[tokio::test]
-    async fn a_failure_the_run_cannot_get_past_ends_it() {
+    async fn every_failure_but_an_item_local_one_ends_this_run() {
         for err in [
             SourceError::Config("no such directory".into()),
             SourceError::Source("malformed response".into()),

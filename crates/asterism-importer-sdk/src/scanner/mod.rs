@@ -89,8 +89,11 @@ pub type ItemStream = BoxStream<'static, Result<RawItem, SourceError>>;
 /// Future returned by [`SourceScanner::scan`] — resolves to the item
 /// stream once the scanner has finished setup.
 ///
-/// A failure here is a failure to *start*, which no disposition can
-/// soften: there is no stream to carry on with.
+/// A failure here is a failure to *start*: there is no stream, so
+/// [`Disposition::KeepScanning`](crate::Disposition::KeepScanning) has
+/// nothing to keep scanning. The other dispositions still read — a
+/// scanner refused with a 503 says [`Transient`](crate::SourceError),
+/// and a caller with a backoff loop retries the start.
 pub type ScanFuture<'a> =
     Pin<Box<dyn std::future::Future<Output = Result<ItemStream, SourceError>> + Send + 'a>>;
 

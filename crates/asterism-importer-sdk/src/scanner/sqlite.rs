@@ -142,7 +142,13 @@ fn run_query(
     let conn = match Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
         Ok(c) => c,
         Err(err) => {
-            let _ = tx.blocking_send(Err(SourceError::Source(format!("open failed: {err}"))));
+            // `Config`, beside the `exists` check above it: the file
+            // is the one the caller named, and what SQLite refuses
+            // here is usually a permission or a file that is not a
+            // database — both answers about that choice. A database
+            // that opens and is corrupt says so later, at `query`,
+            // where it is the source's own trouble.
+            let _ = tx.blocking_send(Err(SourceError::Config(format!("open failed: {err}"))));
             return;
         }
     };

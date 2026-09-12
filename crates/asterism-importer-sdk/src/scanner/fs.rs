@@ -217,11 +217,19 @@ impl SourceScanner for FsScanner {
                             let event = match res {
                                 Ok(ev) => ev,
                                 Err(err) => {
+                                    // Not `Item`: nothing was skipped,
+                                    // and there is no item to name.
+                                    // `Item` would also be the one
+                                    // class a caller carries on past,
+                                    // so a watcher that has started
+                                    // losing events would report this
+                                    // for as long as the watch lived
+                                    // and the scan would never end.
                                     let _ = tx
-                                        .send(Err(SourceError::item(
-                                            root_watch.display().to_string(),
-                                            format!("watcher error: {err}"),
-                                        )))
+                                        .send(Err(SourceError::Source(format!(
+                                            "watching {}: {err}",
+                                            root_watch.display()
+                                        ))))
                                         .await;
                                     continue;
                                 }

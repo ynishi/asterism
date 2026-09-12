@@ -32,12 +32,12 @@ Scanner  ─→ RawItem  ─→ Parser  ─→ Footprint  ─→ AssetSpec  ─�
 - [`AssetSpec`] is the flat intermediate the SDK converts each
   footprint to before batching; plugin authors do not touch it
   directly (see [`Footprint::into_asset_spec`]).
-- [`port`] holds the vocabulary the scanners are written against:
-  [`SourceError`], which says what a caller does about a failure
-  rather than where it happened, and [`SyncState`], which is where a
-  scan's resumption point will live. Nothing persists the latter
-  yet — the type and its wire form are settled first, because the
-  question of who starts an adapter is not.
+- [`port`] holds the port's vocabulary. [`SourceError`] is what the
+  scanner traits are written against, and says what a caller does
+  about a failure rather than where it happened. [`SyncState`] is
+  where a scan's resumption point will live; it is in no signature
+  yet, because the type and its serialised form are settled ahead of
+  the transport that will carry it.
 - [`ApiClient`] performs the HTTP POSTs (single or batch).
 - [`Progress`] keeps a running success / failure tally.
 - [`run_import`] owns the shared scan / parse / batch / progress

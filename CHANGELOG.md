@@ -376,6 +376,27 @@ and this project adheres to
   from one repository to the next on purpose, and the split is what makes a copy
   a deliberate act.
 
+- **An import says what kind of failure stopped it** (#291). The inbound port's
+  error type had three variants that named where a failure happened rather than
+  what to do about it, so nothing downstream could act on the difference and the
+  decision to stop lived inside each scanner — one returned from its own reader
+  thread to end its stream, another let a task fall out of its loop. With seven
+  importers written here that is a preference each author exercised; with the
+  thirty or forty an adapter-led strategy implies it is that many answers to one
+  question, and an upstream change moves every one of them. `SourceError` names
+  five actions instead: a configuration the source refused and trouble inside
+  the source both end the run, a transient failure and a rate limit are for a
+  caller with a backoff loop to retry — the rate limit carrying the wait the
+  source stated, which is the difference between a progress line that says
+  "failed" and one that says when the source is expected back — and an
+  unreadable item is stepped over with the report naming what was skipped. An
+  import that ends early now flushes what the source already handed over and
+  waits for what is in the air before it returns, so the failure costs only the
+  records behind it. A companion type for where a scan left off, `SyncState`, is
+  defined with it and used by nothing yet: the resumption point is two levels,
+  the unit that can be resumed and the position within it, and settling its
+  serialised form is what has to happen before anything can carry it.
+
 ### Fixed
 
 - **A ComfyUI dispatch collects what was saved, not what was previewed** (#289).

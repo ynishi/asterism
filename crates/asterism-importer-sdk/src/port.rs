@@ -1,29 +1,37 @@
 //! The inbound port's shared vocabulary: what a failure is, and what a
 //! resumption point holds.
 //!
-//! These two types are what the scanner traits are written against, and
-//! they are deliberately the part of the port that does not depend on
-//! how an adapter is run — whether Asterism starts it and reads it, or
-//! it runs itself and pushes. A rate limit is a rate limit either way,
-//! and a cursor holds the same thing either way.
+//! [`SourceError`] is what the scanner traits are written against.
+//! [`SyncState`] is not yet in any signature: the type and its
+//! serialised form are settled here first, ahead of the transport that
+//! will carry it. Both are deliberately the part of the port that does
+//! not depend on how an adapter is run — whether Asterism starts it and
+//! reads it, or it runs itself and pushes. A rate limit is a rate limit
+//! either way, and a cursor holds the same thing either way.
 //!
 //! ## Why a classification at all
 //!
 //! [`SourceError`] replaced a three-variant enum whose variants said
-//! where the failure happened rather than what to do about it, and the
-//! runner treated all three alike: record the message, carry on to the
-//! next item. A source that had gone away was handled as one unreadable
-//! file, so an import against a moved directory or an expired
-//! credential spun through its whole stream reporting errors instead of
-//! stopping and saying so. With seven importers that is a bad hour;
-//! with thirty it is thirty separate answers to the same question.
+//! where a failure happened rather than what to do about it. Nothing
+//! downstream could act on that, so the decision moved into the
+//! scanners: `SqliteScanner` returned from its own reader thread after
+//! sending a source-level failure, ending the stream, and `FsScanner`
+//! let its watch task fall out of its loop. Each author decided, in
+//! their own way, that this failure meant stop — and an adapter that
+//! decided otherwise would keep a dead scan alive with nothing able to
+//! tell. One adapter deciding that is a preference. Thirty or forty
+//! deciding it separately is thirty or forty answers to one question,
+//! and an upstream change moves every one of them.
 //!
-//! The five classes here are the ones inbound frameworks converged on —
-//! Airbyte's `config_error` / `transient_error` / `system_error` with
-//! `RATE_LIMITED` broken out as its own action, and Kafka Connect's
-//! coarser `RetriableException` — plus the per-item class this port
-//! already had and which none of those needs, because they stream rows
-//! rather than read files.
+//! The five classes here are the ones inbound frameworks converged on:
+//! Airbyte's `config_error` / `transient_error` / `system_error`
+//! failure types, `RATE_LIMITED` broken out as an action of its own,
+//! and Kafka Connect's coarser `RetriableException`. Carrying on past a
+//! single bad record is in both of those too — Connect's
+//! `errors.tolerance` with a dead-letter queue, Airbyte's `IGNORE`
+//! action — but as an operator setting rather than a thing the source
+//! says. Here it is a variant, because the scanner is what knows that
+//! one file would not open while the directory is fine.
 
 use std::time::Duration;
 
@@ -73,14 +81,17 @@ pub enum SourceError {
     /// The source could not be reached, and the same call may well
     /// work in a moment: a refused connection, a timeout, a 503.
     ///
-    /// **Retried**, with whatever backoff the caller has.
+    /// **Retried by a caller that has a backoff loop.** The SDK's own
+    /// [`run_import`](crate::runner::run_import) does not have one yet
+    /// and ends the run instead; what it does not do is step over this
+    /// as though one file had failed.
     #[error("source temporarily unavailable: {0}")]
     Transient(String),
 
     /// The source asked us to slow down.
     ///
-    /// **Retried**, and kept apart from [`Transient`](Self::Transient)
-    /// for two reasons. The wait is usually longer and told to us
+    /// **Retried on the same terms as [`Transient`](Self::Transient)**,
+    /// and kept apart from it for two reasons. The wait is usually longer and told to us
     /// rather than guessed, so a caller that treats it as an ordinary
     /// transient either waits far too little and is refused again or
     /// far too much and stalls. And it is the one failure where a
@@ -148,6 +159,19 @@ impl SourceError {
         matches!(self.disposition(), Disposition::KeepScanning)
     }
 
+    /// Where the failure happened, when the class names a place.
+    ///
+    /// Only [`Item`](Self::Item) has one: it is the class that names a
+    /// thing inside the source rather than the source itself, which is
+    /// what lets a report say what was skipped instead of saying that
+    /// something, somewhere, was.
+    pub fn locator(&self) -> Option<&str> {
+        match self {
+            Self::Item { locator, .. } => Some(locator),
+            _ => None,
+        }
+    }
+
     /// Builds an [`Item`](Self::Item) failure for `locator`.
     pub fn item(locator: impl Into<String>, message: impl std::fmt::Display) -> Self {
         Self::Item {
@@ -170,23 +194,24 @@ impl SourceError {
 ///
 /// Two levels, not one. `partition` names a unit that can be resumed on
 /// its own — a folder, an album, a table, one account's stream — and
-/// `offset` is the position reached inside it. Every inbound framework
-/// that started with a single opaque blob has since split it: Kafka
-/// Connect carries `sourcePartition` and `sourceOffset` as two maps,
-/// and Airbyte's protocol still names its single-blob form `LEGACY`
-/// beside the per-stream one that replaced it. The reason is that a
-/// source with several independently-advancing parts cannot be
-/// described by one position, and a run that stops halfway through the
-/// third of nine folders has to be able to say which folder.
+/// `offset` is the position reached inside it. Kafka Connect has
+/// carried the split from the start, as `sourcePartition` and
+/// `sourceOffset`; Airbyte arrived at it, and its protocol still names
+/// the single-blob form it left behind `LEGACY`, beside the per-stream
+/// one that replaced it. The reason is that a source with several
+/// independently-advancing parts cannot be described by one position,
+/// and a run that stops halfway through the third of nine folders has
+/// to be able to say which folder.
 ///
 /// ## What the core may look at
 ///
 /// `offset` is opaque: it belongs to the adapter that wrote it, and
 /// nothing here parses, validates or migrates it. `partition` is opaque
-/// too, with one exception — its **identity**. The core compares
-/// partitions to know which state a checkpoint replaces, and stores
-/// them to know which ones exist. It never interprets what the string
-/// means.
+/// too, with one exception — its **identity**. Whatever comes to store
+/// these will compare partitions, to know which state a checkpoint
+/// replaces and which ones exist; it will never interpret what the
+/// string means. Nothing stores them yet, and that reservation is the
+/// whole of what the core is allowed to do with the field.
 ///
 /// That is why `partition` is a string and not a JSON value, though
 /// Connect's equivalent is a map. This workspace builds `serde_json`
@@ -304,7 +329,39 @@ mod tests {
         let wire = serde_json::to_string(&state).expect("serialises");
         let back: SyncState = serde_json::from_str(&wire).expect("deserialises");
         assert_eq!(back, state);
-        assert_eq!(back.offset, state.offset, "the payload is not touched");
+        // Against the text, not only the value. `preserve_order` makes
+        // `Map` an `IndexMap`, whose `PartialEq` ignores key order — so
+        // an implementation that sorted the keys on the way through
+        // would satisfy the comparison above and still hand back a
+        // different document. The serialised form is what a store would
+        // hold and what a later run would compare, so it is what is
+        // pinned.
+        assert_eq!(
+            serde_json::to_string(&back).expect("serialises"),
+            wire,
+            "byte for byte, key order included"
+        );
+        assert!(
+            wire.contains(r#""b":1,"a""#),
+            "and the order is the one the adapter wrote: {wire}"
+        );
+    }
+
+    /// The whole argument for `partition` being a string, stated as a
+    /// test: with `preserve_order` two maps that agree on content but
+    /// not on insertion order serialise differently, so a value could
+    /// not be compared as text without somebody owning a
+    /// canonicalisation of it — and the core is not allowed to read it.
+    #[test]
+    fn two_maps_that_agree_on_content_do_not_agree_as_text() {
+        let one = serde_json::json!({ "account": "me", "album": "2019" });
+        let other = serde_json::json!({ "album": "2019", "account": "me" });
+        assert_eq!(one, other, "as values they are the same");
+        assert_ne!(
+            serde_json::to_string(&one).expect("serialises"),
+            serde_json::to_string(&other).expect("serialises"),
+            "as text they are not, which is why a partition is a string"
+        );
     }
 
     /// "Nothing to resume from" and "never been here" are different
