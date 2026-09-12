@@ -8735,19 +8735,31 @@ ComfyUI's filesystem by hand.
 - Every input the graph names lands in ComfyUI's `input/` through
   the upload route, under a directory of this dispatch's own, and
   the `<subfolder>/<name>` the backend answers with is what the
-  `LoadImage` node is given — ComfyUI resolves that pair against
-  `input/`, and a bare name would name a file in another directory.
-  Stock ComfyUI refuses a path outside `input/`, so the upload is
-  the only way an image gets in.
-- Every image a node emitted (`outputs.<node>.images[]`; other
-  output kinds are left where they are) is fetched and written under
-  the profile's custody root
+  `LoadImage` node is given. An unannotated value resolves against
+  `input/`, so a file this process holds — which is in none of
+  ComfyUI's own directories — has to be put there first, and the
+  upload is what puts it there.
+
+  That a path rather than a bare name works is worth writing down,
+  because the node's own `INPUT_TYPES` lists the top level of
+  `input/` and nothing else, and a reader who stops there concludes
+  this cannot work. `image` is a combo input, and `validate_inputs`
+  skips the "value is one of these" check for any input the node's
+  `VALIDATE_INPUTS` names — `LoadImage`'s names `image`, so what
+  runs instead is `exists_annotated_filepath`. That asks two
+  things: that the resolved path stay inside the directory it
+  resolved against, and that the file be *there*. The second is why
+  the upload has to have finished before the graph is submitted.
+- Every image a saver wrote (`outputs.<node>.images[]`, minus any
+  entry whose `type` names one of ComfyUI's other directories —
+  a preview says `temp`) is fetched and written under the profile's
+  custody root
   ([`asterism_exporter_common::CustodyPaths`]), and that path is the
-  reified asset's locator. ComfyUI's own `output/`
-  is not a place a locator can point: `temp/` is wiped on restart,
-  file names are a counter that is reused once a file is deleted,
-  and where the directory is at all is a flag on ComfyUI's command
-  line that this process cannot see.
+  reified asset's locator. ComfyUI's own directories are not a place
+  a locator can point: `temp/` is wiped on restart, file names are a
+  counter that is reused once a file is deleted, and where `output/`
+  is at all is a flag on ComfyUI's command line that this process
+  cannot see.
 
 Deferred: WebSocket progress, a saved-workflow registry, fanning a
 snapshot's members through one graph each. The `Exporter` trait
@@ -8795,11 +8807,19 @@ reaches it. That is the same rule the http adapter has.
 ## What the produced PNG carries
 
 The submit sets `extra_data.extra_pnginfo.asterism` to the dispatch
-id and the prompt id, and ComfyUI writes every key of
-`extra_pnginfo` as a tEXt chunk of that name beside its own
-`prompt`. A file that reaches the library by some other route —
-dragged out of ComfyUI's output directory — still says which
-dispatch made it.
+id and the prompt id. A saving node that declares the
+`EXTRA_PNGINFO` hidden input — stock `SaveImage` is one — writes
+every key of `extra_pnginfo` as a tEXt chunk of that name beside
+ComfyUI's own `prompt`, so the file on ComfyUI's disk says which
+dispatch made it even though this library's own copy came back
+through `/view`.
+
+Two things put that beyond this exporter's reach, and neither is an
+error here: a graph saving through a node that asks for no such
+hidden input, and a ComfyUI started with `--disable-metadata`, which
+writes no chunks at all. Nothing in this workspace reads the chunk
+back yet — what the dispatch produced carries the same ids on its
+own row. The chunk is for the copy that stays behind.
 
 
 <!-- asterism_exporter_common/index.md -->

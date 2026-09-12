@@ -399,7 +399,8 @@ async fn export_via(
 /// (a `{{params.seed?}}` the caller leaves blank, and literals that
 /// must ride through untouched), the prompt encoder (a placeholder the
 /// caller fills), two image loaders (fed by `input_slot`, one or both),
-/// and the saver. `slots` is written in the map spelling; the
+/// the saver, and a preview beside it — the shape whose history lists
+/// one generation twice. `slots` is written in the map spelling; the
 /// bare-string one is pinned in the exporter's own unit tests.
 fn comfy_params(port: u16, slots: serde_json::Value) -> serde_json::Value {
     json!({
@@ -432,6 +433,10 @@ fn comfy_params(port: u16, slots: serde_json::Value) -> serde_json::Value {
             "9": {
                 "class_type": "SaveImage",
                 "inputs": { "filename_prefix": "asterism/{{dispatch_id}}" }
+            },
+            "5": {
+                "class_type": "PreviewImage",
+                "inputs": { "images": ["8", 0] }
             }
         },
         "input_slot": slots,
@@ -447,7 +452,7 @@ fn comfy_waiting_message() -> String {
 
 /// The `outputs` block of a finished Comfy history entry.
 ///
-/// Two things are deliberate. Node `"12"` produces text and no images
+/// Three things are deliberate. Node `"12"` produces text and no images
 /// — the harvest loop skips any node without an `images` array, and a
 /// fixture where every node has one would never exercise that. Node
 /// `"9"`'s two images differ in `subfolder` (empty / `batch`), which
@@ -464,14 +469,25 @@ fn comfy_waiting_message() -> String {
 /// happens to be written first and sorts first as well, which is two
 /// coincidences rather than a reason.
 ///
-/// What the assertions actually depend on: only node `"9"` carries an
-/// `images` array, so exactly one node contributes outputs whatever
-/// order the walk takes, and the ordering that is asserted is inside
-/// that array — a real JSON array, which keeps its order under either
-/// map type.
+/// Node `"5"` is the `PreviewImage` the submitted graph carries, and
+/// its entry is what the harvest has to drop: same `images` key, same
+/// picture, `type: "temp"`. Its filename differs because
+/// `PreviewImage` appends a random suffix of its own. A fixture whose
+/// every entry said `output` could not show the guard working, which
+/// is how the harvest came to collect both.
+///
+/// What the assertions actually depend on: only nodes `"9"` and `"5"`
+/// carry an `images` array, only `"9"`'s are `output`, and the ordering
+/// that is asserted is inside that array — a real JSON array, which
+/// keeps its order under either map type.
 fn comfy_success_outputs() -> serde_json::Value {
     json!({
         "12": { "text": ["a node that produced no images"] },
+        "5": {
+            "images": [
+                { "filename": "asterism_temp_abcde_00001_.png", "subfolder": "", "type": "temp" }
+            ]
+        },
         "9": {
             "images": [
                 { "filename": "asterism_00001_.png", "subfolder": "", "type": "output" },
@@ -575,8 +591,8 @@ fn http_result_items() -> serde_json::Value {
 /// routes stay silent.
 ///
 /// `/view` serves the same bytes for every name, and records the query
-/// it was asked with: the exporter fetches every image the history
-/// names, and the log is what says it fetched the right ones.
+/// it was asked with: the log is what says which of the images the
+/// history named were fetched, and which were left alone.
 mod fake_backend {
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -717,7 +733,15 @@ mod fake_backend {
                 let Some(images) = node.get("images").and_then(|v| v.as_array()) else {
                     continue;
                 };
+                // This root is the backend's *output* directory, so
+                // only what a saver wrote goes in it. A real ComfyUI
+                // puts a preview under its temp directory, which
+                // nothing here models and nothing here reads: for this
+                // fake a preview is a history entry and no file.
                 for img in images {
+                    if img.get("type").and_then(|v| v.as_str()) != Some("output") {
+                        continue;
+                    }
                     let filename = img
                         .get("filename")
                         .and_then(|v| v.as_str())
@@ -1131,7 +1155,8 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
             "GET /view?filename=asterism_00002_.png&subfolder=batch&type=output".to_string(),
         ],
         "upload, submit, the poll that came back empty, the poll that said done, \
-         the harvest's own read, and one fetch per file the history named"
+         the harvest's own read, and one fetch per *saved* file the history \
+         named — the preview is not fetched at all"
     );
 
     // (B) The state machine, with the test as its only driver.
@@ -1180,9 +1205,12 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
         }])
     );
 
-    // (C) What the harvest reified. Two, not three: node "12" produced
-    // text and no images, and a node with nothing to collect is skipped
-    // rather than turned into an asset with no artefact behind it.
+    // (C) What the harvest reified, out of everything the history
+    // offered: node "12" produced text and no images, and a node with
+    // nothing to collect is skipped rather than turned into an asset
+    // with no artefact behind it; node "5" produced a preview, which is
+    // the same picture ComfyUI is showing rather than keeping. What is
+    // left is node "9"'s two saved files.
     assert_eq!(export.output_ids.len(), 2);
     let first = detail_of(&core, &export.output_ids[0]).await;
     let second = detail_of(&core, &export.output_ids[1]).await;
