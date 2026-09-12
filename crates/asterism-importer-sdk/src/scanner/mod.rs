@@ -1,6 +1,8 @@
 //! `SourceScanner` trait and shared item type.
 //!
-//! Enumerates or watches an external source and produces [`RawItem`]s.
+//! Enumerates or watches an external source and produces
+//! [`ScanEvent`]s: the [`RawItem`]s themselves, and the points a later
+//! scan could take up from.
 //! Bundled implementations live in the sibling modules
 //! ([`fs`] and [`sqlite`]); importer authors typically reuse one
 //! instead of writing their own.

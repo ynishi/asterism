@@ -6,6 +6,12 @@
 //! importers over totally unrelated schemas (chat exports, message DBs,
 //! bespoke tools' scratch tables, and so on).
 //!
+//! **Resumable only on the caller's word.** The query is the caller's,
+//! so only the caller knows whether it has an order to take up inside;
+//! [`SqliteScanner::ordered_by_id`] is where they say so. Without it
+//! this scanner emits no checkpoints and refuses to resume, rather than
+//! resuming inside an order nobody promised.
+//!
 //! Async is faked at the edge: `rusqlite` is blocking, so the scan
 //! actually runs on a dedicated `spawn_blocking` task and pushes rows
 //! into a bounded mpsc.
@@ -130,7 +136,7 @@ impl SqliteScanner {
 
     /// The row id a resumption point says was the last one handled, or
     /// an answer for a caller that has to be told why it cannot resume.
-    fn resume_after(&self, state: Option<SyncState>) -> Result<Option<String>, SourceError> {
+    fn resume_after(&self, state: Option<SyncState>) -> Result<Option<IdKey>, SourceError> {
         let Some(state) = state else {
             return Ok(None);
         };
@@ -147,10 +153,12 @@ impl SqliteScanner {
                 "cannot resume: the state was written for another database or another query".into(),
             ));
         }
-        match state.offset.get("after_id").and_then(|v| v.as_str()) {
-            Some(id) => Ok(Some(id.to_string())),
+        match state.offset.get("after_id").and_then(IdKey::from_json) {
+            Some(id) => Ok(Some(id)),
             None => Err(SourceError::Config(
-                "cannot resume: the state carries no `after_id`".into(),
+                "cannot resume: the state carries no `after_id` this scanner can order — \
+                 it holds an integer or a string, the two things an id column is"
+                    .into(),
             )),
         }
     }
@@ -203,8 +211,10 @@ impl SourceScanner for SqliteScanner {
                     &query,
                     &columns,
                     &source_kind,
-                    partition.as_deref(),
-                    after_id.as_deref(),
+                    Resume {
+                        partition: partition.as_deref(),
+                        after_id: after_id.as_ref(),
+                    },
                     &tx,
                 );
             });
@@ -214,16 +224,12 @@ impl SourceScanner for SqliteScanner {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_query(
     db_path: &Path,
     query: &str,
     columns: &ColumnMap,
     source_kind: &str,
-    // The partition to checkpoint under, or `None` for a scan with no
-    // resumable position.
-    partition: Option<&str>,
-    after_id: Option<&str>,
+    resume: Resume<'_>,
     tx: &mpsc::Sender<Result<ScanEvent, SourceError>>,
 ) {
     let conn = match Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
@@ -349,12 +355,14 @@ fn run_query(
                 }
                 extras.insert("__row_id".into(), json!(id_repr.clone()));
 
+                let id_key = IdKey::of(&id_value);
+
                 // Skipped in this process rather than in the query:
                 // the statement is the caller's and is not rewritten,
                 // so SQLite still reads these rows. What resuming saves
                 // is everything after this line.
-                if let Some(after) = after_id
-                    && id_repr.as_str() <= after
+                if let (Some(after), Some(key)) = (resume.after_id, &id_key)
+                    && key.is_at_or_before(after)
                 {
                     continue;
                 }
@@ -377,10 +385,13 @@ fn run_query(
                 // that emitted points it would later refuse to resume
                 // from would hand its caller something to store, print
                 // and pass back, and answer it with a `Config` failure.
-                if let Some(partition) = partition {
+                //
+                // And only for a row whose id is a position at all —
+                // see [`IdKey::of`].
+                if let (Some(partition), Some(key)) = (resume.partition, &id_key) {
                     let checkpoint = ScanEvent::Checkpoint(SyncState::new(
                         partition.to_string(),
-                        json!({ "after_id": id_repr }),
+                        json!({ "after_id": key.to_json() }),
                     ));
                     if tx.blocking_send(Ok(checkpoint)).is_err() {
                         return;
@@ -417,6 +428,88 @@ fn run_query(
 
 fn column_index(columns: &[String], name: &str) -> Option<usize> {
     columns.iter().position(|c| c.eq_ignore_ascii_case(name))
+}
+
+/// An id's place in the order the caller vouched for.
+///
+/// The skip is a comparison, and a comparison is only worth as much as
+/// the order it reproduces. The first shape of this compared the id's
+/// rendered text, which gets the ordinary case exactly wrong: over an
+/// `INTEGER PRIMARY KEY`, `"10" <= "9"` holds, so a scan resumed after
+/// row 9 dropped every row from 10 to 89 and reported a clean, empty
+/// run. That is the silent skipping [`SqliteScanner::ordered_by_id`]
+/// exists to rule out, arriving through the code that implements it.
+///
+/// So an id is carried as what SQLite stored, and compared the way
+/// SQLite orders that type: integers by value, text bytewise — the
+/// `BINARY` collation, which is what a column that names no other one
+/// gets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum IdKey {
+    Int(i64),
+    Text(String),
+}
+
+impl IdKey {
+    /// The key for a row's id, or `None` for a value this scanner will
+    /// not order.
+    ///
+    /// A real, a blob or a NULL in an id column is not a position in an
+    /// ascending sequence, and inventing one is how rows go missing. A
+    /// row without a key is yielded and earns no checkpoint, so a
+    /// resumption takes up before it and reads it again — a duplicate
+    /// the server answers from the locator, rather than a loss nobody
+    /// sees.
+    fn of(value: &Value) -> Option<Self> {
+        match value {
+            Value::Integer(n) => Some(Self::Int(*n)),
+            Value::Text(s) => Some(Self::Text(s.clone())),
+            _ => None,
+        }
+    }
+
+    /// The key as it is written into a [`SyncState`] offset, keeping
+    /// the type: `9` and `"9"` are different positions and a state that
+    /// blurred them would compare against the wrong order on the way
+    /// back in.
+    fn to_json(&self) -> serde_json::Value {
+        match self {
+            Self::Int(n) => json!(n),
+            Self::Text(s) => json!(s),
+        }
+    }
+
+    fn from_json(value: &serde_json::Value) -> Option<Self> {
+        match value {
+            serde_json::Value::Number(n) => n.as_i64().map(Self::Int),
+            serde_json::Value::String(s) => Some(Self::Text(s.clone())),
+            _ => None,
+        }
+    }
+
+    /// Whether this row falls at or before `after`, and has therefore
+    /// been handled already.
+    ///
+    /// Only like with like. An id column holding both integers and text
+    /// cannot be ascending in any order a resumption could use, and
+    /// guessing which side such a row falls on is the same silent loss
+    /// by another route — so it is not handled, which yields the row.
+    fn is_at_or_before(&self, after: &Self) -> bool {
+        match (self, after) {
+            (Self::Int(a), Self::Int(b)) => a <= b,
+            (Self::Text(a), Self::Text(b)) => a <= b,
+            _ => false,
+        }
+    }
+}
+
+/// What a scan was told about taking up where another stopped.
+struct Resume<'a> {
+    /// The partition to checkpoint under, or `None` for a scan with no
+    /// resumable position.
+    partition: Option<&'a str>,
+    /// The last id a previous run handled, if this is a resumption.
+    after_id: Option<&'a IdKey>,
 }
 
 fn value_to_string(value: &Value) -> String {
@@ -687,7 +780,55 @@ mod tests {
         );
         assert_eq!(
             last_checkpoint(&second).map(|state| state.offset),
-            Some(json!({ "after_id": "3" })),
+            Some(json!({ "after_id": 3 })),
+        );
+    }
+
+    /// Ten rows is where a text comparison of the ids goes wrong, and
+    /// three cannot show it: `"10" <= "9"` holds, so a scan resumed
+    /// after row 9 dropped every row from 10 on and reported a clean,
+    /// empty run — the silent skipping `ordered_by_id` exists to rule
+    /// out, arriving through the code that implements it.
+    #[tokio::test]
+    async fn integer_ids_are_ordered_as_numbers_and_not_as_text() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("many.sqlite");
+        let conn = Connection::open(&path).expect("create");
+        conn.execute_batch("CREATE TABLE entries(id INTEGER PRIMARY KEY, body TEXT);")
+            .expect("schema");
+        for id in 1..=12 {
+            conn.execute(
+                "INSERT INTO entries VALUES(?1, ?2)",
+                rusqlite::params![id, format!("row {id}")],
+            )
+            .expect("seed");
+        }
+        drop(conn);
+
+        let scanner = || {
+            SqliteScanner::new(&path, "SELECT id, body FROM entries ORDER BY id", columns())
+                .ordered_by_id()
+        };
+        let at = |id: u32| format!("{}#{id}", path.display());
+
+        let first = drain_events(scanner(), None).await;
+        // The checkpoint behind row 9: two events per row, so the row
+        // is at index 16 and its checkpoint at 17.
+        let after_nine = match &first[17] {
+            Ok(ScanEvent::Checkpoint(state)) => state.clone(),
+            other => panic!("a checkpoint follows each row, found {other:?}"),
+        };
+        assert_eq!(
+            after_nine.offset,
+            json!({ "after_id": 9 }),
+            "and the id keeps its type on the way out: 9, not \"9\""
+        );
+
+        let second = drain_events(scanner(), Some(after_nine)).await;
+        assert_eq!(
+            locators(&second),
+            vec![at(10), at(11), at(12)],
+            "the rows after 9 are 10, 11 and 12 — not none of them"
         );
     }
 

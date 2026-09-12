@@ -10014,8 +10014,9 @@ Scanner  ─→ RawItem  ─→ Parser  ─→ Footprint  ─→ AssetSpec  ─�
 ```
 
 - [`SourceScanner`] enumerates or watches an external source and
-  emits [`RawItem`]s. Implementations bundled here: [`FsScanner`],
-  [`SqliteScanner`].
+  emits [`ScanEvent`]s — the [`RawItem`]s themselves, and the points
+  a later scan could take up from. Implementations bundled here:
+  [`FsScanner`], [`SqliteScanner`].
 - [`SourceParser`] turns a `RawItem` into zero or more
   [`Footprint`]s; it is the only source-specific piece an importer
   author has to write.
@@ -10028,9 +10029,9 @@ Scanner  ─→ RawItem  ─→ Parser  ─→ Footprint  ─→ AssetSpec  ─�
 - [`port`] holds the port's vocabulary. [`SourceError`] is what
   [`SourceScanner`] is written against, and names what a failure
   cost — one record, or the run — rather than where it happened.
-  [`SyncState`] is where a scan's resumption point will live; its
-  type and serialised form are settled ahead of the transport that
-  will carry it.
+  [`SyncState`] is where a scan's resumption point lives; its type
+  and serialised form are settled independently of whatever comes
+  to store one.
 - [`ApiClient`] performs the HTTP POSTs (single or batch).
 - [`Progress`] keeps a running success / failure tally.
 - [`run_import`] owns the shared scan / parse / batch / progress
@@ -11442,9 +11443,9 @@ The inbound port's shared vocabulary: what a failure is, and what a
 resumption point holds.
 
 [`SourceError`] is what the scanner traits are written against.
-[`SyncState`] is not yet in any signature: the type and its
-serialised form are settled here first, ahead of the transport that
-will carry it. Both are deliberately the part of the port that does
+[`SyncState`] is what a scanner emits and takes back, and its type
+and serialised form are settled independently of whatever comes to
+*store* one. Both are deliberately the part of the port that does
 not depend on how an adapter is run — whether Asterism starts it and
 reads it, or it runs itself and pushes. A rate limit is a rate limit
 either way, and a cursor holds the same thing either way.
@@ -11530,7 +11531,9 @@ messages addressed `<file>#<uuid>`, and one PNG yields itself.
 
 `SourceScanner` trait and shared item type.
 
-Enumerates or watches an external source and produces [`RawItem`]s.
+Enumerates or watches an external source and produces
+[`ScanEvent`]s: the [`RawItem`]s themselves, and the points a later
+scan could take up from.
 Bundled implementations live in the sibling modules
 ([`fs`] and [`sqlite`]); importer authors typically reuse one
 instead of writing their own.
@@ -11554,7 +11557,12 @@ instead of writing their own.
 `FsScanner` — filesystem source scanner.
 
 Walks a directory tree, optionally filtered by glob-ish extension
-set, and emits every matching file as a `RawItem`. In `Watch` mode
+set, and emits every matching file as a `RawItem`.
+
+The walk is sorted and resumable: a checkpoint behind each file
+carries the path it stopped at, and a later scan handed one takes up
+after it. The partition is the root *and* the extension filter,
+because both decide what the walk yields. In `Watch` mode
 the scanner also stays live and streams filesystem-change events via
 `notify` — new / modified files are re-emitted, deletions are
 ignored (deletions on the source do not automatically delete the
@@ -11575,6 +11583,12 @@ Opens an arbitrary SQLite database read-only, runs a user-supplied
 mapping is spelled out by the caller so the same scanner can drive
 importers over totally unrelated schemas (chat exports, message DBs,
 bespoke tools' scratch tables, and so on).
+
+**Resumable only on the caller's word.** The query is the caller's,
+so only the caller knows whether it has an order to take up inside;
+[`SqliteScanner::ordered_by_id`] is where they say so. Without it
+this scanner emits no checkpoints and refuses to resume, rather than
+resuming inside an order nobody promised.
 
 Async is faked at the edge: `rusqlite` is blocking, so the scan
 actually runs on a dedicated `spawn_blocking` task and pushes rows

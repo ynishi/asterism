@@ -126,6 +126,13 @@ struct CommonArgs {
     /// Take up where a previous run stopped, given the JSON that run
     /// printed.
     ///
+    /// Not every source hands one out, and the run itself is how to
+    /// tell: a scan that can be resumed prints its point when it
+    /// finishes, and one that prints nothing has none to give. The
+    /// `sqlite` subcommand is the case worth knowing — it prints a
+    /// point only under `--ordered-by-id`, because only the person who
+    /// wrote the query knows whether it has an order to resume inside.
+    ///
     /// Nothing stores these yet, so an operator carries one across by
     /// hand. What it means belongs to the scanner that wrote it, and a
     /// scanner handed one it cannot use refuses the scan rather than
@@ -332,6 +339,15 @@ struct SqliteArgs {
     source_app: Option<String>,
     #[arg(long, default_value = "sqlite")]
     source_kind: String,
+    /// Declare that `--query` returns rows in ascending order of
+    /// `--id-column`, which is what makes the scan resumable.
+    ///
+    /// Only you can say it: the query is yours. Without it the run
+    /// prints no resumption point and refuses `--resume-from`, rather
+    /// than resuming inside an order nobody promised and skipping rows
+    /// it never read.
+    #[arg(long)]
+    ordered_by_id: bool,
 }
 
 struct SqliteRowParser<'a> {
@@ -470,6 +486,11 @@ async fn main() -> anyhow::Result<()> {
                     .join("_journal.db")
             });
             let columns = ColumnMap::new("id", "body").with_timestamp("created_at");
+            // No `ordered_by_id`, and not by oversight: `JOURNAL_QUERY`
+            // orders by `created_at`, which is not the order a
+            // resumption after a row id would take up inside. So this
+            // importer prints no resumption point and refuses
+            // `--resume-from`, which is the truthful pair.
             let scanner = SqliteScanner::new(db_path, JOURNAL_QUERY, columns)
                 .with_source_kind("persona-journal");
             let parser = PersonaJournalParser {
@@ -559,10 +580,10 @@ where
         "\nasterism-import {name}: done — ok={} err={}",
         summary.imported, summary.failed
     );
-    // Printed because nothing keeps it: this line is how a resumption
-    // point reaches the next run, as `--resume-from`. Printed before
-    // the failure below, so a run cut short still leaves it where an
-    // operator will look — that is the case it is most wanted in.
+    // This line is how a resumption point reaches the next run, as
+    // `--resume-from`. Printed before the failure below, so a run cut
+    // short still leaves it where an operator will look — that is the
+    // case it is most wanted in.
     if let Some(state) = &summary.resume_from {
         eprintln!(
             "asterism-import {name}: resume with --resume-from '{}'",
@@ -616,8 +637,11 @@ async fn run_sqlite(args: SqliteArgs) -> anyhow::Result<()> {
     if let Some(timestamp) = args.ts_column.clone() {
         columns = columns.with_timestamp(timestamp);
     }
-    let scanner = SqliteScanner::new(&args.db_path, &args.query, columns)
+    let mut scanner = SqliteScanner::new(&args.db_path, &args.query, columns)
         .with_source_kind(args.source_kind.clone());
+    if args.ordered_by_id {
+        scanner = scanner.ordered_by_id();
+    }
     let parser = SqliteRowParser { args: &args };
     run("sqlite", &scanner, &parser, false, args.common.options()).await
 }

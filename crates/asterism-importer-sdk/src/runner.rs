@@ -45,9 +45,9 @@ pub struct ImportOptions {
     /// Where to take up, or `None` to start at the beginning.
     ///
     /// Handed to the scanner unread: what it means belongs to whoever
-    /// wrote it. A scanner that cannot use it refuses the scan rather
-    /// than starting over, so a caller that asked to resume and could
-    /// not is told.
+    /// wrote it. A scanner that cannot use it refuses the scan, so a
+    /// caller that asked to resume and could not is told — see
+    /// [`SourceScanner::scan`].
     pub resume_from: Option<SyncState>,
 }
 
@@ -103,8 +103,8 @@ pub struct ImportSummary {
     /// make the second promise about a run in which something did not.
     ///
     /// It could make it about part of one, by tracking which records
-    /// sat between which checkpoints, and that is not built: batches
-    /// are answered out of order and the bookkeeping would be real. So
+    /// sat between which checkpoints, and that is not free: batches are
+    /// answered out of order, so the bookkeeping would be real. So
     /// a run with a single failed record hands back nothing, the next
     /// run re-reads from wherever it last resumed, and the cost of that
     /// is paid in reading rather than in a record nobody notices is
@@ -114,10 +114,9 @@ pub struct ImportSummary {
     /// having: a source that rate-limits halfway is exactly when a
     /// caller wants to take up rather than begin again.
     ///
-    /// Nothing persists this yet — where a resumption point is kept is
-    /// the question the transport decides, and that is not settled. It
-    /// is handed back so whatever comes to keep them has something to
-    /// keep.
+    /// Handed back rather than kept: where a resumption point is
+    /// stored is the transport's question and not this function's, and
+    /// answering it here would settle it for every caller.
     pub resume_from: Option<SyncState>,
 }
 
@@ -724,6 +723,45 @@ mod tests {
                 resume_from: Some(CheckpointingScanner::checkpoint(1)),
             },
             "two records and two checkpoints, and only the records counted"
+        );
+    }
+
+    /// A scan of nothing but checkpoints imports nothing.
+    ///
+    /// Asserted apart from the mixed case above, where a checkpoint
+    /// counted as a record would hide inside the items' own count.
+    #[tokio::test]
+    async fn a_scan_of_checkpoints_alone_imports_nothing() {
+        struct CheckpointsOnly;
+
+        impl SourceScanner for CheckpointsOnly {
+            fn scan(&self, _mode: ScanMode, _resume_from: Option<SyncState>) -> ScanFuture<'_> {
+                Box::pin(async {
+                    Ok(Box::pin(stream::iter([
+                        Ok(ScanEvent::Checkpoint(CheckpointingScanner::checkpoint(0))),
+                        Ok(ScanEvent::Checkpoint(CheckpointingScanner::checkpoint(1))),
+                    ])) as crate::scanner::ItemStream)
+                })
+            }
+        }
+
+        let summary = run_import(
+            &CheckpointsOnly,
+            &NoteParser,
+            ScanMode::Enumerate,
+            dry("http://127.0.0.1:1"),
+        )
+        .await
+        .expect("a scan that hands over no records is not a failure");
+        assert_eq!(
+            summary,
+            ImportSummary {
+                imported: 0,
+                failed: 0,
+                ended_by: None,
+                resume_from: Some(CheckpointingScanner::checkpoint(1)),
+            },
+            "nothing counted, and the last point still earned"
         );
     }
 

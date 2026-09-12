@@ -8,6 +8,12 @@ mapping is spelled out by the caller so the same scanner can drive
 importers over totally unrelated schemas (chat exports, message DBs,
 bespoke tools' scratch tables, and so on).
 
+**Resumable only on the caller's word.** The query is the caller's,
+so only the caller knows whether it has an order to take up inside;
+[`SqliteScanner::ordered_by_id`] is where they say so. Without it
+this scanner emits no checkpoints and refuses to resume, rather than
+resuming inside an order nobody promised.
+
 Async is faked at the edge: `rusqlite` is blocking, so the scan
 actually runs on a dedicated `spawn_blocking` task and pushes rows
 into a bounded mpsc.
