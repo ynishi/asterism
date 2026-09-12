@@ -12,8 +12,12 @@ publish     = false
 [lib]
 
 [dependencies]
-asterism-contract     = { path = "../asterism-contract" }
-asterism-dispatch-sdk = { path = "../asterism-dispatch-sdk" }
+asterism-contract        = { path = "../asterism-contract" }
+asterism-dispatch-sdk    = { path = "../asterism-dispatch-sdk" }
+# The `{{...}}` substitution the workflow graph is rendered through,
+# and the custody layout the harvested files are written into — both
+# shared with the http adapter rather than restated here.
+asterism-exporter-common = { path = "../asterism-exporter-common" }
 
 serde       = { workspace = true }
 serde_json  = { workspace = true }
@@ -22,4 +26,9 @@ thiserror   = { workspace = true }
 async-trait = { workspace = true }
 chrono      = { workspace = true }
 uuid        = { workspace = true }
-reqwest      = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# `multipart` is for `POST /upload/image`, the only way a file reaches
+# ComfyUI's `input/` directory from outside its process.
+reqwest     = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
+tokio       = { workspace = true }
+# Draws the seed a caller left blank; `params_with_seed` says why.
+rand        = { workspace = true }

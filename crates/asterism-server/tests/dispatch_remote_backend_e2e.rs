@@ -14,8 +14,9 @@
 //!
 //! So the backend is faked, and nothing else is. The fake is an axum
 //! `Router` on a loopback port speaking the two protocols verbatim
-//! (ComfyUI's `POST /prompt` + `GET /history/{id}`, and a generic
-//! submit / status / result trio for the schema-driven exporter); the
+//! (ComfyUI's `POST /upload/image` + `POST /prompt` +
+//! `GET /history/{id}` + `GET /view`, and a generic submit / status /
+//! result trio for the schema-driven exporter); the
 //! real `ComfyHttpExporter` and `HttpExporter` reach it through a real
 //! `reqwest::Client`, and the real `DispatchRun` state machine drives
 //! them. What the test owns is the backend's *script* — how many times
@@ -34,11 +35,10 @@
 //!
 //! **What the fake writes.** On submit, when it has been given an
 //! output root, it writes the files its own success fixture claims it
-//! produced. Reify never stats a locator (`dispatch_runner_service.rs`
-//! builds the `Material` from the string alone), so this is not needed
-//! to make the assertions pass — it is here because "ComfyUI put files
-//! in its output dir" is the situation being modelled, and a locator
-//! pointing at nothing would be a different one.
+//! produced — "ComfyUI put files in its output dir" is the situation
+//! being modelled. What the comfy exporter *reads* is `GET /view`, the
+//! same as against a real backend; the files on the fake's disk are
+//! there so a test can say no locator points at them.
 //!
 //! Its own test binary because `init_core` opens a Tantivy index (one
 //! core per test binary, as with the sibling e2e files).
@@ -260,8 +260,7 @@ async fn dispatch_env(
     // with it, so the handle has to outlive every call made through
     // this environment. `core_init` holds its own driver the same way
     // (graceful shutdown is a future addition). The leak is bounded:
-    // one driver per test, five in this binary, all reclaimed when the
-    // test process exits.
+    // one driver per test, all reclaimed when the test process exits.
     std::mem::forget(driver);
 
     let reenqueue = Arc::new(RecordingReEnqueue::default());
@@ -332,14 +331,15 @@ async fn detail_of(core: &CoreCtx, asset_id: &str) -> AssetFacts {
     }
 }
 
-/// Freezes one asset, creates a dispatch for `exporter`, and ticks the
-/// runner until it stops — the outbound half of the feature with a
-/// real exporter behind it.
+/// Freezes the given assets, creates a dispatch for `exporter`, and
+/// ticks the runner until it stops — the outbound half of the feature
+/// with a real exporter behind it. Member order is snapshot order,
+/// which is what a comfy `input_slot` index counts.
 async fn export_via(
     core: &CoreCtx,
     db_path: &Path,
     persona_id: &str,
-    input_asset_id: &str,
+    input_asset_ids: &[&str],
     exporter: Arc<dyn Exporter>,
     action: &str,
     params: serde_json::Value,
@@ -350,7 +350,7 @@ async fn export_via(
         .create(
             CreateSnapshotCommand {
                 persona_id: persona_id.to_string(),
-                asset_ids: vec![input_asset_id.to_string()],
+                asset_ids: input_asset_ids.iter().map(|id| id.to_string()).collect(),
             },
             &unattributed(),
         )
@@ -392,23 +392,24 @@ async fn export_via(
     }
 }
 
-/// The Comfy params both comfy happy-path tests send. `output_dir` is
-/// the only difference between them, and it is the only thing that
-/// decides whether the harvest records a filesystem path or a `/view`
-/// URL.
+/// The Comfy params the comfy tests send.
 ///
 /// The workflow is the shape `schema/comfy_params.example.json`
-/// documents — three nodes, of which the exporter is only allowed to
-/// touch one. Everything else riding through untouched is half of
-/// what the submit-body assertion checks.
-fn comfy_params(port: u16, output_dir: Option<&Path>) -> serde_json::Value {
-    let mut params = json!({
+/// documents, cut down to the nodes the assertions read: the sampler
+/// (a `{{params.seed?}}` the caller leaves blank, and literals that
+/// must ride through untouched), the prompt encoder (a placeholder the
+/// caller fills), two image loaders (fed by `input_slot`, one or both),
+/// and the saver. `slots` is written in the map spelling; the
+/// bare-string one is pinned in the exporter's own unit tests.
+fn comfy_params(port: u16, slots: serde_json::Value) -> serde_json::Value {
+    json!({
         "endpoint": format!("http://127.0.0.1:{port}"),
+        "prompt": "golden hour",
         "workflow": {
             "3": {
                 "class_type": "KSampler",
                 "inputs": {
-                    "seed": 12345,
+                    "seed": "{{params.seed?}}",
                     "steps": 30,
                     "cfg": 6.5,
                     "sampler_name": "dpmpp_2m",
@@ -416,22 +417,26 @@ fn comfy_params(port: u16, output_dir: Option<&Path>) -> serde_json::Value {
                     "denoise": 0.6
                 }
             },
+            "6": {
+                "class_type": "CLIPTextEncode",
+                "inputs": { "text": "{{params.prompt}}, {{input[0].cover?}}" }
+            },
             "10": {
                 "class_type": "LoadImage",
-                "inputs": { "image": "<substituted with the input asset locator>" }
+                "inputs": { "image": "<set from input_slot after upload>" }
+            },
+            "11": {
+                "class_type": "LoadImage",
+                "inputs": { "image": "<set from input_slot after upload>" }
             },
             "9": {
                 "class_type": "SaveImage",
-                "inputs": { "filename_prefix": "asterism" }
+                "inputs": { "filename_prefix": "asterism/{{dispatch_id}}" }
             }
         },
-        "input_slot": "10",
+        "input_slot": slots,
         "poll_interval_ms": POLL_INTERVAL_MS,
-    });
-    if let Some(dir) = output_dir {
-        params["output_dir"] = json!(dir.display().to_string());
-    }
-    params
+    })
 }
 
 /// The progress line the comfy exporter writes while it waits — the
@@ -563,16 +568,15 @@ fn http_result_items() -> serde_json::Value {
 
 /// A generator that never existed.
 ///
-/// One `Router`, five routes, two protocols: ComfyUI's prompt queue
-/// (`POST /prompt`, `GET /history/{id}`) and the generic submit /
-/// status / result trio the schema-driven exporter is pointed at. A
-/// test picks one protocol and the other three routes stay silent.
+/// One `Router`, two protocols: ComfyUI's four routes (`POST
+/// /upload/image`, `POST /prompt`, `GET /history/{id}`, `GET /view`)
+/// and the generic submit / status / result trio the schema-driven
+/// exporter is pointed at. A test picks one protocol and the other's
+/// routes stay silent.
 ///
-/// There is no `/view` route. The `/view` URL Comfy hands out when no
-/// `output_dir` is configured is a *locator string* — the ledger
-/// records it, and nothing in this process fetches it (thumbnail and
-/// Re-In work do not run in `ReadOnly`). A route nobody calls would
-/// only suggest otherwise.
+/// `/view` serves the same bytes for every name, and records the query
+/// it was asked with: the exporter fetches every image the history
+/// names, and the log is what says it fetched the right ones.
 mod fake_backend {
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -581,7 +585,8 @@ mod fake_backend {
 
     use axum::Json;
     use axum::Router;
-    use axum::extract::{Path as UrlPath, State};
+    use axum::body::Bytes;
+    use axum::extract::{Path as UrlPath, RawQuery, State};
     use axum::http::StatusCode;
     use axum::routing::{get, post};
     use serde_json::{Value, json};
@@ -625,6 +630,9 @@ mod fake_backend {
         log: Mutex<Vec<String>>,
         /// Full bodies of every submit.
         submissions: Mutex<Vec<Value>>,
+        /// Every `POST /upload/image`, as `(file name, subfolder)` read
+        /// off the multipart body.
+        uploads: Mutex<Vec<(String, String)>>,
         /// Reads of the status-shaped route — comfy's
         /// `GET /history/{id}` (which serves *both* poll and harvest)
         /// and the schema-driven `GET /status/{id}`. One counter
@@ -647,6 +655,7 @@ mod fake_backend {
                 output_root,
                 log: Mutex::new(Vec::new()),
                 submissions: Mutex::new(Vec::new()),
+                uploads: Mutex::new(Vec::new()),
                 history_reads: AtomicUsize::new(0),
             }
         }
@@ -659,6 +668,11 @@ mod fake_backend {
         /// The body of every submit the backend accepted.
         pub fn submissions(&self) -> Vec<Value> {
             self.submissions.lock().expect("submissions").clone()
+        }
+
+        /// Every upload the backend took, as `(file name, subfolder)`.
+        pub fn uploads(&self) -> Vec<(String, String)> {
+            self.uploads.lock().expect("uploads").clone()
         }
 
         fn record(&self, line: impl Into<String>) {
@@ -752,8 +766,10 @@ mod fake_backend {
         let state = Arc::new(build(port));
         // axum 0.8 path parameters: `{id}`, not the `:id` of 0.7.
         let app = Router::new()
+            .route("/upload/image", post(comfy_upload))
             .route("/prompt", post(comfy_submit))
             .route("/history/{id}", get(comfy_history))
+            .route("/view", get(comfy_view))
             .route("/generate", post(http_submit))
             .route("/status/{id}", get(http_status))
             .route("/result/{id}", get(http_result))
@@ -763,6 +779,73 @@ mod fake_backend {
             let _ = axum::serve(listener, app).await;
         });
         (state, port)
+    }
+
+    /// ComfyUI's `POST /upload/image`: a multipart form with the file
+    /// under `image` and `subfolder` / `type` / `overwrite` beside it,
+    /// answered with the name the file has inside `input/`.
+    ///
+    /// The multipart body is read by hand rather than through axum's
+    /// extractor, which is a feature of the crate this workspace does
+    /// not turn on; two header lines are all the fake needs from it.
+    /// It answers the way a real ComfyUI does when told to overwrite:
+    /// the name it was sent, unchanged, under the subfolder it was
+    /// sent with. Nothing is written — the fake has no `input/`.
+    async fn comfy_upload(State(backend): State<Arc<FakeBackend>>, body: Bytes) -> Json<Value> {
+        backend.record("POST /upload/image");
+        let text = String::from_utf8_lossy(&body);
+        let file_name = multipart_field(&text, "image")
+            .and_then(|part| quoted_after(part, "filename="))
+            .unwrap_or_default();
+        let subfolder = multipart_field(&text, "subfolder")
+            .map(part_value)
+            .unwrap_or_default();
+        backend
+            .uploads
+            .lock()
+            .expect("uploads")
+            .push((file_name.clone(), subfolder.clone()));
+        Json(json!({ "name": file_name, "subfolder": subfolder, "type": "input" }))
+    }
+
+    /// The part of a multipart body whose `name="…"` is `name`, from
+    /// its `Content-Disposition` line to the end of the body.
+    fn multipart_field<'a>(body: &'a str, name: &str) -> Option<&'a str> {
+        let needle = format!("name=\"{name}\"");
+        let at = body.find(&needle)?;
+        Some(&body[at..])
+    }
+
+    /// The quoted value after `key` on the first line of `part`.
+    fn quoted_after(part: &str, key: &str) -> Option<String> {
+        let line = part.lines().next()?;
+        let at = line.find(key)? + key.len();
+        let rest = line[at..].strip_prefix('"')?;
+        let end = rest.find('"')?;
+        Some(rest[..end].to_string())
+    }
+
+    /// The text value of a non-file part: what follows the blank line
+    /// after its headers, up to the next boundary.
+    fn part_value(part: &str) -> String {
+        let after_headers = part.split("\r\n\r\n").nth(1).unwrap_or_default();
+        after_headers
+            .split("\r\n--")
+            .next()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// ComfyUI's `GET /view?filename=&subfolder=&type=`: the bytes of
+    /// one produced file. Every name gets the same fixture; the query
+    /// goes into the log verbatim, which is how a test says the
+    /// exporter asked for the files the history named and no others.
+    async fn comfy_view(
+        State(backend): State<Arc<FakeBackend>>,
+        RawQuery(query): RawQuery,
+    ) -> Vec<u8> {
+        backend.record(format!("GET /view?{}", query.unwrap_or_default()));
+        super::PNG_1X1.to_vec()
     }
 
     /// ComfyUI's `POST /prompt`: the queue accepts the graph and
@@ -801,17 +884,28 @@ mod fake_backend {
                 "status": { "status_str": "success", "completed": true, "messages": [] },
                 "outputs": outputs,
             }),
-            // A real ComfyUI reports execution failures by appending an
-            // `execution_error` message to `status.messages[]`; it does
-            // not write a `status.error` string. The exporter only ever
-            // reads `status.error` (`exporter-comfy/src/lib.rs`), so the
-            // fixture matches the code as it stands rather than the
-            // backend as it is. If the exporter learns to read
-            // `messages[]`, this fixture is the thing to update — the
-            // assertion below would otherwise keep passing against a
-            // shape the real backend never sends.
+            // The shape a real ComfyUI writes for a failed prompt: the
+            // exception is an `execution_error` entry in the message
+            // log, `completed` is false, and the nodes that ran before
+            // the failing one have left their outputs behind. That last
+            // part is what makes the fixture a test: an exporter that
+            // read "there are outputs" as "done" would harvest here.
             Outcome::Failed { message } => json!({
-                "status": { "status_str": "error", "completed": false, "error": message },
+                "status": {
+                    "status_str": "error",
+                    "completed": false,
+                    "messages": [
+                        ["execution_start", { "prompt_id": backend.job_id }],
+                        ["execution_error", {
+                            "prompt_id": backend.job_id,
+                            "node_id": "3",
+                            "node_type": "KSampler",
+                            "exception_message": message,
+                            "exception_type": "torch.OutOfMemoryError",
+                        }],
+                    ],
+                },
+                "outputs": { "12": { "text": ["a node that ran before the sampler"] } },
             }),
             // Unreachable under that script: a refused submit never
             // yields a prompt id, so nothing asks about one.
@@ -902,8 +996,9 @@ mod fake_backend {
 }
 
 /// The whole outbound feature against a backend that makes it wait:
-/// submit, one "not yet", then a finished job whose two images become
-/// two assets with a route back to the original.
+/// upload, submit, one "not yet", then a finished job whose two images
+/// are fetched into custody and become two assets with a route back to
+/// the original.
 ///
 /// The one poll that comes back empty is the point. It is what turns
 /// the tick count and the re-enqueue log into statements about the
@@ -915,6 +1010,7 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let corpus = tmp.path().join("corpus");
     let outbox = tmp.path().join("outbox");
+    let custody_root = tmp.path().join("custody");
     for dir in [&corpus, &outbox] {
         std::fs::create_dir_all(dir).expect("fixture dir");
     }
@@ -946,17 +1042,16 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
         )
         .await
         .expect("register persona");
+    let mut command = add_command(
+        &persona.id,
+        plate.to_str().expect("utf-8 fixture path"),
+        1_785_000_000_000,
+        None,
+    );
+    command.cover_hint = Some("a plate, off-white".into());
     let original = core
         .asset_service
-        .add(
-            add_command(
-                &persona.id,
-                plate.to_str().expect("utf-8 fixture path"),
-                1_785_000_000_000,
-                None,
-            ),
-            &unattributed(),
-        )
+        .add(command, &unattributed())
         .await
         .expect("add original");
 
@@ -964,14 +1059,23 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
         &core,
         &db_path,
         &persona.id,
-        &original.id,
-        Arc::new(ComfyHttpExporter::with_client(backend_client())),
+        &[&original.id],
+        Arc::new(ComfyHttpExporter::with_client(
+            custody_root.clone(),
+            backend_client(),
+        )),
         "img2img",
-        comfy_params(port, Some(&outbox)),
+        comfy_params(port, json!({ "10": 0 })),
     )
     .await;
 
     // (A) What the backend was actually told.
+    let upload_dir = format!("asterism/{}", export.dispatch_id);
+    assert_eq!(
+        backend.uploads(),
+        vec![("plate.png".to_string(), upload_dir.clone())],
+        "the one slot's member went up under this dispatch's own directory"
+    );
     let submissions = backend.submissions();
     assert_eq!(submissions.len(), 1, "one dispatch, one submit");
     let body = &submissions[0];
@@ -981,22 +1085,53 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
     );
     assert_eq!(
         body["prompt"]["10"]["inputs"]["image"],
-        plate.display().to_string(),
-        "freeze, card hydration and the input_slot rewrite all resolved to the original"
+        format!("{upload_dir}/plate.png"),
+        "the loader is given the subfolder and name the upload answered with, \
+         not a path on this machine"
+    );
+    assert_eq!(
+        body["prompt"]["11"]["inputs"]["image"], "<set from input_slot after upload>",
+        "a loader no slot names is left alone"
+    );
+    assert_eq!(
+        body["prompt"]["6"]["inputs"]["text"], "golden hour, a plate, off-white",
+        "the prompt came from the params and the original's cover, through the template"
+    );
+    assert_eq!(
+        body["prompt"]["9"]["inputs"]["filename_prefix"],
+        format!("asterism/{}", export.dispatch_id),
+        "a placeholder embedded in text renders in place"
+    );
+    let seed = &body["prompt"]["3"]["inputs"]["seed"];
+    assert!(
+        seed.is_u64(),
+        "a seed the caller left blank is drawn, and sent as a number: {seed}"
     );
     assert_eq!(
         body["prompt"]["3"]["inputs"]["steps"], 30,
-        "everything outside the input slot rides through verbatim"
+        "everything outside the placeholders rides through verbatim"
+    );
+    assert_eq!(
+        body["extra_data"]["extra_pnginfo"]["asterism"]["dispatch_id"], export.dispatch_id,
+        "the PNG ComfyUI writes will carry the dispatch that made it"
+    );
+    assert_eq!(
+        body["extra_data"]["extra_pnginfo"]["asterism"]["prompt_id"], body["prompt_id"],
+        "and the prompt id the submit chose"
     );
     assert_eq!(
         backend.log(),
         vec![
+            "POST /upload/image".to_string(),
             "POST /prompt".to_string(),
             format!("GET /history/{COMFY_JOB_ID}"),
             format!("GET /history/{COMFY_JOB_ID}"),
             format!("GET /history/{COMFY_JOB_ID}"),
+            "GET /view?filename=asterism_00001_.png&type=output".to_string(),
+            "GET /view?filename=asterism_00002_.png&subfolder=batch&type=output".to_string(),
         ],
-        "submit, the poll that came back empty, the poll that said done, and the harvest"
+        "upload, submit, the poll that came back empty, the poll that said done, \
+         the harvest's own read, and one fetch per file the history named"
     );
 
     // (B) The state machine, with the test as its only driver.
@@ -1024,6 +1159,26 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
         dispatch.completed_at_ms.is_some(),
         "a terminal dispatch records when it landed"
     );
+    // The graph as sent is on the row: the seed the exporter drew is
+    // readable without the PNG, and a re-run can be exact.
+    let attempt: serde_json::Value =
+        serde_json::from_str(&dispatch.attempt_json.expect("the submit is recorded"))
+            .expect("attempt is JSON");
+    assert_eq!(
+        attempt["submit"]["body"]["prompt"]["3"]["inputs"]["seed"],
+        *seed
+    );
+    assert_eq!(attempt["submit"]["status"], 200);
+    assert_eq!(attempt["submit"]["response"]["prompt_id"], COMFY_JOB_ID);
+    assert_eq!(
+        attempt["uploads"],
+        json!([{
+            "node_id": "10",
+            "input_index": 0,
+            "source_locator": plate.display().to_string(),
+            "image": format!("{upload_dir}/plate.png"),
+        }])
+    );
 
     // (C) What the harvest reified. Two, not three: node "12" produced
     // text and no images, and a node with nothing to collect is skipped
@@ -1031,21 +1186,28 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
     assert_eq!(export.output_ids.len(), 2);
     let first = detail_of(&core, &export.output_ids[0]).await;
     let second = detail_of(&core, &export.output_ids[1]).await;
+    let dispatch_dir = custody_root.join("dispatch").join(&export.dispatch_id);
     assert_eq!(
         first.locator,
-        format!("{}/asterism_00001_.png", outbox.display()),
-        "output_dir set, empty subfolder: dir and filename, nothing between them"
+        dispatch_dir
+            .join("000-asterism_00001_.png")
+            .display()
+            .to_string(),
+        "the locator is the file we hold, under the dispatch that made it"
     );
     assert_eq!(
         second.locator,
-        format!("{}/batch/asterism_00002_.png", outbox.display()),
-        "a non-empty subfolder becomes a path segment"
+        dispatch_dir
+            .join("001-asterism_00002_.png")
+            .display()
+            .to_string(),
+        "one counter across the harvest, whatever subfolder the backend used"
     );
     for facts in [&first, &second] {
-        assert!(
-            Path::new(&facts.locator).is_file(),
-            "the backend wrote what it said it made: {}",
-            facts.locator
+        assert_eq!(
+            std::fs::read(&facts.locator).expect("the custody file exists"),
+            PNG_1X1,
+            "what landed on disk is what `/view` served"
         );
         assert_eq!(facts.source_kind, "dispatch-comfy");
         assert_eq!(facts.modality.as_deref(), Some("image"));
@@ -1071,6 +1233,10 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
         );
         assert_eq!(facts.extra["comfy"]["prompt_id"], COMFY_JOB_ID);
         assert_eq!(facts.extra["comfy"]["node_id"], "9");
+        assert_eq!(
+            facts.extra["comfy"]["seed"], *seed,
+            "the seed the graph ran with sits beside every image it produced"
+        );
         assert_eq!(facts.extra["dispatch_id"], export.dispatch_id);
         assert_eq!(
             facts.extra["_dispatch"],
@@ -1085,9 +1251,25 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
     assert_eq!(first.extra["comfy"]["image_index"], 0);
     assert_eq!(first.extra["comfy"]["filename"], "asterism_00001_.png");
     assert_eq!(first.extra["comfy"]["subfolder"], "");
+    assert_eq!(
+        first.extra["comfy"]["view_url"],
+        format!("http://127.0.0.1:{port}/view?filename=asterism_00001_.png&type=output"),
+        "where the backend served it from is kept as provenance, not as the locator"
+    );
     assert_eq!(second.extra["comfy"]["image_index"], 1);
     assert_eq!(second.extra["comfy"]["filename"], "asterism_00002_.png");
     assert_eq!(second.extra["comfy"]["subfolder"], "batch");
+    // The backend's own copy is on its disk, and nothing claims it: a
+    // locator into ComfyUI's output directory would dangle the day
+    // ComfyUI reuses the counter or is started with another
+    // `--output-directory`.
+    let on_disk = outbox.join("asterism_00001_.png");
+    assert!(on_disk.is_file(), "the backend wrote its output as always");
+    let on_disk = on_disk.display().to_string();
+    assert!(
+        [&first, &second].iter().all(|f| f.locator != on_disk),
+        "no asset points into the backend's output directory"
+    );
 
     // (D) What the ledger made of it.
     let edges = core
@@ -1166,38 +1348,34 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
     );
 }
 
-/// The same export with `output_dir` left out — the case where
-/// Asterism has no view of Comfy's filesystem and records the URL the
-/// backend serves the file from instead.
-///
-/// One params key is the only difference from the happy path, and it
-/// changes what a locator *is*: a path on this machine, or a request
-/// to another process. Everything downstream reads that string, so
-/// this is the test that says which one it gets.
+/// A graph with two image inputs — a reference and a mask, say —
+/// takes both from the snapshot, each slot naming which member by
+/// position. The order of the members is the order the snapshot was
+/// frozen in, and the output derives from both.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_comfy_export_told_no_output_dir_records_the_view_url_instead() {
+async fn a_comfy_export_feeds_every_slot_from_the_snapshot_member_it_names() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let corpus = tmp.path().join("corpus");
-    let outbox = tmp.path().join("outbox");
-    for dir in [&corpus, &outbox] {
-        std::fs::create_dir_all(dir).expect("fixture dir");
-    }
+    let custody_root = tmp.path().join("custody");
+    std::fs::create_dir_all(&corpus).expect("fixture dir");
     let plate = corpus.join("plate.png");
+    let mask = corpus.join("mask.png");
     std::fs::write(&plate, PNG_1X1).expect("write plate");
+    std::fs::write(&mask, PNG_1X1).expect("write mask");
 
     let db_path = tmp.path().join("asterism.db");
     let core = boot(tmp.path()).await;
-    // The backend still writes its files: a real Comfy always writes
-    // into its own output dir, whether or not the caller told Asterism
-    // where that is. The files existing is what makes the assertion
-    // below ("no asset points at them") mean something.
     let (backend, port) = fake_backend::spawn(FakeBackend::new(
         COMFY_JOB_ID,
-        1,
+        0,
         Outcome::Finished {
-            outputs: comfy_success_outputs(),
+            outputs: json!({
+                "9": { "images": [
+                    { "filename": "asterism_00001_.png", "subfolder": "", "type": "output" }
+                ] }
+            }),
         },
-        Some(outbox.clone()),
+        None,
     ))
     .await;
 
@@ -1206,12 +1384,27 @@ async fn a_comfy_export_told_no_output_dir_records_the_view_url_instead() {
         .register(
             RegisterPersonaCommand {
                 name: "E2E".into(),
-                pack_id: Some("e2e-comfy-view-url".into()),
+                pack_id: Some("e2e-comfy-two-slots".into()),
             },
             &unattributed(),
         )
         .await
         .expect("register persona");
+    // Created mask-first and frozen plate-first on purpose: see the
+    // slot assertions below.
+    let mask_asset = core
+        .asset_service
+        .add(
+            add_command(
+                &persona.id,
+                mask.to_str().expect("utf-8 fixture path"),
+                1_785_000_001_000,
+                None,
+            ),
+            &unattributed(),
+        )
+        .await
+        .expect("add mask");
     let original = core
         .asset_service
         .add(
@@ -1225,96 +1418,103 @@ async fn a_comfy_export_told_no_output_dir_records_the_view_url_instead() {
         )
         .await
         .expect("add original");
+    assert!(
+        mask_asset.id < original.id,
+        "the fixture needs the mask's id to sort first, so that freeze order \
+         and id order disagree: {} vs {}",
+        mask_asset.id,
+        original.id
+    );
 
     let export = export_via(
         &core,
         &db_path,
         &persona.id,
-        &original.id,
-        Arc::new(ComfyHttpExporter::with_client(backend_client())),
-        "img2img",
-        comfy_params(port, None),
+        &[&original.id, &mask_asset.id],
+        Arc::new(ComfyHttpExporter::with_client(
+            custody_root.clone(),
+            backend_client(),
+        )),
+        "inpaint",
+        comfy_params(port, json!({ "10": 0, "11": 1 })),
     )
     .await;
 
-    // The wait is unchanged — the locator form is a harvest-time
-    // decision and touches nothing about the state machine.
+    let upload_dir = format!("asterism/{}", export.dispatch_id);
+    assert_eq!(
+        backend.uploads(),
+        vec![
+            ("plate.png".to_string(), upload_dir.clone()),
+            ("mask.png".to_string(), upload_dir.clone()),
+        ],
+        "one upload per slot, in slot order, both under this dispatch's directory"
+    );
+    let body = &backend.submissions()[0];
+    // Slot 0 is the plate and slot 1 the mask because that is the order
+    // the snapshot was frozen in — and the snapshot was frozen in the
+    // reverse of the order the two assets were created, so an
+    // implementation that handed the exporter its members in id order
+    // (which is creation order, the ids being UUIDv7) would put each
+    // image in the other's node and report success.
+    assert_eq!(
+        body["prompt"]["10"]["inputs"]["image"],
+        format!("{upload_dir}/plate.png")
+    );
+    assert_eq!(
+        body["prompt"]["11"]["inputs"]["image"],
+        format!("{upload_dir}/mask.png")
+    );
     assert_eq!(
         export.ticks,
         vec![
             ("running".to_string(), Some("dispatched".to_string())),
-            ("running".to_string(), Some(comfy_waiting_message())),
             ("done".to_string(), None),
-        ]
+        ],
+        "no wait scripted: the first poll already has the answer"
     );
-    assert_eq!(export.reenqueued.len(), 2);
-    assert_eq!(export.output_ids.len(), 2);
 
-    let first = detail_of(&core, &export.output_ids[0]).await;
-    let second = detail_of(&core, &export.output_ids[1]).await;
+    assert_eq!(export.output_ids.len(), 1);
+    let facts = detail_of(&core, &export.output_ids[0]).await;
     assert_eq!(
-        first.locator,
-        format!("http://127.0.0.1:{port}/view?filename=asterism_00001_.png"),
-        "no output_dir: the locator is the URL the backend serves the file from"
-    );
-    assert_eq!(
-        second.locator,
-        format!("http://127.0.0.1:{port}/view?filename=asterism_00002_.png&subfolder=batch"),
-        "the subfolder parameter is appended only when there is one"
-    );
-    for facts in [&first, &second] {
-        assert_eq!(facts.source_kind, "dispatch-comfy");
-        assert_eq!(facts.modality.as_deref(), Some("image"));
-        // Current behaviour, deliberately pinned: the mime guess reads
-        // the extension of the locator's *path*, and `/view` has none
-        // (the query string is dropped first). So a URL-locator image
-        // carries `modality = image` with `mime = None`. Not a defect
-        // to fix here — it is what "Asterism has never seen this file"
-        // looks like in the material layer, and a test that ignored it
-        // would go silently green the day the rule changes.
-        assert_eq!(facts.mime, None, "a /view URL has no extension to guess");
-        assert_eq!(
-            facts.bundle_id.as_deref(),
-            Some(export.dispatch_id.as_str())
-        );
-    }
-
-    // The artefacts are on disk — the backend wrote them — and nothing
-    // in the library claims them, because nobody told the exporter
-    // where to look.
-    let on_disk = outbox.join("asterism_00001_.png");
-    assert!(on_disk.is_file(), "the backend wrote its output as always");
-    let on_disk = on_disk.display().to_string();
-    assert!(
-        [&first, &second].iter().all(|f| f.locator != on_disk),
-        "no output_dir, no filesystem locator — the path is not guessed at"
-    );
-    // The fake's own log is the control: this URL form was reached
-    // through the same three history reads, not by some other route.
-    assert_eq!(
-        backend.log(),
+        facts.labels,
         vec![
-            "POST /prompt".to_string(),
-            format!("GET /history/{COMFY_JOB_ID}"),
-            format!("GET /history/{COMFY_JOB_ID}"),
-            format!("GET /history/{COMFY_JOB_ID}"),
-        ]
+            "exporter:comfy".to_string(),
+            "comfy:inpaint".to_string(),
+            "comfy_node:9".to_string(),
+        ],
+        "the action is whatever the caller named; the exporter does not gate it"
     );
+    let mut parents: Vec<String> = core
+        .asset_service
+        .edges_of(&export.output_ids[0], Some("derived_from"), 10)
+        .await
+        .expect("derived_from edges")
+        .into_iter()
+        .map(|e| e.to_asset_id)
+        .collect();
+    parents.sort();
+    let mut expected = vec![original.id.clone(), mask_asset.id.clone()];
+    expected.sort();
+    assert_eq!(parents, expected, "the output derives from both members");
 }
 
-/// The backend refuses the job, and the library records that instead
-/// of inventing an artefact.
+/// The backend fails the job, and the library records that instead of
+/// inventing an artefact.
 ///
 /// The failure has to arrive through the *poll* — the submit succeeded,
 /// so the job is Running when the bad news comes. What that buys is the
 /// negative half of the harvest contract: a poll that says Failed must
-/// stop the machine there, and the absence of a harvest request in the
-/// log is the only direct evidence of it.
+/// stop the machine there, and the absence of a `/view` fetch in the
+/// log is the direct evidence of it. The fixture leaves the outputs of
+/// the nodes that ran before the sampler in the entry, as a real
+/// ComfyUI does; that is what makes this a test of reading the status
+/// rather than of noticing there is nothing to collect.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_backend_that_reports_an_error_mints_nothing_and_says_why() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let corpus = tmp.path().join("corpus");
     let outbox = tmp.path().join("outbox");
+    let custody_root = tmp.path().join("custody");
     for dir in [&corpus, &outbox] {
         std::fs::create_dir_all(dir).expect("fixture dir");
     }
@@ -1366,21 +1566,24 @@ async fn a_backend_that_reports_an_error_mints_nothing_and_says_why() {
         &core,
         &db_path,
         &persona.id,
-        &original.id,
-        Arc::new(ComfyHttpExporter::with_client(backend_client())),
+        &[&original.id],
+        Arc::new(ComfyHttpExporter::with_client(
+            custody_root.clone(),
+            backend_client(),
+        )),
         "img2img",
-        comfy_params(port, Some(&outbox)),
+        comfy_params(port, json!({ "10": 0 })),
     )
     .await;
 
-    let reason = "CUDA out of memory while sampling".to_string();
+    let reason = "KSampler: CUDA out of memory while sampling".to_string();
     assert_eq!(
         export.ticks,
         vec![
             ("running".to_string(), Some("dispatched".to_string())),
             ("failed".to_string(), Some(reason)),
         ],
-        "the backend's own words reach the row a reader will see"
+        "the backend's own words reach the row a reader will see, with the node that said them"
     );
     assert_eq!(
         export.reenqueued,
@@ -1390,10 +1593,11 @@ async fn a_backend_that_reports_an_error_mints_nothing_and_says_why() {
     assert_eq!(
         backend.log(),
         vec![
+            "POST /upload/image".to_string(),
             "POST /prompt".to_string(),
             format!("GET /history/{COMFY_JOB_ID}"),
         ],
-        "no second history read: a failed poll never reaches the harvest"
+        "no second history read and no /view: a failed poll never reaches the harvest"
     );
 
     let dispatch = core
@@ -1410,6 +1614,10 @@ async fn a_backend_that_reports_an_error_mints_nothing_and_says_why() {
         dispatch.completed_at_ms.is_some(),
         "failure is a landing, and the row records when it happened"
     );
+    assert!(
+        !custody_root.exists(),
+        "nothing was fetched, so custody was never opened"
+    );
 
     let page = core
         .asset_service
@@ -1423,8 +1631,7 @@ async fn a_backend_that_reports_an_error_mints_nothing_and_says_why() {
     assert_eq!(page.items.len(), 1, "only the original");
     let written = std::fs::read_dir(&outbox).expect("read outbox").count();
     // Fixture honesty check: the *fake* declines to write files for a
-    // Failed outcome (Asterism itself never writes into a comfy
-    // output_dir — the exporter only builds locator strings).
+    // Failed outcome.
     assert_eq!(
         written, 0,
         "the fake backend wrote nothing for a failed job"
@@ -1511,7 +1718,7 @@ async fn a_schema_driven_http_export_drives_the_same_state_machine() {
         &core,
         &db_path,
         &persona.id,
-        &original.id,
+        &[&original.id],
         Arc::new(HttpExporter::with_client(
             tmp.path().join("custody"),
             backend_client(),
@@ -1680,7 +1887,7 @@ async fn a_profile_that_asks_for_custody_lands_the_bytes_and_the_record() {
         &core,
         &db_path,
         &persona.id,
-        &original.id,
+        &[&original.id],
         Arc::new(HttpExporter::with_client(
             custody_root.clone(),
             backend_client(),
@@ -1844,7 +2051,7 @@ async fn a_schema_driven_export_reports_the_backends_own_failure_message() {
         &core,
         &db_path,
         &persona.id,
-        &original.id,
+        &[&original.id],
         Arc::new(HttpExporter::with_client(
             tmp.path().join("custody"),
             backend_client(),
@@ -1957,7 +2164,7 @@ async fn a_refused_submit_records_what_it_sent() {
         &core,
         &db_path,
         &persona.id,
-        &original.id,
+        &[&original.id],
         Arc::new(HttpExporter::with_client(
             tmp.path().join("custody"),
             backend_client(),
@@ -2086,7 +2293,7 @@ async fn a_backend_that_was_never_there_records_that_it_was_not() {
         &core,
         &db_path,
         &persona.id,
-        &original.id,
+        &[&original.id],
         Arc::new(HttpExporter::with_client(
             tmp.path().join("custody"),
             backend_client(),

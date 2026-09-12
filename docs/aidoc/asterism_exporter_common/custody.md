@@ -1,4 +1,4 @@
-# asterism-exporter-http::custody
+# asterism-exporter-common::custody
 
 Where a produced file lands once we hold it.
 

@@ -99,6 +99,14 @@ pub enum ExporterError {
 pub struct DispatchContext<'a> {
     /// Assets the user selected. Guaranteed non-empty and all owned by
     /// `persona_id`.
+    ///
+    /// **In the order the Selection was frozen in**, so an exporter
+    /// whose params address a member by position (ComfyUI's
+    /// `input_slot` names one node per member) is addressing the same
+    /// artefact the user picked into that position. A member the
+    /// viewer cannot see is absent rather than replaced, which
+    /// shortens the list — an index past the end is an error the
+    /// exporter reports, not a neighbouring asset sent by mistake.
     pub inputs: &'a [asterism_contract::dto::AssetCardDto],
     /// Stable id of the Selection this dispatch was issued from. Same
     /// Selection may be dispatched multiple times to different

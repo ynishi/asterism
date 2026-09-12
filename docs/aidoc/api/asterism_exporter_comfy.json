@@ -5,7 +5,7 @@
     {
       "path": "asterism_exporter_comfy::ACTION_IMG2IMG",
       "kind": "constant",
-      "docs": "The single action supported at first-slice."
+      "docs": "The conventional action name for the graph the shipped example\ndescribes. The exporter accepts any action — it is a label on the\nderived assets, not a switch inside the graph."
     },
     {
       "path": "asterism_exporter_comfy::ComfyDispatchParams",
@@ -18,6 +18,11 @@
       "docs": "HTTP-backed Exporter against a ComfyUI backend.\n\nCheap to `Clone` — the underlying reqwest client uses connection\npooling."
     },
     {
+      "path": "asterism_exporter_comfy::InputSlots",
+      "kind": "enum",
+      "docs": "Which workflow nodes take an image from the snapshot.\n\nTwo spellings for one shape. The map is the shape: node id to the\nindex of the snapshot member that node loads. The bare string is\nthe spelling every params blob stored before the map existed uses,\nand it means the first member — a stored profile is re-read on\nevery re-dispatch, so the old spelling has to keep resolving."
+    },
+    {
       "path": "asterism_exporter_comfy::SCHEMA_NAME",
       "kind": "constant",
       "docs": "Public name for this exporter's params schema in the\n`asterism-server schema` CLI (`exporter:comfy:params`)."
@@ -28,9 +33,19 @@
       "docs": "Slug the registry uses for this exporter."
     },
     {
+      "path": "asterism_exporter_comfy::UPLOAD_SUBFOLDER",
+      "kind": "constant",
+      "docs": "The subfolder under ComfyUI's `input/` every upload goes to, above\na directory per dispatch ([`upload_subfolder`]).\n\nComfyUI never prunes `input/`, so a name of our own keeps what this\nprocess wrote apart from what the user dropped there by hand."
+    },
+    {
       "path": "asterism_exporter_comfy::params_example_json",
       "kind": "function",
       "docs": "Canonical example JSON for [`ComfyDispatchParams`] — streamed by\n`asterism-server schema print exporter:comfy:params`."
+    },
+    {
+      "path": "asterism_exporter_comfy::upload_subfolder",
+      "kind": "function",
+      "docs": "Where one dispatch's inputs go: `asterism/<dispatch_id>`.\n\nA directory per dispatch, because the upload is named after the\nasset's own file and two assets can share a basename — this\nexporter's own outputs do, since custody names them by their\nposition in the harvest, so re-dispatching two dispatches' first\nimages as a reference and a mask would send `000-asterism_00001_.png`\ntwice. With `overwrite=true` the second upload would land on the\nfirst and both nodes would load one image, with nothing to report.\nIt is not only a within-dispatch problem: `LoadImage` reads the\nfile when the prompt executes, so an upload from a later dispatch\ncould change what an already-queued one loads."
     }
   ]
 }

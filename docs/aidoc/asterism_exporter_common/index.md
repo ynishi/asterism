@@ -15,6 +15,12 @@ out of what it wrote down, the rule for doing so is one rule, and a
 reader of an attempt record should meet one token for it whichever
 adapter wrote the record.
 
+[`custody`] likewise: an adapter that pulls a produced file off its
+backend has to put it somewhere, the layout of that somewhere is
+what a later reader lists to find out what a dispatch made, and two
+adapters with two layouts would give that reader two answers. The
+HTTP adapter and the ComfyUI adapter both write through it.
+
 ## Why not in the SDK
 
 `asterism-dispatch-sdk` is the port. It publishes the `Exporter`
@@ -64,6 +70,7 @@ impl<A: TemplateAdapter + ResponsePath> MyExporter<A> {
 
 ## Modules
 
+- [`custody`](custody.md): Where a produced file lands once we hold it.
 - [`jsonpath`](jsonpath.md): A JSONPath subset — enough to steer a state machine and pluck out
 - [`redact`](redact.md): Taking a credential back out of what an adapter wrote down.
 - [`template`](template.md): `{{...}}` substitution over a dispatch — the other half of what a

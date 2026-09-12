@@ -28,6 +28,10 @@ pub struct CustodyPaths {
 
 impl CustodyPaths {
     /// Binds a root directory (the application directory).
+    ///
+    /// The composition root hands this in; no adapter reads it out of
+    /// the dispatch params. A params-supplied path would let a dispatch
+    /// write outside the profile that ran it.
     pub fn new(root: PathBuf) -> Self {
         Self { root }
     }
@@ -37,10 +41,12 @@ impl CustodyPaths {
         self.root.join("dispatch").join(sanitise(dispatch_id))
     }
 
-    /// Path for one harvested item.
-    pub fn item_path(&self, dispatch_id: &str, index: usize, source_url: &str) -> PathBuf {
+    /// Path for one harvested item. `source` is what the backend called
+    /// it — a download URL or a bare file name; only its last path
+    /// segment is kept, and a query or fragment is dropped first.
+    pub fn item_path(&self, dispatch_id: &str, index: usize, source: &str) -> PathBuf {
         self.dispatch_dir(dispatch_id)
-            .join(format!("{index:03}-{}", file_name_from(source_url)))
+            .join(format!("{index:03}-{}", file_name_from(source)))
     }
 
     /// Writes one harvested item, creating the dispatch directory.
@@ -48,10 +54,10 @@ impl CustodyPaths {
         &self,
         dispatch_id: &str,
         index: usize,
-        source_url: &str,
+        source: &str,
         bytes: &[u8],
     ) -> Result<PathBuf, ExporterError> {
-        let path = self.item_path(dispatch_id, index, source_url);
+        let path = self.item_path(dispatch_id, index, source);
         let dir = path.parent().expect("an item path always has a parent");
         tokio::fs::create_dir_all(dir).await.map_err(|e| {
             ExporterError::Other(anyhow::anyhow!(
@@ -69,17 +75,20 @@ impl CustodyPaths {
     }
 }
 
-/// The file name a URL suggests, or `artefact` when it suggests none.
+/// The file name a URL or a bare name suggests, or `artefact` when it
+/// suggests none.
 ///
-/// The query string is dropped before the last segment is taken.
-/// Signed download URLs carry the whole signature there, and a file
-/// named after one is unreadable in a directory listing and outlives
-/// the signature it was named for.
-fn file_name_from(source_url: &str) -> String {
-    let without_query = source_url
+/// The query string and fragment are dropped before the last segment
+/// is taken. Signed download URLs carry the whole signature there, and
+/// a file named after one is unreadable in a directory listing and
+/// outlives the signature it was named for. A bare name from a backend
+/// that lets its caller choose a prefix (ComfyUI's `filename_prefix`)
+/// is cut at the same characters, which is the price of one rule.
+fn file_name_from(source: &str) -> String {
+    let without_query = source
         .split(['?', '#'])
         .next()
-        .unwrap_or(source_url)
+        .unwrap_or(source)
         .trim_end_matches('/');
     let candidate = Path::new(without_query)
         .file_name()

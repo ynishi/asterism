@@ -96,6 +96,19 @@ impl<'a> TemplateEnv<'a> {
         }
     }
 
+    /// The value a placeholder key names, before it is turned into text.
+    ///
+    /// [`render`] always produces a string, which is what a template
+    /// *is*. An adapter whose document has typed leaves — a ComfyUI
+    /// graph, where `seed` is an integer input and `"123"` is a string
+    /// the backend has to coerce — reads the value through this instead
+    /// when the whole leaf is one placeholder, and keeps a number a
+    /// number. `None` means the key does not resolve; whether that is
+    /// an error is the caller's `?` to decide.
+    pub fn value(&self, key: &str) -> Option<Value> {
+        self.lookup(key)
+    }
+
     fn resolve(&self, key: &str, optional: bool) -> Result<String, ExporterError> {
         let value = self.lookup(key);
         match value {
@@ -200,8 +213,8 @@ fn dot_path(root: &Value, path: &str) -> Option<Value> {
 
 /// How a resolved value is spelled when it lands in a string.
 ///
-/// Null resolves to nothing at all — which an optional placeholder turns
-/// into an empty string and a required one reports as unresolved. That
+/// Null resolves to the empty string, optional or not; only a key that
+/// is absent altogether is unresolved. That
 /// distinction is deliberate: a backend that sends `"caption": null` is
 /// saying the same thing as one that omits the field, and a template
 /// should not have to know which shape it is talking to.

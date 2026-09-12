@@ -24,3 +24,9 @@ serde_json = { workspace = true }
 # `redact` rebuilds an `ExporterError::Other`, whose payload is an
 # `anyhow::Error`, around the scrubbed text.
 anyhow     = { workspace = true }
+# `custody` writes the harvested bytes from inside the adapters' async
+# calls, so it is `tokio::fs` rather than `std::fs`.
+tokio      = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
