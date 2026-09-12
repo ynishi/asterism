@@ -529,10 +529,20 @@ where
         ScanMode::Enumerate
     };
     let summary = run_import(scanner, parser, mode, options).await?;
+    // Printed for every run that started, including one a failure cut
+    // short: the counts are what it managed, and they are worth having
+    // either way.
     eprintln!(
         "\nasterism-import {name}: done — ok={} err={}",
         summary.imported, summary.failed
     );
+    // Checked before the count, so it is the failure the exit names:
+    // "the source refused the credential" tells an operator what to do
+    // next and "3 failed item(s)" does not. The counts are printed
+    // above either way, because they are what the run managed.
+    if let Some(err) = summary.ended_by {
+        bail!("{name} import stopped: {err}");
+    }
     if summary.failed > 0 {
         bail!(
             "{name} import completed with {} failed item(s)",

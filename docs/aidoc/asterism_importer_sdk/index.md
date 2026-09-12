@@ -32,6 +32,12 @@ Scanner  ─→ RawItem  ─→ Parser  ─→ Footprint  ─→ AssetSpec  ─�
 - [`AssetSpec`] is the flat intermediate the SDK converts each
   footprint to before batching; plugin authors do not touch it
   directly (see [`Footprint::into_asset_spec`]).
+- [`port`] holds the port's vocabulary. [`SourceError`] is what
+  [`SourceScanner`] is written against, and names what a failure
+  cost — one record, or the run — rather than where it happened.
+  [`SyncState`] is where a scan's resumption point will live; its
+  type and serialised form are settled ahead of the transport that
+  will carry it.
 - [`ApiClient`] performs the HTTP POSTs (single or batch).
 - [`Progress`] keeps a running success / failure tally.
 - [`run_import`] owns the shared scan / parse / batch / progress
@@ -119,6 +125,7 @@ per-target split rules, locator patterns, and unverified fields.
 - [`harvest::parser`](harvest__parser.md): [`SourceParser`] impl that decodes `asterism_agent_harvest` JSON
 - [`mapper`](mapper.md): Convenience shape for parser output plus the mapping to the wire
 - [`parser`](parser.md): `SourceParser` — turn a scanned [`RawItem`] into one or more
+- [`port`](port.md): The inbound port's shared vocabulary: what a failure is, and what a
 - [`progress`](progress.md): Tiny progress reporter — running success / failure counters, plus
 - [`runner`](runner.md): Shared importer execution pipeline.
 - [`scanner`](scanner.md): `SourceScanner` trait and shared item type.

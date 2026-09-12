@@ -2,8 +2,8 @@
 //!
 //! Enumerates or watches an external source and produces [`RawItem`]s.
 //! Bundled implementations live in the sibling modules
-//! ([`fs`], and future `sqlite` / `http`); importer authors typically
-//! reuse one instead of writing their own.
+//! ([`fs`] and [`sqlite`]); importer authors typically reuse one
+//! instead of writing their own.
 
 pub mod fs;
 pub mod sqlite;
@@ -12,6 +12,8 @@ use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
 use serde_json::Value;
 use std::pin::Pin;
+
+use crate::port::SourceError;
 
 /// A raw scanned item — a payload plus the metadata needed to attribute
 /// it back to its origin.
@@ -75,33 +77,31 @@ pub enum ScanMode {
     Watch,
 }
 
-/// Errors returned by scanners.
-#[derive(Debug, thiserror::Error)]
-pub enum ScanError {
-    /// Source path / URL / query was invalid or unreachable.
-    #[error("source unavailable: {0}")]
-    SourceUnavailable(String),
-    /// Item-level I/O failure that should be surfaced but not necessarily
-    /// abort the whole scan.
-    #[error("item read failed: {0}")]
-    ItemReadFailed(String),
-    /// Wraps any other transport / library failure.
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
-}
-
-/// Async stream of scanned items (or per-item errors).
-pub type ItemStream = BoxStream<'static, Result<RawItem, ScanError>>;
+/// Async stream of scanned items, or failures.
+///
+/// A failure on this stream is not necessarily the end of it, and what
+/// it is followed by is this scanner's to decide: another item, or
+/// nothing. [`SourceError::disposition`](crate::SourceError::disposition)
+/// says what the failure cost the run, which is a different question
+/// and deliberately not this one.
+pub type ItemStream = BoxStream<'static, Result<RawItem, SourceError>>;
 
 /// Future returned by [`SourceScanner::scan`] — resolves to the item
 /// stream once the scanner has finished setup.
+///
+/// A failure here is a failure to *start*, and the classes read the
+/// same as anywhere else: a scanner refused with a 503 says
+/// [`Transient`](crate::SourceError::Transient), and a caller with a
+/// backoff loop may try the scan again.
 pub type ScanFuture<'a> =
-    Pin<Box<dyn std::future::Future<Output = Result<ItemStream, ScanError>> + Send + 'a>>;
+    Pin<Box<dyn std::future::Future<Output = Result<ItemStream, SourceError>> + Send + 'a>>;
 
 /// Trait every source scanner implements.
 ///
-/// `scan` returns a boxed async stream of `RawItem`s (or per-item
-/// errors, so a single bad row does not tear the whole scan down).
+/// `scan` returns a boxed async stream of `RawItem`s, or failures. A
+/// failure does not by itself end the stream — whether anything follows
+/// it is this scanner's answer, and `FsScanner` and `SqliteScanner`
+/// give different ones about a record they could not read.
 pub trait SourceScanner: Send + Sync {
     /// Starts scanning; the returned future resolves to a stream that
     /// yields items one at a time.
