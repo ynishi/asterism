@@ -260,8 +260,7 @@ async fn dispatch_env(
     // with it, so the handle has to outlive every call made through
     // this environment. `core_init` holds its own driver the same way
     // (graceful shutdown is a future addition). The leak is bounded:
-    // one driver per test, five in this binary, all reclaimed when the
-    // test process exits.
+    // one driver per test, all reclaimed when the test process exits.
     std::mem::forget(driver);
 
     let reenqueue = Arc::new(RecordingReEnqueue::default());
@@ -576,7 +575,7 @@ fn http_result_items() -> serde_json::Value {
 /// routes stay silent.
 ///
 /// `/view` serves the same bytes for every name, and records the query
-/// it was asked with: the exporter fetches every file the history
+/// it was asked with: the exporter fetches every image the history
 /// names, and the log is what says it fetched the right ones.
 mod fake_backend {
     use std::path::PathBuf;

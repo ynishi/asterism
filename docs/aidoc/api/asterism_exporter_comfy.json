@@ -5,7 +5,7 @@
     {
       "path": "asterism_exporter_comfy::ACTION_IMG2IMG",
       "kind": "constant",
-      "docs": "The action the shipped example and the dispatch form name. The\nexporter accepts any action — it is a label on the derived assets,\nnot a switch inside the graph — and this is the conventional one."
+      "docs": "The conventional action name for the graph the shipped example\ndescribes. The exporter accepts any action — it is a label on the\nderived assets, not a switch inside the graph."
     },
     {
       "path": "asterism_exporter_comfy::ComfyDispatchParams",

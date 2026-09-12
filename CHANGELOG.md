@@ -389,11 +389,11 @@ and this project adheres to
   already rules out. And a failed prompt with partial outputs read as done,
   because the exporter looked for a `status.error` key ComfyUI never writes. Now
   the inputs go up through `POST /upload/image` under a subfolder of Asterism's
-  own and the loader is given the name the backend answered with; every produced
-  file is fetched through `/view` and written under the profile's custody root,
-  beside what the http exporter writes, and that path is the locator, with the
-  `/view` parameters kept as provenance; the verdict is read from
-  `status.status_str` and the `execution_error` entry in `status.messages`.
+  own and the loader is given the name the backend answered with; every image a
+  node emitted is fetched through `/view` and written under the profile's
+  custody root, beside what the http exporter writes, and that path is the
+  locator, with the `/view` parameters kept as provenance; the verdict is read
+  from `status.status_str` and the `execution_error` entry in `status.messages`.
   `output_dir` is gone from the params. The graph is also rendered through the
   shared `{{...}}` template before it is sent, so a prompt, a seed or a batch
   count is `{{params.prompt}}` in the node and a value in the params rather than
@@ -405,8 +405,9 @@ and this project adheres to
   (`{ "10": 0, "11": 1 }`) so a reference and a mask can come from one snapshot,
   the bare-string spelling still means the first member, and a txt2img graph may
   name none; the exporter accepts any action name. The submit sets
-  `extra_pnginfo.asterism` to the dispatch id, so the PNG ComfyUI writes says
-  which dispatch made it even when it reaches the library by some other road.
+  `extra_pnginfo.asterism` to the dispatch id and the prompt id, so the PNG
+  ComfyUI writes says which dispatch made it even when it reaches the library by
+  some other road.
 
 - **Audio already in a library gets the format it should have had** (#262).
   #259's entry closes by saying that files already imported keep the format they

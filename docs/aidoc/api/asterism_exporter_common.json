@@ -75,7 +75,7 @@
     {
       "path": "asterism_exporter_common::template::value_to_display_string",
       "kind": "function",
-      "docs": "How a resolved value is spelled when it lands in a string.\n\nNull resolves to nothing at all — which an optional placeholder turns\ninto an empty string and a required one reports as unresolved. That\ndistinction is deliberate: a backend that sends `\"caption\": null` is\nsaying the same thing as one that omits the field, and a template\nshould not have to know which shape it is talking to."
+      "docs": "How a resolved value is spelled when it lands in a string.\n\nNull resolves to the empty string, optional or not; only a key that\nis absent altogether is unresolved. That\ndistinction is deliberate: a backend that sends `\"caption\": null` is\nsaying the same thing as one that omits the field, and a template\nshould not have to know which shape it is talking to."
     }
   ]
 }

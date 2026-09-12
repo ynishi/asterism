@@ -8737,9 +8737,11 @@ ComfyUI's filesystem by hand.
   backend answers with is what the `LoadImage` node is given. Stock
   ComfyUI refuses a path outside `input/`, so this is the only way
   an image gets in.
-- Every produced file is fetched and written under the profile's
-  custody root ([`asterism_exporter_common::CustodyPaths`]), and
-  that path is the reified asset's locator. ComfyUI's own `output/`
+- Every image a node emitted (`outputs.<node>.images[]`; other
+  output kinds are left where they are) is fetched and written under
+  the profile's custody root
+  ([`asterism_exporter_common::CustodyPaths`]), and that path is the
+  reified asset's locator. ComfyUI's own `output/`
   is not a place a locator can point: `temp/` is wiped on restart,
   file names are a counter that is reused once a file is deleted,
   and where the directory is at all is a flag on ComfyUI's command
@@ -8774,16 +8776,16 @@ into [`ComfyDispatchParams`]:
   the backend as the integer `4`.
 - `input_slot` — which nodes take an image from the snapshot, as
   `{ node_id: input_index }`; the index is the position in the
-  snapshot's member list. A bare `"10"` still means `{ "10": 0 }`,
-  which is what every stored params blob says. Optional: a txt2img
-  graph names no node and uploads nothing.
+  snapshot's member list. A bare `"10"` is accepted and means
+  `{ "10": 0 }`. Optional: a txt2img graph names no node and uploads
+  nothing.
 - `seed` — read by `{{params.seed?}}`; left out, a random one is
   drawn per dispatch and written into the params the template sees,
   so a re-dispatch is a new sample and the attempt record shows
   which one.
-- `poll_interval_ms` — how often the runner will poll; the value is
-  echoed back into the progress hint so the UI can display a
-  correct spinner cadence.
+- `poll_interval_ms` — echoed into the progress hint's message
+  while the prompt is queued. The runner's own cadence is the job
+  queue's; nothing reads this number back.
 
 Anything else in the blob is the caller's — `{{params.<key>}}`
 reaches it. That is the same rule the http adapter has.

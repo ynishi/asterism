@@ -30,6 +30,5 @@ uuid        = { workspace = true }
 # ComfyUI's `input/` directory from outside its process.
 reqwest     = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
 tokio       = { workspace = true }
-# A seed the caller left blank is drawn here, so a re-dispatch of the
-# same graph is a new sample rather than a cache hit on the backend.
+# Draws the seed a caller left blank; `params_with_seed` says why.
 rand        = { workspace = true }

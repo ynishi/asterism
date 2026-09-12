@@ -19,9 +19,11 @@
 //!   backend answers with is what the `LoadImage` node is given. Stock
 //!   ComfyUI refuses a path outside `input/`, so this is the only way
 //!   an image gets in.
-//! - Every produced file is fetched and written under the profile's
-//!   custody root ([`asterism_exporter_common::CustodyPaths`]), and
-//!   that path is the reified asset's locator. ComfyUI's own `output/`
+//! - Every image a node emitted (`outputs.<node>.images[]`; other
+//!   output kinds are left where they are) is fetched and written under
+//!   the profile's custody root
+//!   ([`asterism_exporter_common::CustodyPaths`]), and that path is the
+//!   reified asset's locator. ComfyUI's own `output/`
 //!   is not a place a locator can point: `temp/` is wiped on restart,
 //!   file names are a counter that is reused once a file is deleted,
 //!   and where the directory is at all is a flag on ComfyUI's command
@@ -56,16 +58,16 @@
 //!   the backend as the integer `4`.
 //! - `input_slot` — which nodes take an image from the snapshot, as
 //!   `{ node_id: input_index }`; the index is the position in the
-//!   snapshot's member list. A bare `"10"` still means `{ "10": 0 }`,
-//!   which is what every stored params blob says. Optional: a txt2img
-//!   graph names no node and uploads nothing.
+//!   snapshot's member list. A bare `"10"` is accepted and means
+//!   `{ "10": 0 }`. Optional: a txt2img graph names no node and uploads
+//!   nothing.
 //! - `seed` — read by `{{params.seed?}}`; left out, a random one is
 //!   drawn per dispatch and written into the params the template sees,
 //!   so a re-dispatch is a new sample and the attempt record shows
 //!   which one.
-//! - `poll_interval_ms` — how often the runner will poll; the value is
-//!   echoed back into the progress hint so the UI can display a
-//!   correct spinner cadence.
+//! - `poll_interval_ms` — echoed into the progress hint's message
+//!   while the prompt is queued. The runner's own cadence is the job
+//!   queue's; nothing reads this number back.
 //!
 //! Anything else in the blob is the caller's — `{{params.<key>}}`
 //! reaches it. That is the same rule the http adapter has.
@@ -95,9 +97,9 @@ use serde_json::Value;
 
 /// Slug the registry uses for this exporter.
 pub const SLUG: &str = "comfy";
-/// The action the shipped example and the dispatch form name. The
-/// exporter accepts any action — it is a label on the derived assets,
-/// not a switch inside the graph — and this is the conventional one.
+/// The conventional action name for the graph the shipped example
+/// describes. The exporter accepts any action — it is a label on the
+/// derived assets, not a switch inside the graph.
 pub const ACTION_IMG2IMG: &str = "img2img";
 
 /// Public name for this exporter's params schema in the
@@ -181,11 +183,12 @@ struct ComfyHandlePayload {
     prompt_id: String,
     /// Base URL to hit on subsequent polls.
     endpoint: String,
-    /// Poll interval echoed back so the SDK's `ProgressHint` can
-    /// carry it.
+    /// Poll interval echoed into the progress hint's message.
     poll_interval_ms: u64,
-    /// The seed the graph was sent with, when the template read one:
-    /// the value a reader of the derived asset wants beside it.
+    /// The seed the graph was sent with, when the graph took one from
+    /// the params (`{{params.seed}}` somewhere in it); `None` for a
+    /// graph that carries its own literal. The value a reader of the
+    /// derived asset wants beside it.
     #[serde(default)]
     seed: Option<Value>,
 }
@@ -198,8 +201,8 @@ struct ComfyHandlePayload {
 pub struct ComfyHttpExporter {
     http: reqwest::Client,
     /// Where fetched outputs are written. Bound at construction by the
-    /// composition root, never read out of the params: a params-supplied
-    /// path would let a dispatch write outside the profile that ran it.
+    /// composition root, never read out of the params — see
+    /// [`CustodyPaths::new`] for why.
     custody: CustodyPaths,
     grammar: CommonExportAdapter,
 }
@@ -279,6 +282,16 @@ fn sole_placeholder(s: &str) -> Option<(&str, bool)> {
     })
 }
 
+/// Whether any leaf of the graph names the params' seed.
+fn workflow_reads_seed(workflow: &Value) -> bool {
+    match workflow {
+        Value::String(s) => s.contains("{{params.seed"),
+        Value::Array(arr) => arr.iter().any(workflow_reads_seed),
+        Value::Object(obj) => obj.values().any(workflow_reads_seed),
+        _ => false,
+    }
+}
+
 /// Renders the graph's string leaves through the template.
 ///
 /// The one departure from [`TemplateAdapter::render_json`]: a leaf that
@@ -295,6 +308,9 @@ fn render_workflow(
     match value {
         Value::String(s) => match sole_placeholder(s) {
             Some((key, optional)) => match env.value(key) {
+                // A key that is there but null is what it is for
+                // `render`: nothing, spelled as the empty string.
+                Some(Value::Null) => Ok(Value::String(String::new())),
                 Some(v) => Ok(v),
                 None if optional => Ok(Value::String(String::new())),
                 None => Err(ExporterError::BackendRejected(format!(
@@ -348,10 +364,10 @@ fn set_workflow_image(
 /// What `POST /upload/image` answered: the name the file has inside
 /// ComfyUI, which is what a `LoadImage` node is given.
 ///
-/// ComfyUI renames on collision unless told to overwrite, and the
-/// response is the only place the name it chose appears — a caller
-/// that reused the name it sent would point the node at the wrong
-/// file.
+/// Read from the response rather than rebuilt from the request. The
+/// upload asks to overwrite, so today the name comes back as sent —
+/// but the subfolder the backend settled on and any renaming a version
+/// applies are in its answer, not in what was asked.
 #[derive(Debug, Clone, Deserialize)]
 struct UploadResponse {
     name: String,
@@ -601,7 +617,14 @@ impl Exporter for ComfyHttpExporter {
                 image,
             });
         }
-        let seed = template_params.get("seed").cloned();
+        // Only a graph that took its seed from the params has a seed to
+        // report; a frontend export carries a literal in the sampler,
+        // and the drawn one never left this function.
+        let seed = if workflow_reads_seed(&params.workflow) {
+            template_params.get("seed").cloned()
+        } else {
+            None
+        };
         // ComfyUI's client id is arbitrary; using the dispatch id keeps
         // the WS backchannel (a later addition) natural. The prompt id
         // is ours to choose as well, and choosing it means the PNG can
@@ -936,6 +959,7 @@ mod tests {
             "endpoint": "http://x",
             "prompt": "golden hour",
             "count": 4,
+            "negative": null,
             "workflow": {}
         });
         let ctx = ctx(&inputs, &params);
@@ -944,6 +968,7 @@ mod tests {
             "6": { "inputs": { "text": "{{params.prompt}}, {{input[0].cover}}" } },
             "12": { "inputs": { "amount": "{{params.count}}" } },
             "9": { "inputs": { "filename_prefix": "asterism/{{dispatch_id}}" } },
+            "7": { "inputs": { "text": "{{params.negative}}" } },
             "3": { "inputs": { "seed": "{{params.seed?}}", "steps": 30 } }
         });
         let rendered = render_workflow(&CommonExportAdapter, &workflow, &env).unwrap();
@@ -964,6 +989,10 @@ mod tests {
             "optional and absent: empty"
         );
         assert_eq!(
+            rendered["7"]["inputs"]["text"], "",
+            "present but null: empty, as `render` has it"
+        );
+        assert_eq!(
             rendered["3"]["inputs"]["steps"], 30,
             "a literal rides through"
         );
@@ -974,6 +1003,18 @@ mod tests {
             matches!(&err, ExporterError::BackendRejected(m) if m.contains("params.seed")),
             "{err:?}"
         );
+    }
+
+    /// A graph that carries its own literal seed never took the drawn
+    /// one, so there is none to report beside its outputs.
+    #[test]
+    fn only_a_graph_that_reads_the_params_seed_has_one_to_report() {
+        let literal = serde_json::json!({ "3": { "inputs": { "seed": 12345 } } });
+        assert!(!workflow_reads_seed(&literal));
+        let optional = serde_json::json!({ "3": { "inputs": { "seed": "{{params.seed?}}" } } });
+        assert!(workflow_reads_seed(&optional));
+        let nested = serde_json::json!({ "3": { "inputs": { "seed": ["{{params.seed}}"] } } });
+        assert!(workflow_reads_seed(&nested));
     }
 
     #[test]

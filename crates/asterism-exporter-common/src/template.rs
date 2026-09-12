@@ -213,8 +213,8 @@ fn dot_path(root: &Value, path: &str) -> Option<Value> {
 
 /// How a resolved value is spelled when it lands in a string.
 ///
-/// Null resolves to nothing at all — which an optional placeholder turns
-/// into an empty string and a required one reports as unresolved. That
+/// Null resolves to the empty string, optional or not; only a key that
+/// is absent altogether is unresolved. That
 /// distinction is deliberate: a backend that sends `"caption": null` is
 /// saying the same thing as one that omits the field, and a template
 /// should not have to know which shape it is talking to.

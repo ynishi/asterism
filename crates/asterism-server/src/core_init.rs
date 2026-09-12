@@ -1331,8 +1331,8 @@ pub async fn init_core_with(
         disclosure_cell.clone(),
     ));
 
-    // Register the built-in exporters (`comfy` / `file` / `http`, the
-    // last of them twice).
+    // Register the built-in exporters (`comfy` / `file` / `http` /
+    // `transfer`, and `http` under a second name).
     //
     // `comfy` and `http` are the ones that need an argument: both take
     // custody of the files their backend produces, and where those go
