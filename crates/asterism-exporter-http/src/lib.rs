@@ -188,7 +188,6 @@
 //! [`record`] for the shape, and for why the status is beside the value
 //! rather than written into it.
 
-pub mod custody;
 pub mod record;
 pub mod secret;
 
@@ -205,7 +204,9 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub use custody::CustodyPaths;
+// Re-exported from where it moved to: the layout is shared with the
+// ComfyUI adapter now, and callers that named it here keep working.
+pub use asterism_exporter_common::CustodyPaths;
 pub use record::{Absence, FieldRecord, Record, RecordSchema};
 pub use secret::SecretGrammar;
 
