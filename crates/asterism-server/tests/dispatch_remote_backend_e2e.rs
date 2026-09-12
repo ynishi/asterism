@@ -464,14 +464,25 @@ fn comfy_waiting_message() -> String {
 /// happens to be written first and sorts first as well, which is two
 /// coincidences rather than a reason.
 ///
-/// What the assertions actually depend on: only node `"9"` carries an
-/// `images` array, so exactly one node contributes outputs whatever
-/// order the walk takes, and the ordering that is asserted is inside
-/// that array — a real JSON array, which keeps its order under either
-/// map type.
+/// Node `"5"` is a preview. `PreviewImage` subclasses `SaveImage` and
+/// reports under the same `images` key, differing only in `type` —
+/// so a graph that previews what it also saves, which is most graphs,
+/// lists the same picture twice. A harvest that took both would mint
+/// two assets per generation, and a fixture whose every entry said
+/// `output` could never say so.
+///
+/// What the assertions actually depend on: only nodes `"9"` and `"5"`
+/// carry an `images` array, only `"9"`'s are `output`, and the ordering
+/// that is asserted is inside that array — a real JSON array, which
+/// keeps its order under either map type.
 fn comfy_success_outputs() -> serde_json::Value {
     json!({
         "12": { "text": ["a node that produced no images"] },
+        "5": {
+            "images": [
+                { "filename": "asterism_temp_abcde_00001_.png", "subfolder": "", "type": "temp" }
+            ]
+        },
         "9": {
             "images": [
                 { "filename": "asterism_00001_.png", "subfolder": "", "type": "output" },
@@ -1131,7 +1142,8 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
             "GET /view?filename=asterism_00002_.png&subfolder=batch&type=output".to_string(),
         ],
         "upload, submit, the poll that came back empty, the poll that said done, \
-         the harvest's own read, and one fetch per file the history named"
+         the harvest's own read, and one fetch per *saved* file the history \
+         named — the preview is not fetched at all"
     );
 
     // (B) The state machine, with the test as its only driver.
@@ -1180,9 +1192,11 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
         }])
     );
 
-    // (C) What the harvest reified. Two, not three: node "12" produced
-    // text and no images, and a node with nothing to collect is skipped
-    // rather than turned into an asset with no artefact behind it.
+    // (C) What the harvest reified. Two, out of four entries the
+    // history offered: node "12" produced text and no images, and a
+    // node with nothing to collect is skipped rather than turned into
+    // an asset with no artefact behind it; node "5" produced a preview,
+    // which is the same picture ComfyUI is showing rather than keeping.
     assert_eq!(export.output_ids.len(), 2);
     let first = detail_of(&core, &export.output_ids[0]).await;
     let second = detail_of(&core, &export.output_ids[1]).await;

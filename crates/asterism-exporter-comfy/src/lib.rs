@@ -21,15 +21,24 @@
 //!   `input/`, and a bare name would name a file in another directory.
 //!   Stock ComfyUI refuses a path outside `input/`, so the upload is
 //!   the only way an image gets in.
-//! - Every image a node emitted (`outputs.<node>.images[]`; other
-//!   output kinds are left where they are) is fetched and written under
-//!   the profile's custody root
+//!
+//!   That a path works there at all is worth writing down, because the
+//!   node's own `INPUT_TYPES` lists the top level of `input/` and
+//!   nothing else, and a reader who stops there concludes this cannot
+//!   work. `image` is a combo input, and `validate_inputs` skips the
+//!   "value is one of these" check for any input the node's
+//!   `VALIDATE_INPUTS` names — `LoadImage`'s names `image`, so what
+//!   actually runs is `exists_annotated_filepath`, which joins the
+//!   value onto `input/` and asks only that the result stay inside it.
+//! - Every image a saver wrote (`outputs.<node>.images[]` with
+//!   `type: "output"`; previews and other output kinds are left where
+//!   they are) is fetched and written under the profile's custody root
 //!   ([`asterism_exporter_common::CustodyPaths`]), and that path is the
-//!   reified asset's locator. ComfyUI's own `output/`
-//!   is not a place a locator can point: `temp/` is wiped on restart,
-//!   file names are a counter that is reused once a file is deleted,
-//!   and where the directory is at all is a flag on ComfyUI's command
-//!   line that this process cannot see.
+//!   reified asset's locator. ComfyUI's own directories are not a place
+//!   a locator can point: `temp/` is wiped on restart, file names are a
+//!   counter that is reused once a file is deleted, and where `output/`
+//!   is at all is a flag on ComfyUI's command line that this process
+//!   cannot see.
 //!
 //! Deferred: WebSocket progress, a saved-workflow registry, fanning a
 //! snapshot's members through one graph each. The `Exporter` trait
@@ -77,11 +86,19 @@
 //! ## What the produced PNG carries
 //!
 //! The submit sets `extra_data.extra_pnginfo.asterism` to the dispatch
-//! id and the prompt id, and ComfyUI writes every key of
-//! `extra_pnginfo` as a tEXt chunk of that name beside its own
-//! `prompt`. A file that reaches the library by some other route —
-//! dragged out of ComfyUI's output directory — still says which
-//! dispatch made it.
+//! id and the prompt id. A saver that declares the `EXTRA_PNGINFO`
+//! hidden input — stock `SaveImage` and `PreviewImage` do — writes
+//! every key of `extra_pnginfo` as a tEXt chunk of that name beside
+//! ComfyUI's own `prompt`, so a file that reaches the library by some
+//! other route, dragged out of ComfyUI's output directory, still says
+//! which dispatch made it.
+//!
+//! Two things put that beyond this exporter's reach, and neither is an
+//! error here: a graph saving through a node that asks for no such
+//! hidden input, and a ComfyUI started with `--disable-metadata`, which
+//! writes no chunks at all. What the dispatch itself produced carries
+//! the same ids on its own row either way; the chunk is for the copy
+//! that leaves.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -794,6 +811,17 @@ impl Exporter for ComfyHttpExporter {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default();
                 let kind = img.get("type").and_then(|v| v.as_str()).unwrap_or("output");
+                // `temp` is ComfyUI showing you something rather than
+                // keeping it. `PreviewImage` subclasses `SaveImage` with
+                // the temp directory and reports under the same
+                // `images` key, so a graph that previews what it also
+                // saves — which is most graphs — lists the same picture
+                // twice, and a walk that took both would mint two assets
+                // for one generation. What the library wants is what a
+                // saver wrote, so only `output` is collected.
+                if kind != "output" {
+                    continue;
+                }
                 let url = view_url(&payload.endpoint, filename, subfolder, kind);
                 let resp =
                     self.http.get(&url).send().await.map_err(|e| {
