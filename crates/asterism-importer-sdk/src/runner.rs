@@ -89,9 +89,28 @@ where
     while let Some(next) = stream.next().await {
         let raw = match next {
             Ok(item) => item,
-            Err(err) => {
+            // What the classification buys, at the one site that used
+            // to ignore it. Every failure was recorded and stepped
+            // over, so a source that had gone away — a moved
+            // directory, a query naming a column that is not there —
+            // was handled as one unreadable file and the loop ran on
+            // through the rest of the stream reporting the same thing
+            // over and over. Only an item-local failure is stepped
+            // over now; anything else ends the run and says why.
+            //
+            // `Retry` ends it here too, and that is this runner's
+            // limitation rather than the class's meaning: there is no
+            // backoff loop to hand it to yet. A caller that grows one
+            // reads `disposition` and waits instead — which is why the
+            // wait rides on the error rather than being recomputed
+            // from its text.
+            Err(err) if err.is_item_local() => {
                 progress.record_err("<scan>", &err.to_string());
                 continue;
+            }
+            Err(err) => {
+                progress.record_err("<scan>", &err.to_string());
+                return Err(anyhow::Error::new(err).context("scan ended"));
             }
         };
         let raw_locator = raw.locator.clone();
@@ -257,7 +276,7 @@ mod tests {
 
     use super::*;
     use crate::scanner::ScanFuture;
-    use crate::{Footprint, FootprintSource, Note, ParseError, RawItem};
+    use crate::{Footprint, FootprintSource, Note, ParseError, RawItem, SourceError};
 
     struct OneItemScanner;
 
@@ -313,5 +332,102 @@ mod tests {
                 failed: 0
             }
         );
+    }
+
+    /// A scanner whose stream yields one failure and then an item, so a
+    /// test can say whether the loop got past the failure.
+    struct FailingScanner(std::sync::Mutex<Option<SourceError>>);
+
+    impl FailingScanner {
+        fn with(err: SourceError) -> Self {
+            Self(std::sync::Mutex::new(Some(err)))
+        }
+    }
+
+    impl SourceScanner for FailingScanner {
+        fn scan(&self, _mode: ScanMode) -> ScanFuture<'_> {
+            let err = self.0.lock().expect("the fixture's error").take();
+            Box::pin(async move {
+                let item = RawItem {
+                    source_kind: "test".into(),
+                    locator: "/tmp/after.txt".into(),
+                    payload: b"reached".to_vec(),
+                    occurred_at: Some(Utc::now()),
+                    extra: serde_json::json!({}),
+                };
+                Ok(Box::pin(stream::iter([
+                    Err(err.expect("scan is called once")),
+                    Ok(item),
+                ])) as crate::scanner::ItemStream)
+            })
+        }
+    }
+
+    fn dry(server: &str) -> ImportOptions {
+        let mut options = ImportOptions::new("persona-id");
+        options.dry_run = true;
+        options.server = server.into();
+        options
+    }
+
+    /// One unreadable item is a line in the report, and the item behind
+    /// it still arrives.
+    #[tokio::test]
+    async fn an_item_local_failure_does_not_end_the_scan() {
+        let scanner = FailingScanner::with(SourceError::item("/tmp/bad.txt", "permission denied"));
+        let summary = run_import(
+            &scanner,
+            &NoteParser,
+            ScanMode::Enumerate,
+            dry("http://127.0.0.1:1"),
+        )
+        .await
+        .expect("an item-local failure is not the end of the run");
+        assert_eq!(
+            summary,
+            ImportSummary {
+                imported: 1,
+                failed: 1
+            },
+            "the failure is reported and the item behind it still lands"
+        );
+    }
+
+    /// And the case this classification was introduced for: a source
+    /// that is not going to work ends the run instead of being stepped
+    /// over, so the item behind it is never reached.
+    ///
+    /// Before the taxonomy every failure took the arm above, which is
+    /// why an import against a moved directory or a query naming a
+    /// column that does not exist reported its way through the whole
+    /// stream and exited 0.
+    #[tokio::test]
+    async fn a_failure_the_run_cannot_get_past_ends_it() {
+        for err in [
+            SourceError::Config("no such directory".into()),
+            SourceError::Source("malformed response".into()),
+            SourceError::rate_limited("429"),
+            SourceError::Transient("connection refused".into()),
+        ] {
+            let expected = err.to_string();
+            let scanner = FailingScanner::with(err);
+            let outcome = run_import(
+                &scanner,
+                &NoteParser,
+                ScanMode::Enumerate,
+                dry("http://127.0.0.1:1"),
+            )
+            .await;
+            let reported = outcome
+                .expect_err("the run ends")
+                .chain()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join(": ");
+            assert!(
+                reported.contains(&expected),
+                "the run says which failure ended it: {reported}"
+            );
+        }
     }
 }

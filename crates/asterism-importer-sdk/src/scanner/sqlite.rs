@@ -29,7 +29,8 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use super::{RawItem, ScanError, ScanFuture, ScanMode, SourceScanner};
+use super::{RawItem, ScanFuture, ScanMode, SourceScanner};
+use crate::port::SourceError;
 
 /// Column-to-`RawItem` mapping supplied by the importer.
 #[derive(Debug, Clone)]
@@ -101,7 +102,7 @@ impl SourceScanner for SqliteScanner {
         let this = self.clone();
         Box::pin(async move {
             if !this.db_path.exists() {
-                return Err(ScanError::SourceUnavailable(format!(
+                return Err(SourceError::Config(format!(
                     "db does not exist: {}",
                     this.db_path.display()
                 )));
@@ -111,12 +112,12 @@ impl SourceScanner for SqliteScanner {
                 // polling loop; neither is worth cementing before we
                 // have a real consumer. Refuse loudly instead of
                 // pretending.
-                return Err(ScanError::SourceUnavailable(
+                return Err(SourceError::Config(
                     "SqliteScanner does not support watch mode yet".into(),
                 ));
             }
 
-            let (tx, rx) = mpsc::channel::<Result<RawItem, ScanError>>(64);
+            let (tx, rx) = mpsc::channel::<Result<RawItem, SourceError>>(64);
             let db_path = this.db_path.clone();
             let query = this.query.clone();
             let columns = this.columns.clone();
@@ -136,23 +137,21 @@ fn run_query(
     query: &str,
     columns: &ColumnMap,
     source_kind: &str,
-    tx: &mpsc::Sender<Result<RawItem, ScanError>>,
+    tx: &mpsc::Sender<Result<RawItem, SourceError>>,
 ) {
     let conn = match Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
         Ok(c) => c,
         Err(err) => {
-            let _ = tx.blocking_send(Err(ScanError::SourceUnavailable(format!(
-                "open failed: {err}"
-            ))));
+            let _ = tx.blocking_send(Err(SourceError::Source(format!("open failed: {err}"))));
             return;
         }
     };
     let mut stmt = match conn.prepare(query) {
         Ok(s) => s,
         Err(err) => {
-            let _ = tx.blocking_send(Err(ScanError::SourceUnavailable(format!(
-                "prepare failed: {err}"
-            ))));
+            // The query came from the caller, so SQLite refusing to
+            // prepare it is a configuration answer, not an outage.
+            let _ = tx.blocking_send(Err(SourceError::Config(format!("prepare failed: {err}"))));
             return;
         }
     };
@@ -160,7 +159,7 @@ fn run_query(
     let id_idx = match column_index(&names, &columns.id) {
         Some(i) => i,
         None => {
-            let _ = tx.blocking_send(Err(ScanError::SourceUnavailable(format!(
+            let _ = tx.blocking_send(Err(SourceError::Config(format!(
                 "id column {:?} missing from result set",
                 columns.id
             ))));
@@ -170,7 +169,7 @@ fn run_query(
     let body_idx = match column_index(&names, &columns.body) {
         Some(i) => i,
         None => {
-            let _ = tx.blocking_send(Err(ScanError::SourceUnavailable(format!(
+            let _ = tx.blocking_send(Err(SourceError::Config(format!(
                 "body column {:?} missing from result set",
                 columns.body
             ))));
@@ -185,9 +184,7 @@ fn run_query(
     let mut rows = match stmt.query([]) {
         Ok(r) => r,
         Err(err) => {
-            let _ = tx.blocking_send(Err(ScanError::SourceUnavailable(format!(
-                "query failed: {err}"
-            ))));
+            let _ = tx.blocking_send(Err(SourceError::Source(format!("query failed: {err}"))));
             return;
         }
     };
@@ -226,9 +223,10 @@ fn run_query(
             }
             Ok(None) => break,
             Err(err) => {
-                let _ = tx.blocking_send(Err(ScanError::ItemReadFailed(format!(
-                    "row read failed: {err}"
-                ))));
+                let _ = tx.blocking_send(Err(SourceError::item(
+                    db_path.display().to_string(),
+                    format!("row read failed: {err}"),
+                )));
                 break;
             }
         }

@@ -30,6 +30,12 @@
 //! - [`AssetSpec`] is the flat intermediate the SDK converts each
 //!   footprint to before batching; plugin authors do not touch it
 //!   directly (see [`Footprint::into_asset_spec`]).
+//! - [`port`] holds the vocabulary the scanners are written against:
+//!   [`SourceError`], which says what a caller does about a failure
+//!   rather than where it happened, and [`SyncState`], which is where a
+//!   scan's resumption point will live. Nothing persists the latter
+//!   yet — the type and its wire form are settled first, because the
+//!   question of who starts an adapter is not.
 //! - [`ApiClient`] performs the HTTP POSTs (single or batch).
 //! - [`Progress`] keeps a running success / failure tally.
 //! - [`run_import`] owns the shared scan / parse / batch / progress
@@ -104,6 +110,7 @@ pub mod footprint;
 pub mod harvest;
 pub mod mapper;
 pub mod parser;
+pub mod port;
 pub mod progress;
 pub mod runner;
 pub mod scanner;
@@ -135,8 +142,7 @@ pub use footprint::{
 };
 pub use mapper::{AssetSpec, spec_to_command};
 pub use parser::{ParseError, RecordAddresses, SourceParser, resolve_occurrence};
+pub use port::{Disposition, SourceError, SyncState};
 pub use progress::Progress;
 pub use runner::{ImportOptions, ImportSummary, run_import};
-pub use scanner::{
-    RawItem, ScanError, ScanMode, SourceScanner, fs::FsScanner, sqlite::SqliteScanner,
-};
+pub use scanner::{RawItem, ScanMode, SourceScanner, fs::FsScanner, sqlite::SqliteScanner};

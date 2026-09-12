@@ -17,7 +17,8 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use walkdir::WalkDir;
 
-use super::{RawItem, ScanError, ScanFuture, ScanMode, SourceScanner};
+use super::{RawItem, ScanFuture, ScanMode, SourceScanner};
+use crate::port::SourceError;
 
 /// Filesystem scanner.
 ///
@@ -78,9 +79,9 @@ impl FsScanner {
         }
     }
 
-    fn read_item(&self, path: PathBuf) -> Result<RawItem, ScanError> {
-        let payload = std::fs::read(&path)
-            .map_err(|e| ScanError::ItemReadFailed(format!("{}: {e}", path.display())))?;
+    fn read_item(&self, path: PathBuf) -> Result<RawItem, SourceError> {
+        let payload =
+            std::fs::read(&path).map_err(|e| SourceError::item(path.display().to_string(), e))?;
         let (occurred_at, size) = std::fs::metadata(&path)
             .map(|m| {
                 let mtime = m
@@ -122,8 +123,12 @@ impl SourceScanner for FsScanner {
         let root = self.root.clone();
         let this = self.clone();
         Box::pin(async move {
+            // `Config` rather than `Transient`: the directory the
+            // caller named is not there, and no amount of waiting
+            // makes a path appear. The message is for whoever typed
+            // it.
             if !root.exists() {
-                return Err(ScanError::SourceUnavailable(format!(
+                return Err(SourceError::Config(format!(
                     "path does not exist: {}",
                     root.display()
                 )));
@@ -131,7 +136,7 @@ impl SourceScanner for FsScanner {
 
             // Enumerate the current tree into a channel so both modes
             // can share the same stream shape.
-            let (tx, rx) = mpsc::channel::<Result<RawItem, ScanError>>(64);
+            let (tx, rx) = mpsc::channel::<Result<RawItem, SourceError>>(64);
             let enumerate = {
                 let this = this.clone();
                 let root = root.clone();
@@ -149,11 +154,7 @@ impl SourceScanner for FsScanner {
                                     .path()
                                     .map(|p| p.display().to_string())
                                     .unwrap_or_else(|| "<no-path>".into());
-                                let _ = tx
-                                    .send(Err(ScanError::ItemReadFailed(format!(
-                                        "walkdir at {path}: {err}"
-                                    ))))
-                                    .await;
+                                let _ = tx.send(Err(SourceError::item(path, err))).await;
                                 continue;
                             }
                         };
@@ -191,8 +192,12 @@ impl SourceScanner for FsScanner {
                         }) {
                             Ok(w) => w,
                             Err(err) => {
+                                // Nothing about this run gets further:
+                                // the platform refused a watcher, so
+                                // there is no second half of the scan
+                                // to wait for.
                                 let _ = tx
-                                    .send(Err(ScanError::SourceUnavailable(format!(
+                                    .send(Err(SourceError::Source(format!(
                                         "watcher init failed: {err}"
                                     ))))
                                     .await;
@@ -201,8 +206,9 @@ impl SourceScanner for FsScanner {
                         };
                         if let Err(err) = watcher.watch(&root_watch, RecursiveMode::Recursive) {
                             let _ = tx
-                                .send(Err(ScanError::SourceUnavailable(format!(
-                                    "watch failed: {err}"
+                                .send(Err(SourceError::Source(format!(
+                                    "watch failed: {} : {err}",
+                                    root_watch.display()
                                 ))))
                                 .await;
                             return;
@@ -212,9 +218,10 @@ impl SourceScanner for FsScanner {
                                 Ok(ev) => ev,
                                 Err(err) => {
                                     let _ = tx
-                                        .send(Err(ScanError::ItemReadFailed(format!(
-                                            "watcher error: {err}"
-                                        ))))
+                                        .send(Err(SourceError::item(
+                                            root_watch.display().to_string(),
+                                            format!("watcher error: {err}"),
+                                        )))
                                         .await;
                                     continue;
                                 }

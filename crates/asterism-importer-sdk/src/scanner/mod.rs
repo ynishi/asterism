@@ -13,6 +13,8 @@ use futures::stream::BoxStream;
 use serde_json::Value;
 use std::pin::Pin;
 
+use crate::port::SourceError;
+
 /// A raw scanned item — a payload plus the metadata needed to attribute
 /// it back to its origin.
 #[derive(Debug, Clone)]
@@ -75,28 +77,22 @@ pub enum ScanMode {
     Watch,
 }
 
-/// Errors returned by scanners.
-#[derive(Debug, thiserror::Error)]
-pub enum ScanError {
-    /// Source path / URL / query was invalid or unreachable.
-    #[error("source unavailable: {0}")]
-    SourceUnavailable(String),
-    /// Item-level I/O failure that should be surfaced but not necessarily
-    /// abort the whole scan.
-    #[error("item read failed: {0}")]
-    ItemReadFailed(String),
-    /// Wraps any other transport / library failure.
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
-}
-
-/// Async stream of scanned items (or per-item errors).
-pub type ItemStream = BoxStream<'static, Result<RawItem, ScanError>>;
+/// Async stream of scanned items, or failures.
+///
+/// A failure on this stream is not necessarily the end of it: which
+/// ones the caller may carry on past is
+/// [`SourceError::disposition`](crate::SourceError::disposition), and
+/// the loop in [`run_import`](crate::runner::run_import) is written
+/// against that rather than against the variants.
+pub type ItemStream = BoxStream<'static, Result<RawItem, SourceError>>;
 
 /// Future returned by [`SourceScanner::scan`] — resolves to the item
 /// stream once the scanner has finished setup.
+///
+/// A failure here is a failure to *start*, which no disposition can
+/// soften: there is no stream to carry on with.
 pub type ScanFuture<'a> =
-    Pin<Box<dyn std::future::Future<Output = Result<ItemStream, ScanError>> + Send + 'a>>;
+    Pin<Box<dyn std::future::Future<Output = Result<ItemStream, SourceError>> + Send + 'a>>;
 
 /// Trait every source scanner implements.
 ///
