@@ -19,8 +19,9 @@
 //! ```
 //!
 //! - [`SourceScanner`] enumerates or watches an external source and
-//!   emits [`RawItem`]s. Implementations bundled here: [`FsScanner`],
-//!   [`SqliteScanner`].
+//!   emits [`ScanEvent`]s — the [`RawItem`]s themselves, and the points
+//!   a later scan could take up from. Implementations bundled here:
+//!   [`FsScanner`], [`SqliteScanner`].
 //! - [`SourceParser`] turns a `RawItem` into zero or more
 //!   [`Footprint`]s; it is the only source-specific piece an importer
 //!   author has to write.
@@ -33,9 +34,9 @@
 //! - [`port`] holds the port's vocabulary. [`SourceError`] is what
 //!   [`SourceScanner`] is written against, and names what a failure
 //!   cost — one record, or the run — rather than where it happened.
-//!   [`SyncState`] is where a scan's resumption point will live; its
-//!   type and serialised form are settled ahead of the transport that
-//!   will carry it.
+//!   [`SyncState`] is where a scan's resumption point lives; its type
+//!   and serialised form are settled independently of whatever comes
+//!   to store one.
 //! - [`ApiClient`] performs the HTTP POSTs (single or batch).
 //! - [`Progress`] keeps a running success / failure tally.
 //! - [`run_import`] owns the shared scan / parse / batch / progress
@@ -145,4 +146,6 @@ pub use parser::{ParseError, RecordAddresses, SourceParser, resolve_occurrence};
 pub use port::{Disposition, SourceError, SyncState};
 pub use progress::Progress;
 pub use runner::{ImportOptions, ImportSummary, run_import};
-pub use scanner::{RawItem, ScanMode, SourceScanner, fs::FsScanner, sqlite::SqliteScanner};
+pub use scanner::{
+    RawItem, ScanEvent, ScanMode, SourceScanner, fs::FsScanner, sqlite::SqliteScanner,
+};

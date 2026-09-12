@@ -1,7 +1,12 @@
 //! `FsScanner` — filesystem source scanner.
 //!
 //! Walks a directory tree, optionally filtered by glob-ish extension
-//! set, and emits every matching file as a `RawItem`. In `Watch` mode
+//! set, and emits every matching file as a `RawItem`.
+//!
+//! The walk is sorted and resumable: a checkpoint behind each file
+//! carries the path it stopped at, and a later scan handed one takes up
+//! after it. The partition is the root *and* the extension filter,
+//! because both decide what the walk yields. In `Watch` mode
 //! the scanner also stays live and streams filesystem-change events via
 //! `notify` — new / modified files are re-emitted, deletions are
 //! ignored (deletions on the source do not automatically delete the
@@ -17,8 +22,8 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use walkdir::WalkDir;
 
-use super::{RawItem, ScanFuture, ScanMode, SourceScanner};
-use crate::port::SourceError;
+use super::{RawItem, ScanEvent, ScanFuture, ScanMode, SourceScanner};
+use crate::port::{SourceError, SyncState};
 
 /// Filesystem scanner.
 ///
@@ -64,6 +69,53 @@ impl FsScanner {
     pub fn with_source_kind(mut self, slug: impl Into<String>) -> Self {
         self.source_kind = slug.into();
         self
+    }
+
+    /// The resumable unit: this root, walked through this filter.
+    ///
+    /// Both, because a partition has to name what a position inside it
+    /// is a position *in*, and [`accepts`](Self::accepts) is half of
+    /// what this walk yields. `asterism-import image --dir ~/Pictures`
+    /// and `asterism-import video --dir ~/Pictures` walk one tree and
+    /// hand over two different sets of files; on the root alone their
+    /// states would be interchangeable, and one would take up after a
+    /// path the other had never reached.
+    fn partition(&self) -> String {
+        // Sorted, because `accepts` reads the extensions as a set and
+        // two callers who named the same set in a different order are
+        // scanning the same thing.
+        let mut extensions: Vec<&str> = self.extensions.iter().map(String::as_str).collect();
+        extensions.sort_unstable();
+        format!("root={}|ext={}", self.root.display(), extensions.join(","))
+    }
+
+    /// The path a resumption point says was the last one handled, or an
+    /// answer for a caller that has to be told why it cannot resume.
+    ///
+    /// Two refusals, both `Config`, because both are about how the
+    /// scanner was built rather than about the source: a state from
+    /// another partition, and a state whose offset this version does
+    /// not understand. Neither is answered by starting over — see
+    /// [`SourceScanner::scan`](super::SourceScanner::scan) for why that
+    /// is the one answer a scanner may not give.
+    fn resume_after(&self, state: Option<SyncState>) -> Result<Option<PathBuf>, SourceError> {
+        let Some(state) = state else {
+            return Ok(None);
+        };
+        if state.partition != self.partition() {
+            return Err(SourceError::Config(format!(
+                "cannot resume: the state is for {:?} and this scanner walks {:?}",
+                state.partition,
+                self.partition()
+            )));
+        }
+        match state.offset.get("after_path").and_then(|v| v.as_str()) {
+            Some(path) => Ok(Some(PathBuf::from(path))),
+            None => Err(SourceError::Config(format!(
+                "cannot resume: the state for {:?} carries no `after_path`",
+                state.partition
+            ))),
+        }
     }
 
     fn accepts(&self, path: &Path) -> bool {
@@ -119,7 +171,7 @@ impl SourceScanner for FsScanner {
         true
     }
 
-    fn scan(&self, mode: ScanMode) -> ScanFuture<'_> {
+    fn scan(&self, mode: ScanMode, resume_from: Option<SyncState>) -> ScanFuture<'_> {
         let root = self.root.clone();
         let this = self.clone();
         Box::pin(async move {
@@ -134,9 +186,15 @@ impl SourceScanner for FsScanner {
                 )));
             }
 
+            // Refused before anything is walked: a caller that asked
+            // to resume and cannot needs to hear so instead of
+            // receiving a whole tree it already has.
+            let after_path = this.resume_after(resume_from)?;
+            let partition = this.partition();
+
             // Enumerate the current tree into a channel so both modes
             // can share the same stream shape.
-            let (tx, rx) = mpsc::channel::<Result<RawItem, SourceError>>(64);
+            let (tx, rx) = mpsc::channel::<Result<ScanEvent, SourceError>>(64);
             let enumerate = {
                 let this = this.clone();
                 let root = root.clone();
@@ -146,7 +204,26 @@ impl SourceScanner for FsScanner {
                     // `walkdir::Error` (per-directory read failures on
                     // macOS especially can otherwise strand thousands
                     // of files with no user-visible signal).
-                    for entry_res in WalkDir::new(&root) {
+                    //
+                    // Sorted, because "after this path" only names a
+                    // set once the order is fixed, and this is where it
+                    // is fixed: siblings by name, and a directory's
+                    // contents straight after the directory itself.
+                    //
+                    // The skip below has to be that same order, and
+                    // that is why it compares `Path`s and not the
+                    // strings they print as. `Path` compares component
+                    // by component, which is the walk's order; bytes
+                    // over the whole path are not, and the two disagree
+                    // wherever a directory and a file share a prefix.
+                    // The walk yields `a/z.txt` before `a-b.txt`, while
+                    // as bytes `"…/a-b.txt" < "…/a/z.txt"` — `-` is
+                    // 0x2D and `/` is 0x2F. The first shape of this
+                    // compared bytes, so a run resumed after `a/z.txt`
+                    // dropped `a-b.txt`, which it had never seen: the
+                    // silent loss the sort is here to prevent.
+                    let walk = WalkDir::new(&root).sort_by_file_name();
+                    for entry_res in walk {
                         let entry = match entry_res {
                             Ok(e) => e,
                             Err(err) => {
@@ -164,8 +241,25 @@ impl SourceScanner for FsScanner {
                         if !this.accepts(entry.path()) {
                             continue;
                         }
-                        let item = this.read_item(entry.path().to_path_buf());
-                        if tx.send(item).await.is_err() {
+                        let path = entry.path().to_path_buf();
+                        let locator = path.display().to_string();
+                        if let Some(after) = &after_path
+                            && path.as_path() <= after.as_path()
+                        {
+                            continue;
+                        }
+                        let event = this.read_item(path).map(ScanEvent::Item);
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                        // After the file, not before: the checkpoint
+                        // says everything already yielded is dealt
+                        // with, and this file has been.
+                        let checkpoint = ScanEvent::Checkpoint(SyncState::new(
+                            partition.clone(),
+                            serde_json::json!({ "after_path": locator }),
+                        ));
+                        if tx.send(Ok(checkpoint)).await.is_err() {
                             return;
                         }
                     }
@@ -251,8 +345,8 @@ impl SourceScanner for FsScanner {
                                 if !path.is_file() || !this_watch.accepts(&path) {
                                     continue;
                                 }
-                                let item = this_watch.read_item(path);
-                                if tx.send(item).await.is_err() {
+                                let event = this_watch.read_item(path).map(ScanEvent::Item);
+                                if tx.send(event).await.is_err() {
                                     return;
                                 }
                             }
@@ -271,11 +365,52 @@ mod tests {
     use crate::port::Disposition;
     use futures::StreamExt;
 
-    async fn drain(scanner: FsScanner) -> Vec<Result<RawItem, SourceError>> {
-        match scanner.scan(ScanMode::Enumerate).await {
+    /// Everything the stream yielded, checkpoints included.
+    async fn drain_events(
+        scanner: FsScanner,
+        resume_from: Option<SyncState>,
+    ) -> Vec<Result<ScanEvent, SourceError>> {
+        match scanner.scan(ScanMode::Enumerate, resume_from).await {
             Ok(stream) => stream.collect().await,
             Err(err) => vec![Err(err)],
         }
+    }
+
+    /// The same, with the bookkeeping dropped — what a parser would
+    /// ever be handed.
+    async fn drain(scanner: FsScanner) -> Vec<Result<RawItem, SourceError>> {
+        drain_events(scanner, None)
+            .await
+            .into_iter()
+            .filter_map(|r| match r {
+                Ok(ScanEvent::Item(item)) => Some(Ok(item)),
+                Ok(ScanEvent::Checkpoint(_)) => None,
+                Err(err) => Some(Err(err)),
+            })
+            .collect()
+    }
+
+    /// The locators, in the order the walk yielded them.
+    fn locators(events: &[Result<ScanEvent, SourceError>]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|r| match r {
+                Ok(ScanEvent::Item(item)) => Some(item.locator.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The last checkpoint the scan emitted, which is what a runner
+    /// would keep.
+    fn last_checkpoint(events: &[Result<ScanEvent, SourceError>]) -> Option<SyncState> {
+        events
+            .iter()
+            .filter_map(|r| match r {
+                Ok(ScanEvent::Checkpoint(state)) => Some(state.clone()),
+                _ => None,
+            })
+            .next_back()
     }
 
     /// A root that is not there is the caller's answer, and the scan
@@ -284,7 +419,7 @@ mod tests {
     async fn a_root_that_is_not_there_is_the_callers() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let err = FsScanner::new(tmp.path().join("nope"))
-            .scan(ScanMode::Enumerate)
+            .scan(ScanMode::Enumerate, None)
             .await
             .err()
             .expect("no directory, no scan");
@@ -367,5 +502,144 @@ mod tests {
             ],
             "the extension filter keeps `c.bin` out"
         );
+    }
+
+    /// What the whole resumption is for: a second scan handed the first
+    /// one's checkpoint reads what follows it, and not the tree over
+    /// again.
+    ///
+    /// The sorted walk is asserted here too, because it is the same
+    /// property — see the comment on the walk itself.
+    #[tokio::test]
+    async fn a_resumed_walk_yields_only_what_follows_the_checkpoint() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(tmp.path().join(name), name.as_bytes()).expect("write");
+        }
+        let at = |name: &str| tmp.path().join(name).display().to_string();
+
+        let first = drain_events(FsScanner::new(tmp.path()), None).await;
+        assert_eq!(
+            locators(&first),
+            vec![at("a.txt"), at("b.txt"), at("c.txt")],
+            "sorted, which is what lets a path stand for a position"
+        );
+
+        // The checkpoint that follows the first file — the scan got
+        // that far and no further, which is the state a run cut short
+        // after one file would have kept.
+        let after_a = match &first[1] {
+            Ok(ScanEvent::Checkpoint(state)) => state.clone(),
+            other => panic!("a checkpoint follows each file, found {other:?}"),
+        };
+
+        let second = drain_events(FsScanner::new(tmp.path()), Some(after_a)).await;
+        assert_eq!(
+            locators(&second),
+            vec![at("b.txt"), at("c.txt")],
+            "the file already handled does not come back"
+        );
+        assert_eq!(
+            last_checkpoint(&second).map(|state| state.offset),
+            Some(serde_json::json!({ "after_path": at("c.txt") })),
+            "and the resumed scan earns a point of its own"
+        );
+    }
+
+    /// The walk's order and the resumption's comparison have to be the
+    /// same order, and the case that tells the two apart is a directory
+    /// beside a file it shares a prefix with.
+    ///
+    /// `a/z.txt` is walked before `a-b.txt` — the siblings sort `a`
+    /// before `a-b.txt`, and a directory's contents follow it
+    /// immediately — while as bytes `"…/a-b.txt" < "…/a/z.txt"`, since
+    /// `-` is 0x2D and `/` is 0x2F. The first shape of this compared
+    /// bytes and dropped `a-b.txt` here, having never yielded it. A
+    /// flat directory cannot show the difference, which is why this
+    /// test is not the one above.
+    #[tokio::test]
+    async fn a_resumption_follows_the_walk_and_not_the_bytes() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(tmp.path().join("a")).expect("mkdir");
+        std::fs::write(tmp.path().join("a/z.txt"), b"one").expect("write");
+        std::fs::write(tmp.path().join("a-b.txt"), b"two").expect("write");
+        let at = |name: &str| tmp.path().join(name).display().to_string();
+
+        let first = drain_events(FsScanner::new(tmp.path()), None).await;
+        assert_eq!(
+            locators(&first),
+            vec![at("a/z.txt"), at("a-b.txt")],
+            "a directory's contents come before the sibling sorting after it"
+        );
+
+        let after_a_z = match &first[1] {
+            Ok(ScanEvent::Checkpoint(state)) => state.clone(),
+            other => panic!("a checkpoint follows each file, found {other:?}"),
+        };
+        let second = drain_events(FsScanner::new(tmp.path()), Some(after_a_z)).await;
+        assert_eq!(
+            locators(&second),
+            vec![at("a-b.txt")],
+            "and the file behind it is not dropped for sorting low as bytes"
+        );
+    }
+
+    /// A partition names what a position is a position *in*, and the
+    /// extension filter is half of what this walk yields.
+    ///
+    /// `asterism-import image --dir ~/Pictures` and `… video --dir
+    /// ~/Pictures` are the real shape of this: one tree, two sets of
+    /// files. On the root alone their states were interchangeable, and
+    /// one would take up after a path the other had never reached.
+    #[tokio::test]
+    async fn two_filters_over_one_root_are_two_partitions() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(tmp.path().join("a.png"), b"png").expect("write");
+        std::fs::write(tmp.path().join("b.mp4"), b"mp4").expect("write");
+
+        let images = drain_events(FsScanner::new(tmp.path()).with_extensions(["png"]), None).await;
+        let point = last_checkpoint(&images).expect("the image walk earns a point");
+
+        let err = FsScanner::new(tmp.path())
+            .with_extensions(["mp4"])
+            .scan(ScanMode::Enumerate, Some(point))
+            .await
+            .err()
+            .expect("one walk's position is not the other's");
+        assert!(matches!(err, SourceError::Config(_)), "{err}");
+    }
+
+    /// A state this scanner cannot honour is refused rather than
+    /// ignored — see
+    /// [`SourceScanner::scan`](super::SourceScanner::scan) for why that
+    /// is the only answer available.
+    #[tokio::test]
+    async fn a_state_this_scanner_cannot_use_is_refused_rather_than_ignored() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(tmp.path().join("a.txt"), b"one").expect("write");
+
+        let refusals = [
+            // Written by a scanner walking somewhere else.
+            SyncState::new(
+                "root=/somewhere/else",
+                serde_json::json!({ "after_path": "/somewhere/else/a.txt" }),
+            ),
+            // This root, but an offset this version does not read.
+            SyncState::new(
+                format!("root={}", tmp.path().display()),
+                serde_json::json!({ "cursor": 7 }),
+            ),
+        ];
+        for state in refusals {
+            let err = FsScanner::new(tmp.path())
+                .scan(ScanMode::Enumerate, Some(state))
+                .await
+                .err()
+                .expect("the scan does not start");
+            assert!(
+                matches!(err, SourceError::Config(_)),
+                "how the scanner was built, not what the source did: {err}"
+            );
+        }
     }
 }

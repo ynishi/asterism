@@ -30,7 +30,8 @@ use asterism_contract::digest;
 use futures::stream::{FuturesUnordered, StreamExt};
 
 use crate::{
-    ApiClient, Progress, ScanMode, SourceError, SourceParser, SourceScanner, spec_to_command,
+    ApiClient, Progress, ScanEvent, ScanMode, SourceError, SourceParser, SourceScanner, SyncState,
+    spec_to_command,
 };
 
 #[derive(Debug, Clone)]
@@ -41,6 +42,13 @@ pub struct ImportOptions {
     pub upload_concurrency: usize,
     pub dry_run: bool,
     pub auto_organize_base_dir: Option<String>,
+    /// Where to take up, or `None` to start at the beginning.
+    ///
+    /// Handed to the scanner unread: what it means belongs to whoever
+    /// wrote it. A scanner that cannot use it refuses the scan, so a
+    /// caller that asked to resume and could not is told — see
+    /// [`SourceScanner::scan`].
+    pub resume_from: Option<SyncState>,
 }
 
 impl ImportOptions {
@@ -52,6 +60,7 @@ impl ImportOptions {
             upload_concurrency: 1,
             dry_run: false,
             auto_organize_base_dir: None,
+            resume_from: None,
         }
     }
 }
@@ -84,6 +93,31 @@ pub struct ImportSummary {
     /// with no failures at all, since a lost record raises `failed` and
     /// leaves this `None`.
     pub ended_by: Option<SourceError>,
+    /// Where a later run may take up, if this one earned the right to
+    /// say.
+    ///
+    /// The last checkpoint the scanner emitted — **and only when
+    /// nothing failed**. A checkpoint is the scanner's promise that it
+    /// has handed over everything before it; storing one is a promise
+    /// that everything before it *landed*, and this function cannot
+    /// make the second promise about a run in which something did not.
+    ///
+    /// It could make it about part of one, by tracking which records
+    /// sat between which checkpoints, and that is not free: batches are
+    /// answered out of order, so the bookkeeping would be real. So
+    /// a run with a single failed record hands back nothing, the next
+    /// run re-reads from wherever it last resumed, and the cost of that
+    /// is paid in reading rather than in a record nobody notices is
+    /// missing.
+    ///
+    /// A scan cut short still earns one, which is the case worth
+    /// having: a source that rate-limits halfway is exactly when a
+    /// caller wants to take up rather than begin again.
+    ///
+    /// Handed back rather than kept: where a resumption point is
+    /// stored is the transport's question and not this function's, and
+    /// answering it here would settle it for every caller.
+    pub resume_from: Option<SyncState>,
 }
 
 pub async fn run_import<S, P>(
@@ -106,18 +140,22 @@ where
 
     let progress = Progress::new();
     let payload_is_whole_artefact = scanner.payload_is_whole_artefact();
-    let mut stream = scanner.scan(mode).await?;
+    let mut stream = scanner.scan(mode, options.resume_from.clone()).await?;
     let mut buffer: Vec<AddAssetCommand> = Vec::new();
     // The failure that cost the run, if the scanner sent one. Carried
     // out on the summary rather than thrown instead of it.
     let mut ended_by: Option<SourceError> = None;
+    // The furthest point the scanner said it had got past. Whether this
+    // run may hand it back is decided at the end, when what the server
+    // did with the records in front of it is known.
+    let mut last_checkpoint: Option<SyncState> = None;
     let batch_size = options.batch_size.max(1);
     let upload_concurrency = options.upload_concurrency.max(1);
     let mut in_flight = FuturesUnordered::new();
 
     while let Some(next) = stream.next().await {
-        let raw = match next {
-            Ok(item) => item,
+        let event = match next {
+            Ok(event) => event,
             // A failure never leaves this loop. It ends when the stream
             // does, which is the scanner's call and not this
             // function's: `SqliteScanner` stops after a row it could
@@ -145,6 +183,15 @@ where
                 // a failure it cannot continue past; one that sends
                 // several is reported by the one it finished on.
                 ended_by = Some(err);
+                continue;
+            }
+        };
+        let raw = match event {
+            ScanEvent::Item(item) => item,
+            // A checkpoint is not a record. It is counted nowhere, and
+            // a scan of nothing but checkpoints imports nothing.
+            ScanEvent::Checkpoint(state) => {
+                last_checkpoint = Some(state);
                 continue;
             }
         };
@@ -231,10 +278,16 @@ where
         }
     }
 
+    // Decided here rather than as each checkpoint arrived, because
+    // this is the first line at which what the server did with every
+    // record is known: batches are sent while the scan is still
+    // running and answered out of order.
+    let failed = progress.err_count();
     Ok(ImportSummary {
         imported: progress.ok_count(),
-        failed: progress.err_count(),
+        failed,
         ended_by,
+        resume_from: if failed == 0 { last_checkpoint } else { None },
     })
 }
 
@@ -312,12 +365,14 @@ mod tests {
 
     use super::*;
     use crate::scanner::ScanFuture;
-    use crate::{Footprint, FootprintSource, Note, ParseError, RawItem, SourceError};
+    use crate::{
+        Footprint, FootprintSource, Note, ParseError, RawItem, ScanEvent, SourceError, SyncState,
+    };
 
     struct OneItemScanner;
 
     impl SourceScanner for OneItemScanner {
-        fn scan(&self, _mode: ScanMode) -> ScanFuture<'_> {
+        fn scan(&self, _mode: ScanMode, _resume_from: Option<SyncState>) -> ScanFuture<'_> {
             Box::pin(async {
                 let item = RawItem {
                     source_kind: "test".into(),
@@ -326,7 +381,8 @@ mod tests {
                     occurred_at: Some(Utc::now()),
                     extra: serde_json::json!({}),
                 };
-                Ok(Box::pin(stream::iter([Ok(item)])) as crate::scanner::ItemStream)
+                Ok(Box::pin(stream::iter([Ok(ScanEvent::Item(item))]))
+                    as crate::scanner::ItemStream)
             })
         }
     }
@@ -367,6 +423,7 @@ mod tests {
                 imported: 1,
                 failed: 0,
                 ended_by: None,
+                resume_from: None,
             }
         );
     }
@@ -382,7 +439,7 @@ mod tests {
     }
 
     impl SourceScanner for FailingScanner {
-        fn scan(&self, _mode: ScanMode) -> ScanFuture<'_> {
+        fn scan(&self, _mode: ScanMode, _resume_from: Option<SyncState>) -> ScanFuture<'_> {
             let err = self.0.lock().expect("the fixture's error").take();
             Box::pin(async move {
                 let item = RawItem {
@@ -394,7 +451,7 @@ mod tests {
                 };
                 Ok(Box::pin(stream::iter([
                     Err(err.expect("scan is called once")),
-                    Ok(item),
+                    Ok(ScanEvent::Item(item)),
                 ])) as crate::scanner::ItemStream)
             })
         }
@@ -408,18 +465,18 @@ mod tests {
     }
 
     impl SourceScanner for ThenFailsScanner {
-        fn scan(&self, _mode: ScanMode) -> ScanFuture<'_> {
+        fn scan(&self, _mode: ScanMode, _resume_from: Option<SyncState>) -> ScanFuture<'_> {
             let err = self.err.lock().expect("the fixture's error").take();
             let accepted = self.accepted;
             Box::pin(async move {
                 let items = (0..accepted).map(|n| {
-                    Ok(RawItem {
+                    Ok(ScanEvent::Item(RawItem {
                         source_kind: "test".into(),
                         locator: format!("/tmp/{n}.txt"),
                         payload: b"held".to_vec(),
                         occurred_at: Some(Utc::now()),
                         extra: serde_json::json!({}),
-                    })
+                    }))
                 });
                 Ok(Box::pin(stream::iter(
                     items.chain([Err(err.expect("scan is called once"))]),
@@ -456,6 +513,7 @@ mod tests {
                 imported: 1,
                 failed: 1,
                 ended_by: None,
+                resume_from: None,
             },
             "reported, and the item behind it still lands"
         );
@@ -516,7 +574,7 @@ mod tests {
         struct StopsAfterLoss;
 
         impl SourceScanner for StopsAfterLoss {
-            fn scan(&self, _mode: ScanMode) -> ScanFuture<'_> {
+            fn scan(&self, _mode: ScanMode, _resume_from: Option<SyncState>) -> ScanFuture<'_> {
                 Box::pin(async {
                     Ok(Box::pin(stream::iter([Err(SourceError::item(
                         "/db#7",
@@ -540,6 +598,7 @@ mod tests {
                 imported: 0,
                 failed: 1,
                 ended_by: None,
+                resume_from: None,
             },
             "one record lost, and the run itself is not condemned for it"
         );
@@ -585,6 +644,171 @@ mod tests {
         assert_eq!(
             summary.ended_by,
             Some(SourceError::Config("token rejected".into()))
+        );
+    }
+
+    /// A scanner shaped like the bundled ones: a checkpoint behind each
+    /// item, and a record of what it was handed to resume from.
+    struct CheckpointingScanner {
+        items: usize,
+        /// Sent after the items, if the test asked for one.
+        tail: std::sync::Mutex<Option<SourceError>>,
+        handed: std::sync::Mutex<Option<SyncState>>,
+    }
+
+    impl CheckpointingScanner {
+        fn new(items: usize) -> Self {
+            Self {
+                items,
+                tail: std::sync::Mutex::new(None),
+                handed: std::sync::Mutex::new(None),
+            }
+        }
+
+        fn then(self, err: SourceError) -> Self {
+            *self.tail.lock().expect("the fixture's error") = Some(err);
+            self
+        }
+
+        /// The checkpoint this scanner sends behind item `n`.
+        fn checkpoint(n: usize) -> SyncState {
+            SyncState::new("test", serde_json::json!({ "after": n }))
+        }
+    }
+
+    impl SourceScanner for CheckpointingScanner {
+        fn scan(&self, _mode: ScanMode, resume_from: Option<SyncState>) -> ScanFuture<'_> {
+            *self.handed.lock().expect("the fixture's record") = resume_from;
+            let items = self.items;
+            let tail = self.tail.lock().expect("the fixture's error").take();
+            Box::pin(async move {
+                let events = (0..items).flat_map(|n| {
+                    [
+                        Ok(ScanEvent::Item(RawItem {
+                            source_kind: "test".into(),
+                            locator: format!("/tmp/{n}.txt"),
+                            payload: b"held".to_vec(),
+                            occurred_at: Some(Utc::now()),
+                            extra: serde_json::json!({}),
+                        })),
+                        Ok(ScanEvent::Checkpoint(Self::checkpoint(n))),
+                    ]
+                });
+                Ok(Box::pin(stream::iter(events.chain(tail.map(Err))))
+                    as crate::scanner::ItemStream)
+            })
+        }
+    }
+
+    /// A checkpoint is the scanner's bookkeeping and not a record: the
+    /// counts do not move for one, and the last one is what a later run
+    /// may take up from.
+    #[tokio::test]
+    async fn a_checkpoint_is_not_a_record_and_the_last_one_comes_back() {
+        let scanner = CheckpointingScanner::new(2);
+        let summary = run_import(
+            &scanner,
+            &NoteParser,
+            ScanMode::Enumerate,
+            dry("http://127.0.0.1:1"),
+        )
+        .await
+        .expect("a scan of items and checkpoints is an ordinary run");
+        assert_eq!(
+            summary,
+            ImportSummary {
+                imported: 2,
+                failed: 0,
+                ended_by: None,
+                resume_from: Some(CheckpointingScanner::checkpoint(1)),
+            },
+            "two records and two checkpoints, and only the records counted"
+        );
+    }
+
+    /// A scan of nothing but checkpoints imports nothing.
+    ///
+    /// Asserted apart from the mixed case above, where a checkpoint
+    /// counted as a record would hide inside the items' own count.
+    #[tokio::test]
+    async fn a_scan_of_checkpoints_alone_imports_nothing() {
+        struct CheckpointsOnly;
+
+        impl SourceScanner for CheckpointsOnly {
+            fn scan(&self, _mode: ScanMode, _resume_from: Option<SyncState>) -> ScanFuture<'_> {
+                Box::pin(async {
+                    Ok(Box::pin(stream::iter([
+                        Ok(ScanEvent::Checkpoint(CheckpointingScanner::checkpoint(0))),
+                        Ok(ScanEvent::Checkpoint(CheckpointingScanner::checkpoint(1))),
+                    ])) as crate::scanner::ItemStream)
+                })
+            }
+        }
+
+        let summary = run_import(
+            &CheckpointsOnly,
+            &NoteParser,
+            ScanMode::Enumerate,
+            dry("http://127.0.0.1:1"),
+        )
+        .await
+        .expect("a scan that hands over no records is not a failure");
+        assert_eq!(
+            summary,
+            ImportSummary {
+                imported: 0,
+                failed: 0,
+                ended_by: None,
+                resume_from: Some(CheckpointingScanner::checkpoint(1)),
+            },
+            "nothing counted, and the last point still earned"
+        );
+    }
+
+    /// A run that lost a record hands back nothing, though it saw a
+    /// checkpoint before the loss.
+    ///
+    /// Keeping one would promise that everything in front of it landed,
+    /// and this run cannot make that promise about the part of itself
+    /// that failed. The next run re-reads instead, which costs reading
+    /// rather than a record nobody notices is missing.
+    #[tokio::test]
+    async fn a_run_that_lost_a_record_earns_no_resumption_point() {
+        let scanner = CheckpointingScanner::new(1)
+            .then(SourceError::item("/tmp/bad.txt", "permission denied"));
+        let summary = run_import(
+            &scanner,
+            &NoteParser,
+            ScanMode::Enumerate,
+            dry("http://127.0.0.1:1"),
+        )
+        .await
+        .expect("a lost record is not the end of the run");
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(
+            summary.resume_from, None,
+            "the checkpoint was reached, but not earned"
+        );
+    }
+
+    /// What the caller asked to resume from reaches the scanner as
+    /// given. Nothing here reads it: what a state means belongs to
+    /// whoever wrote it.
+    #[tokio::test]
+    async fn the_resumption_point_reaches_the_scanner_unread() {
+        let scanner = CheckpointingScanner::new(1);
+        let asked = SyncState::new("test", serde_json::json!({ "after": 41 }));
+        let mut options = dry("http://127.0.0.1:1");
+        options.resume_from = Some(asked.clone());
+
+        run_import(&scanner, &NoteParser, ScanMode::Enumerate, options)
+            .await
+            .expect("a resumed run is an ordinary run");
+        assert_eq!(
+            *scanner.handed.lock().expect("the fixture's record"),
+            Some(asked),
+            "handed over whole, neither read nor rewritten"
         );
     }
 

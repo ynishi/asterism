@@ -22,7 +22,7 @@ use asterism_importer_sdk::harvest::{HarvestSourceParser, schema_example_json};
 use asterism_importer_sdk::scanner::sqlite::ColumnMap;
 use asterism_importer_sdk::{
     ChatMessage, ChatRole, Doc, DocFormat, Footprint, FootprintSource, FsScanner, ImportOptions,
-    Note, OccurredSource, ParseError, RawItem, ScanMode, SourceParser, SqliteScanner,
+    Note, OccurredSource, ParseError, RawItem, ScanMode, SourceParser, SqliteScanner, SyncState,
     resolve_occurrence, run_import,
 };
 use asterism_importer_tape::TapeParser;
@@ -123,6 +123,22 @@ struct CommonArgs {
     /// Materialise the source directory hierarchy after each batch.
     #[arg(long)]
     auto_organize_base_dir: Option<String>,
+    /// Take up where a previous run stopped, given the JSON that run
+    /// printed.
+    ///
+    /// Not every source hands one out, and the run itself is how to
+    /// tell: a scan that can be resumed prints its point when it
+    /// finishes, and one that prints nothing has none to give. The
+    /// `sqlite` subcommand is the case worth knowing — it prints a
+    /// point only under `--ordered-by-id`, because only the person who
+    /// wrote the query knows whether it has an order to resume inside.
+    ///
+    /// Nothing stores these yet, so an operator carries one across by
+    /// hand. What it means belongs to the scanner that wrote it, and a
+    /// scanner handed one it cannot use refuses the scan rather than
+    /// quietly starting over.
+    #[arg(long, value_parser = parse_sync_state)]
+    resume_from: Option<SyncState>,
 }
 
 impl CommonArgs {
@@ -134,8 +150,19 @@ impl CommonArgs {
             upload_concurrency: 1,
             dry_run: self.dry_run,
             auto_organize_base_dir: self.auto_organize_base_dir.clone(),
+            resume_from: self.resume_from.clone(),
         }
     }
+}
+
+/// Reads the resumption point a previous run printed.
+///
+/// Read as a whole and not field by field: the partition is half of
+/// what makes a state answerable, and a caller who could supply an
+/// offset alone would be able to point one source's position at
+/// another's.
+fn parse_sync_state(raw: &str) -> Result<SyncState, String> {
+    serde_json::from_str(raw).map_err(|err| format!("not a resumption point: {err}"))
 }
 
 #[derive(Debug, Args)]
@@ -187,6 +214,9 @@ struct HarvestArgs {
     dry_run: bool,
     #[arg(long)]
     auto_organize_base_dir: Option<String>,
+    /// Take up where a previous run stopped. See `CommonArgs`.
+    #[arg(long, value_parser = parse_sync_state)]
+    resume_from: Option<SyncState>,
 }
 
 #[derive(Debug, Args)]
@@ -309,6 +339,15 @@ struct SqliteArgs {
     source_app: Option<String>,
     #[arg(long, default_value = "sqlite")]
     source_kind: String,
+    /// Declare that `--query` returns rows in ascending order of
+    /// `--id-column`, which is what makes the scan resumable.
+    ///
+    /// Only you can say it: the query is yours. Without it the run
+    /// prints no resumption point and refuses `--resume-from`, rather
+    /// than resuming inside an order nobody promised and skipping rows
+    /// it never read.
+    #[arg(long)]
+    ordered_by_id: bool,
 }
 
 struct SqliteRowParser<'a> {
@@ -447,6 +486,11 @@ async fn main() -> anyhow::Result<()> {
                     .join("_journal.db")
             });
             let columns = ColumnMap::new("id", "body").with_timestamp("created_at");
+            // No `ordered_by_id`, and not by oversight: `JOURNAL_QUERY`
+            // orders by `created_at`, which is not the order a
+            // resumption after a row id would take up inside. So this
+            // importer prints no resumption point and refuses
+            // `--resume-from`, which is the truthful pair.
             let scanner = SqliteScanner::new(db_path, JOURNAL_QUERY, columns)
                 .with_source_kind("persona-journal");
             let parser = PersonaJournalParser {
@@ -536,6 +580,16 @@ where
         "\nasterism-import {name}: done — ok={} err={}",
         summary.imported, summary.failed
     );
+    // This line is how a resumption point reaches the next run, as
+    // `--resume-from`. Printed before the failure below, so a run cut
+    // short still leaves it where an operator will look — that is the
+    // case it is most wanted in.
+    if let Some(state) = &summary.resume_from {
+        eprintln!(
+            "asterism-import {name}: resume with --resume-from '{}'",
+            serde_json::to_string(state).expect("a state this crate built serialises")
+        );
+    }
     // Checked before the count, so it is the failure the exit names:
     // "the source refused the credential" tells an operator what to do
     // next and "3 failed item(s)" does not. The counts are printed
@@ -573,6 +627,7 @@ async fn run_harvest(args: HarvestArgs) -> anyhow::Result<()> {
         upload_concurrency: 1,
         dry_run: args.dry_run,
         auto_organize_base_dir: args.auto_organize_base_dir,
+        resume_from: args.resume_from,
     };
     run("harvest", &scanner, &parser, args.watch, options).await
 }
@@ -582,8 +637,11 @@ async fn run_sqlite(args: SqliteArgs) -> anyhow::Result<()> {
     if let Some(timestamp) = args.ts_column.clone() {
         columns = columns.with_timestamp(timestamp);
     }
-    let scanner = SqliteScanner::new(&args.db_path, &args.query, columns)
+    let mut scanner = SqliteScanner::new(&args.db_path, &args.query, columns)
         .with_source_kind(args.source_kind.clone());
+    if args.ordered_by_id {
+        scanner = scanner.ordered_by_id();
+    }
     let parser = SqliteRowParser { args: &args };
     run("sqlite", &scanner, &parser, false, args.common.options()).await
 }

@@ -380,7 +380,7 @@
     {
       "path": "asterism_importer_sdk::port",
       "kind": "module",
-      "docs": "The inbound port's shared vocabulary: what a failure is, and what a\nresumption point holds.\n\n[`SourceError`] is what the scanner traits are written against.\n[`SyncState`] is not yet in any signature: the type and its\nserialised form are settled here first, ahead of the transport that\nwill carry it. Both are deliberately the part of the port that does\nnot depend on how an adapter is run — whether Asterism starts it and\nreads it, or it runs itself and pushes. A rate limit is a rate limit\neither way, and a cursor holds the same thing either way.\n\n## Why the classes are what they are\n\n[`SourceError`] replaced a three-variant enum that named where a\nfailure happened — source unavailable, item read failed, other.\nNothing downstream could act on that, so a run against a rejected\ncredential and a run that skipped one unreadable file produced the\nsame report: a count, and a message only a person could read.\n\nThe classes here are cuts a caller acts on differently. A\nconfiguration nobody has changed will be refused again, so the run\nstops and the message is for whoever wrote it. A source that was\nbriefly unreachable will not, so the same run repeated is worth\nsomething — and a rate limit is that case with the wait stated\nrather than guessed, which is what lets a report say when the source\nis expected back instead of only that it failed. A record that could\nnot be read costs that record, and a run missing one file out of ten\nthousand is not a failed import.\n\nWhat the classification does not do is tell a scanner how to behave.\nThat is [`SourceError`]'s own section below, and it is one rule."
+      "docs": "The inbound port's shared vocabulary: what a failure is, and what a\nresumption point holds.\n\n[`SourceError`] is what the scanner traits are written against.\n[`SyncState`] is what a scanner emits and takes back, and its type\nand serialised form are settled independently of whatever comes to\n*store* one. Both are deliberately the part of the port that does\nnot depend on how an adapter is run — whether Asterism starts it and\nreads it, or it runs itself and pushes. A rate limit is a rate limit\neither way, and a cursor holds the same thing either way.\n\n## Why the classes are what they are\n\n[`SourceError`] replaced a three-variant enum that named where a\nfailure happened — source unavailable, item read failed, other.\nNothing downstream could act on that, so a run against a rejected\ncredential and a run that skipped one unreadable file produced the\nsame report: a count, and a message only a person could read.\n\nThe classes here are cuts a caller acts on differently. A\nconfiguration nobody has changed will be refused again, so the run\nstops and the message is for whoever wrote it. A source that was\nbriefly unreachable will not, so the same run repeated is worth\nsomething — and a rate limit is that case with the wait stated\nrather than guessed, which is what lets a report say when the source\nis expected back instead of only that it failed. A record that could\nnot be read costs that record, and a run missing one file out of ten\nthousand is not a failed import.\n\nWhat the classification does not do is tell a scanner how to behave.\nThat is [`SourceError`]'s own section below, and it is one rule."
     },
     {
       "path": "asterism_importer_sdk::port::Disposition",
@@ -428,17 +428,22 @@
     {
       "path": "asterism_importer_sdk::scanner",
       "kind": "module",
-      "docs": "`SourceScanner` trait and shared item type.\n\nEnumerates or watches an external source and produces [`RawItem`]s.\nBundled implementations live in the sibling modules\n([`fs`] and [`sqlite`]); importer authors typically reuse one\ninstead of writing their own."
+      "docs": "`SourceScanner` trait and shared item type.\n\nEnumerates or watches an external source and produces\n[`ScanEvent`]s: the [`RawItem`]s themselves, and the points a later\nscan could take up from.\nBundled implementations live in the sibling modules\n([`fs`] and [`sqlite`]); importer authors typically reuse one\ninstead of writing their own."
     },
     {
       "path": "asterism_importer_sdk::scanner::ItemStream",
       "kind": "type_alias",
-      "docs": "Async stream of scanned items, or failures.\n\nA failure on this stream is not necessarily the end of it, and what\nit is followed by is this scanner's to decide: another item, or\nnothing. [`SourceError::disposition`](crate::SourceError::disposition)\nsays what the failure cost the run, which is a different question\nand deliberately not this one."
+      "docs": "Async stream of scan events, or failures.\n\nA failure on this stream is not necessarily the end of it, and what\nit is followed by is this scanner's to decide: another event, or\nnothing. [`SourceError::disposition`](crate::SourceError::disposition)\nsays what the failure cost the run, which is a different question\nand deliberately not this one."
     },
     {
       "path": "asterism_importer_sdk::scanner::RawItem",
       "kind": "struct",
       "docs": "A raw scanned item — a payload plus the metadata needed to attribute\nit back to its origin."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::ScanEvent",
+      "kind": "enum",
+      "docs": "What a scanner puts on its stream: a record, or a point it could be\nresumed from.\n\nThe two travel together rather than through separate calls, which is\nwhere every inbound framework surveyed put it — Airbyte's state\nmessages, Singer's `STATE`, the offset Kafka Connect hangs on each\nrecord. The reason is that a resumption point means nothing on its\nown: it says \"everything before this is dealt with\", and *before\nthis* is a position in the stream it arrived on."
     },
     {
       "path": "asterism_importer_sdk::scanner::ScanFuture",
@@ -453,12 +458,12 @@
     {
       "path": "asterism_importer_sdk::scanner::SourceScanner",
       "kind": "trait",
-      "docs": "Trait every source scanner implements.\n\n`scan` returns a boxed async stream of `RawItem`s, or failures. A\nfailure does not by itself end the stream — whether anything follows\nit is this scanner's answer, and `FsScanner` and `SqliteScanner`\ngive different ones about a record they could not read."
+      "docs": "Trait every source scanner implements.\n\n`scan` returns a boxed async stream of [`ScanEvent`]s, or failures.\nA failure does not by itself end the stream — whether anything\nfollows it is this scanner's answer, and `FsScanner` and\n`SqliteScanner` give different ones about a record they could not\nread."
     },
     {
       "path": "asterism_importer_sdk::scanner::fs",
       "kind": "module",
-      "docs": "`FsScanner` — filesystem source scanner.\n\nWalks a directory tree, optionally filtered by glob-ish extension\nset, and emits every matching file as a `RawItem`. In `Watch` mode\nthe scanner also stays live and streams filesystem-change events via\n`notify` — new / modified files are re-emitted, deletions are\nignored (deletions on the source do not automatically delete the\ncorresponding asset; that is a policy decision left to the caller)."
+      "docs": "`FsScanner` — filesystem source scanner.\n\nWalks a directory tree, optionally filtered by glob-ish extension\nset, and emits every matching file as a `RawItem`.\n\nThe walk is sorted and resumable: a checkpoint behind each file\ncarries the path it stopped at, and a later scan handed one takes up\nafter it. The partition is the root *and* the extension filter,\nbecause both decide what the walk yields. In `Watch` mode\nthe scanner also stays live and streams filesystem-change events via\n`notify` — new / modified files are re-emitted, deletions are\nignored (deletions on the source do not automatically delete the\ncorresponding asset; that is a policy decision left to the caller)."
     },
     {
       "path": "asterism_importer_sdk::scanner::fs::FsScanner",
@@ -468,7 +473,7 @@
     {
       "path": "asterism_importer_sdk::scanner::sqlite",
       "kind": "module",
-      "docs": "`SqliteScanner` — SQLite source scanner.\n\nOpens an arbitrary SQLite database read-only, runs a user-supplied\n`SELECT` statement, and emits every row as a `RawItem`. Column\nmapping is spelled out by the caller so the same scanner can drive\nimporters over totally unrelated schemas (chat exports, message DBs,\nbespoke tools' scratch tables, and so on).\n\nAsync is faked at the edge: `rusqlite` is blocking, so the scan\nactually runs on a dedicated `spawn_blocking` task and pushes rows\ninto a bounded mpsc.\n\nThis scanner leaves\n[`payload_is_whole_artefact`](super::SourceScanner::payload_is_whole_artefact)\nat its `false` default, and the reason is worth stating rather than\ninheriting: a row's `body` column is a value out of a database, and\nthe `<db>#<id>` address it is given has no bytes of its own for\nanybody to read back. A digest declared from here could never be\nchecked, which is precisely what the server refuses."
+      "docs": "`SqliteScanner` — SQLite source scanner.\n\nOpens an arbitrary SQLite database read-only, runs a user-supplied\n`SELECT` statement, and emits every row as a `RawItem`. Column\nmapping is spelled out by the caller so the same scanner can drive\nimporters over totally unrelated schemas (chat exports, message DBs,\nbespoke tools' scratch tables, and so on).\n\n**Resumable only on the caller's word.** The query is the caller's,\nso only the caller knows whether it has an order to take up inside;\n[`SqliteScanner::ordered_by_id`] is where they say so. Without it\nthis scanner emits no checkpoints and refuses to resume, rather than\nresuming inside an order nobody promised.\n\nAsync is faked at the edge: `rusqlite` is blocking, so the scan\nactually runs on a dedicated `spawn_blocking` task and pushes rows\ninto a bounded mpsc.\n\nThis scanner leaves\n[`payload_is_whole_artefact`](super::SourceScanner::payload_is_whole_artefact)\nat its `false` default, and the reason is worth stating rather than\ninheriting: a row's `body` column is a value out of a database, and\nthe `<db>#<id>` address it is given has no bytes of its own for\nanybody to read back. A digest declared from here could never be\nchecked, which is precisely what the server refuses."
     },
     {
       "path": "asterism_importer_sdk::scanner::sqlite::ColumnMap",

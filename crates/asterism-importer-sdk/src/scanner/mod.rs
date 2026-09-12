@@ -1,6 +1,8 @@
 //! `SourceScanner` trait and shared item type.
 //!
-//! Enumerates or watches an external source and produces [`RawItem`]s.
+//! Enumerates or watches an external source and produces
+//! [`ScanEvent`]s: the [`RawItem`]s themselves, and the points a later
+//! scan could take up from.
 //! Bundled implementations live in the sibling modules
 //! ([`fs`] and [`sqlite`]); importer authors typically reuse one
 //! instead of writing their own.
@@ -13,7 +15,7 @@ use futures::stream::BoxStream;
 use serde_json::Value;
 use std::pin::Pin;
 
-use crate::port::SourceError;
+use crate::port::{SourceError, SyncState};
 
 /// A raw scanned item — a payload plus the metadata needed to attribute
 /// it back to its origin.
@@ -77,14 +79,37 @@ pub enum ScanMode {
     Watch,
 }
 
-/// Async stream of scanned items, or failures.
+/// What a scanner puts on its stream: a record, or a point it could be
+/// resumed from.
+///
+/// The two travel together rather than through separate calls, which is
+/// where every inbound framework surveyed put it — Airbyte's state
+/// messages, Singer's `STATE`, the offset Kafka Connect hangs on each
+/// record. The reason is that a resumption point means nothing on its
+/// own: it says "everything before this is dealt with", and *before
+/// this* is a position in the stream it arrived on.
+#[derive(Debug, Clone)]
+pub enum ScanEvent {
+    /// One record, for the parser.
+    Item(RawItem),
+    /// Everything already yielded can be considered handled, and a scan
+    /// given this state would take up after it.
+    ///
+    /// A promise about the scanner's side only. Whether the records
+    /// before it *landed* is the runner's question, and why a caller
+    /// must not store one of these until it has an answer to that — see
+    /// [`ImportSummary::resume_from`](crate::ImportSummary::resume_from).
+    Checkpoint(SyncState),
+}
+
+/// Async stream of scan events, or failures.
 ///
 /// A failure on this stream is not necessarily the end of it, and what
-/// it is followed by is this scanner's to decide: another item, or
+/// it is followed by is this scanner's to decide: another event, or
 /// nothing. [`SourceError::disposition`](crate::SourceError::disposition)
 /// says what the failure cost the run, which is a different question
 /// and deliberately not this one.
-pub type ItemStream = BoxStream<'static, Result<RawItem, SourceError>>;
+pub type ItemStream = BoxStream<'static, Result<ScanEvent, SourceError>>;
 
 /// Future returned by [`SourceScanner::scan`] — resolves to the item
 /// stream once the scanner has finished setup.
@@ -98,14 +123,36 @@ pub type ScanFuture<'a> =
 
 /// Trait every source scanner implements.
 ///
-/// `scan` returns a boxed async stream of `RawItem`s, or failures. A
-/// failure does not by itself end the stream — whether anything follows
-/// it is this scanner's answer, and `FsScanner` and `SqliteScanner`
-/// give different ones about a record they could not read.
+/// `scan` returns a boxed async stream of [`ScanEvent`]s, or failures.
+/// A failure does not by itself end the stream — whether anything
+/// follows it is this scanner's answer, and `FsScanner` and
+/// `SqliteScanner` give different ones about a record they could not
+/// read.
 pub trait SourceScanner: Send + Sync {
     /// Starts scanning; the returned future resolves to a stream that
-    /// yields items one at a time.
-    fn scan(&self, mode: ScanMode) -> ScanFuture<'_>;
+    /// yields events one at a time.
+    ///
+    /// `resume_from` is a [`SyncState`] this scanner emitted on an
+    /// earlier run, or `None` to start at the beginning. What it means
+    /// belongs to the scanner that wrote it — the core carries these
+    /// without reading them — so a scanner is handed back only its own
+    /// and may take the `offset` at face value.
+    ///
+    /// It may not take the *partition* at face value. A state names a
+    /// unit that can be resumed, and a scanner configured differently
+    /// since — a new root, another query — is being asked to take up
+    /// inside something it is no longer scanning. That is a
+    /// [`Config`](crate::SourceError::Config) failure and not a quiet
+    /// restart: an importer that silently began again would re-import
+    /// the source and look, from the outside, exactly like one that
+    /// resumed.
+    ///
+    /// A scanner that cannot resume at all says so the same way, and
+    /// says it in its own documentation as well. Ignoring the argument
+    /// is not one of the answers: a caller that asked to resume and was
+    /// not told it could not has been told something false about what
+    /// it is about to receive.
+    fn scan(&self, mode: ScanMode, resume_from: Option<SyncState>) -> ScanFuture<'_>;
 
     /// Whether [`RawItem::payload`] is the **complete byte content of
     /// what [`RawItem::locator`] addresses** — a whole file, a whole

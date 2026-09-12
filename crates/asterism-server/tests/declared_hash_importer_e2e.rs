@@ -107,6 +107,21 @@ async fn register(core: &CoreCtx, pack_id: &str) -> String {
         .id
 }
 
+/// What these tests ask of a summary: how many landed, how many did
+/// not, and whether anything ended the run.
+///
+/// Not the whole struct, because it also carries the point a later run
+/// could take up from — a path inside a temporary directory that
+/// changes every run, and the scanner's bookkeeping rather than
+/// anything a declared digest is about.
+fn tally(summary: &ImportSummary) -> (u64, u64, Option<String>) {
+    (
+        summary.imported,
+        summary.failed,
+        summary.ended_by.as_ref().map(ToString::to_string),
+    )
+}
+
 /// Runs the real importer over one directory of PNGs: scan → digest →
 /// parse → POST to the router on `port`.
 async fn import_png_dir(root: &std::path::Path, persona_id: &str, port: u16) -> ImportSummary {
@@ -274,14 +289,7 @@ async fn the_digest_the_importer_declares_is_the_one_the_hash_job_computes() {
     let persona = register(&core, "e2e-declared-importer-agreement").await;
 
     let summary = import_png_dir(&corpus, &persona, port).await;
-    assert_eq!(
-        summary,
-        ImportSummary {
-            imported: 1,
-            failed: 0,
-            ended_by: None,
-        }
-    );
+    assert_eq!(tally(&summary), (1, 0, None));
     let asset_id = asset_id_by_locator(&core, &persona, &plate).await;
 
     // Before the worker gets there the claim is on the row with no
@@ -369,12 +377,8 @@ async fn an_exact_copy_is_proposed_at_ingest_without_the_server_reading_it() {
 
     // Leg 1: the incumbent arrives through the real importer.
     assert_eq!(
-        import_png_dir(&first_dir, &persona, port).await,
-        ImportSummary {
-            imported: 1,
-            failed: 0,
-            ended_by: None,
-        }
+        tally(&import_png_dir(&first_dir, &persona, port).await),
+        (1, 0, None)
     );
     let incumbent_id = asset_id_by_locator(&core, &persona, &original).await;
     let incumbent = detail_of(&core, &incumbent_id).await;
@@ -398,12 +402,8 @@ async fn an_exact_copy_is_proposed_at_ingest_without_the_server_reading_it() {
 
     // Leg 2: the copy, same importer, different directory.
     assert_eq!(
-        import_png_dir(&second_dir, &persona, port).await,
-        ImportSummary {
-            imported: 1,
-            failed: 0,
-            ended_by: None,
-        },
+        tally(&import_png_dir(&second_dir, &persona, port).await),
+        (1, 0, None),
         "a duplicate is a finding, not a failed import"
     );
     let newcomer_id = asset_id_by_locator(&core, &persona, &copy).await;
@@ -602,12 +602,8 @@ async fn a_source_with_no_payload_declares_nothing_and_ingests_anyway() {
 
     // Positive control first: the pipeline demonstrably can declare.
     assert_eq!(
-        import_png_dir(&corpus, &persona, port).await,
-        ImportSummary {
-            imported: 1,
-            failed: 0,
-            ended_by: None,
-        }
+        tally(&import_png_dir(&corpus, &persona, port).await),
+        (1, 0, None)
     );
     let file_id = asset_id_by_locator(&core, &persona, &plate).await;
     assert!(
@@ -631,12 +627,8 @@ async fn a_source_with_no_payload_declares_nothing_and_ingests_anyway() {
     .await
     .expect("import run");
     assert_eq!(
-        summary,
-        ImportSummary {
-            imported: 1,
-            failed: 0,
-            ended_by: None,
-        },
+        tally(&summary),
+        (1, 0, None),
         "a declaration on `<db>#<id>` would have been refused, and the row \
          would be counted here as a failure"
     );

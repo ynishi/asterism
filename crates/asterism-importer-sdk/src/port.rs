@@ -2,9 +2,9 @@
 //! resumption point holds.
 //!
 //! [`SourceError`] is what the scanner traits are written against.
-//! [`SyncState`] is not yet in any signature: the type and its
-//! serialised form are settled here first, ahead of the transport that
-//! will carry it. Both are deliberately the part of the port that does
+//! [`SyncState`] is what a scanner emits and takes back, and its type
+//! and serialised form are settled independently of whatever comes to
+//! *store* one. Both are deliberately the part of the port that does
 //! not depend on how an adapter is run — whether Asterism starts it and
 //! reads it, or it runs itself and pushes. A rate limit is a rate limit
 //! either way, and a cursor holds the same thing either way.
