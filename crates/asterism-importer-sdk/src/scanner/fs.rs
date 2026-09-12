@@ -217,21 +217,25 @@ impl SourceScanner for FsScanner {
                             let event = match res {
                                 Ok(ev) => ev,
                                 Err(err) => {
-                                    // Not `Item`: nothing was skipped,
-                                    // and there is no item to name.
-                                    // `Item` would also be the one
-                                    // class a caller carries on past,
-                                    // so a watcher that has started
-                                    // losing events would report this
-                                    // for as long as the watch lived
-                                    // and the scan would never end.
+                                    // `Source`, and then the task ends.
+                                    // A `notify` error on this channel
+                                    // is a dropped or overflowed batch
+                                    // of events — changes that happened
+                                    // and were not delivered — so the
+                                    // watch is no longer telling the
+                                    // truth about the directory, and
+                                    // `Item` would be the wrong shape
+                                    // twice over: there is no item to
+                                    // name, and a watch that keeps
+                                    // reporting it is a stream that
+                                    // never ends.
                                     let _ = tx
                                         .send(Err(SourceError::Source(format!(
                                             "watching {}: {err}",
                                             root_watch.display()
                                         ))))
                                         .await;
-                                    continue;
+                                    return;
                                 }
                             };
                             for path in event.paths {

@@ -37,7 +37,7 @@ one file would not open while the directory is fine.
 
 ## Types
 
-- `Disposition` — What a caller should do about a [`SourceError`].
+- `Disposition` — What a [`SourceError`] means for the run it happened in.
 - `SourceError` — Why a source could not be read.
 - `SyncState` — Where a scan left off, so the next one can start there.
 

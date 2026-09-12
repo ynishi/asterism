@@ -385,12 +385,12 @@
     {
       "path": "asterism_importer_sdk::port::Disposition",
       "kind": "enum",
-      "docs": "What a caller should do about a [`SourceError`].\n\nReturned by [`SourceError::disposition`] so a caller branches on a\ndecision rather than on which variant it happens to be holding — the\nmapping from class to action belongs to the port, not to each of its\ncallers."
+      "docs": "What a [`SourceError`] means for the run it happened in.\n\nReturned by [`SourceError::disposition`] so a caller branches on a\ndecision rather than on which variant it happens to be holding — the\nmapping from class to meaning belongs to the port, not to each of\nits callers.\n\n## What this is not about\n\nIt says nothing about whether more items follow. That is the\nscanner's own fact, and the stream is where it is answered: a\nscanner with more to give yields more, one without ends. The first\nshape of this enum did claim it — an item failure was documented as\n\"keeps scanning\" — and `SqliteScanner` refuted it on the day it was\nwritten, because a row that fails to read leaves `rusqlite`'s cursor\nsomewhere this code cannot reason about, so it sends the failure and\nstops. Both scanners were right about their own sources; the port\nwas wrong to hold an opinion.\n\nSo a caller reads the stream to its end whatever it is handed, and\nuses this to decide what the run was worth."
     },
     {
       "path": "asterism_importer_sdk::port::SourceError",
       "kind": "enum",
-      "docs": "Why a source could not be read.\n\nEach variant names an action rather than a location, and\n[`disposition`](Self::disposition) is where that action is written\ndown. A caller that matches on the variants directly is free to, but\nit is then deciding the policy a second time."
+      "docs": "Why a source could not be read.\n\nEach variant names what the failure cost rather than where it\nhappened, and [`disposition`](Self::disposition) is where that is\nwritten down. A caller that matches on the variants directly is free\nto, but it is then deciding the policy a second time.\n\n## What a scanner owes\n\nOne thing, and it is about the stream rather than about any class: a\nscanner with nothing more to give **ends its stream**. A failure it\ncannot continue past is followed by no further items; a failure it\ncan is followed by the next one. It does not have to say which kind\nit was — ending is how it says so, and that is why no class here\nclaims to know.\n\nWhat it must not do is emit a failure it cannot continue past and\nthen keep emitting it. That is not a mismatched class, it is a\nscanner that never ends, and no caller can rescue it."
     },
     {
       "path": "asterism_importer_sdk::port::SyncState",
@@ -418,7 +418,8 @@
     },
     {
       "path": "asterism_importer_sdk::runner::ImportSummary",
-      "kind": "struct"
+      "kind": "struct",
+      "docs": "What one run did.\n\nReturned for every run that *started*, including one a failure cut\nshort: the counts are what the run achieved and\n[`ended_by`](Self::ended_by) is why it is not a success, so a caller\nreads both from one place. Returning the failure *instead* would\nthrow the counts away at the moment somebody wants them.\n\n[`run_import`] still returns `Err` for a run that could not start,\nwhere there is nothing to count."
     },
     {
       "path": "asterism_importer_sdk::runner::run_import",

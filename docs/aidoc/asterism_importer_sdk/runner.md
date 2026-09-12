@@ -31,5 +31,5 @@ messages addressed `<file>#<uuid>`, and one PNG yields itself.
 ## Types
 
 - `ImportOptions` — (no documentation)
-- `ImportSummary` — (no documentation)
+- `ImportSummary` — What one run did.
 

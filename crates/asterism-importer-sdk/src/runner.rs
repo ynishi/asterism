@@ -56,10 +56,27 @@ impl ImportOptions {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What one run did.
+///
+/// Returned for every run that *started*, including one a failure cut
+/// short: the counts are what the run achieved and
+/// [`ended_by`](Self::ended_by) is why it is not a success, so a caller
+/// reads both from one place. Returning the failure *instead* would
+/// throw the counts away at the moment somebody wants them.
+///
+/// [`run_import`] still returns `Err` for a run that could not start,
+/// where there is nothing to count.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportSummary {
+    /// Records the server accepted.
     pub imported: u64,
+    /// Records that failed, including any the source could not read.
     pub failed: u64,
+    /// The failure that cost the run, if one did. `None` is a run that
+    /// ended on the source's own terms — which is not the same as a run
+    /// with no failures at all, since a lost record raises `failed` and
+    /// leaves this `None`.
+    pub ended_by: Option<SourceError>,
 }
 
 pub async fn run_import<S, P>(
@@ -84,8 +101,8 @@ where
     let payload_is_whole_artefact = scanner.payload_is_whole_artefact();
     let mut stream = scanner.scan(mode).await?;
     let mut buffer: Vec<AddAssetCommand> = Vec::new();
-    // Set when a failure ends the scan early. Returned after the tail
-    // below has flushed and drained, never instead of it.
+    // The failure that cost the run, if the scanner sent one. Carried
+    // out on the summary rather than thrown instead of it.
     let mut ended_by: Option<SourceError> = None;
     let batch_size = options.batch_size.max(1);
     let upload_concurrency = options.upload_concurrency.max(1);
@@ -94,40 +111,30 @@ where
     while let Some(next) = stream.next().await {
         let raw = match next {
             Ok(item) => item,
-            // This loop used to have one arm: record the message, take
-            // the next item, whatever the failure was. Stopping
-            // therefore had to be done by the scanner — `SqliteScanner`
-            // returned from its reader thread after a source-level
-            // failure so the stream would end — which put the decision
-            // in each adapter rather than in the port, and left a
-            // scanner that did not stop indistinguishable from one with
-            // nothing more to say.
+            // Both arms record and read on. The loop ends when the
+            // stream does, which is the scanner's call and not this
+            // function's: `SqliteScanner` stops after a row it could
+            // not read, because its cursor is no longer somewhere this
+            // code can reason about, and `FsScanner` takes the next
+            // file. Neither is wrong about its own source, and a runner
+            // that jumped out on the class would have overruled one of
+            // them.
             //
-            // Now the classification decides, in one place.
-            //
-            // `Retry` ends the run here too, and that is this runner's
-            // limitation rather than the class's meaning: there is no
-            // backoff loop to hand it to yet. A caller that grows one
-            // reads `disposition` and waits instead — which is why the
-            // wait rides on the error rather than being recomputed from
-            // its text.
-            Err(err) if err.is_item_local() => {
-                progress.record_err(err.locator().unwrap_or("<scan>"), &err.to_string());
-                continue;
-            }
-            // Breaks rather than returns. Everything already scanned,
-            // parsed and mapped is in `buffer`, and up to
-            // `batch_size - 1` of it has not been sent; the tasks in
-            // `in_flight` are still running against a client this
-            // function owns. Returning here would drop the first and
-            // detach the second — work the source had already handed
-            // over, thrown away because something *after* it failed.
-            // The tail below sends what is held and waits for what is
-            // in the air, and the failure is returned once it has.
+            // Reading on also means the ordinary tail below — flush
+            // what is buffered, wait for what is in flight — runs
+            // however the scan ended, rather than an early exit having
+            // to remember to do it. It did not, the first time.
             Err(err) => {
                 progress.record_err(err.locator().unwrap_or("<scan>"), &err.to_string());
-                ended_by = Some(err);
-                break;
+                if !err.is_record_lost() {
+                    // The last one wins. A scanner that keeps its side
+                    // of the bargain sends at most one, because it ends
+                    // after a failure it cannot continue past; one that
+                    // sends several is reported by the one it finished
+                    // on.
+                    ended_by = Some(err);
+                }
+                continue;
             }
         };
         let raw_locator = raw.locator.clone();
@@ -213,16 +220,10 @@ where
         }
     }
 
-    if let Some(err) = ended_by {
-        return Err(anyhow::Error::new(err).context(format!(
-            "scan ended early; the {} record(s) already accepted were sent first",
-            progress.ok_count()
-        )));
-    }
-
     Ok(ImportSummary {
         imported: progress.ok_count(),
         failed: progress.err_count(),
+        ended_by,
     })
 }
 
@@ -353,7 +354,8 @@ mod tests {
             summary,
             ImportSummary {
                 imported: 1,
-                failed: 0
+                failed: 0,
+                ended_by: None,
             }
         );
     }
@@ -415,49 +417,6 @@ mod tests {
         }
     }
 
-    /// What the source handed over before it failed is not thrown away
-    /// because of the failure.
-    ///
-    /// The first shape of the early exit returned from the middle of
-    /// the loop, which left the buffered commands — up to
-    /// `batch_size - 1` of them, already scanned, parsed and mapped —
-    /// unsent, and the tasks already in flight detached from the client
-    /// this function owns. The run still ends; it flushes and drains
-    /// first, and says how much it sent on the way out.
-    #[tokio::test]
-    async fn work_accepted_before_the_failure_is_not_dropped_by_it() {
-        let scanner = ThenFailsScanner {
-            accepted: 3,
-            err: std::sync::Mutex::new(Some(SourceError::Config("token rejected".into()))),
-        };
-        let reported = run_import(
-            &scanner,
-            &NoteParser,
-            ScanMode::Enumerate,
-            // `batch_size` above the number accepted, so every one of
-            // them is still in the buffer when the failure arrives —
-            // which is the case the early return lost.
-            ImportOptions {
-                batch_size: 50,
-                ..dry("http://127.0.0.1:1")
-            },
-        )
-        .await
-        .expect_err("the run ends")
-        .chain()
-        .map(|e| e.to_string())
-        .collect::<Vec<_>>()
-        .join(": ");
-        assert!(
-            reported.contains("3 record(s) already accepted were sent first"),
-            "the run accounts for what it did with them: {reported}"
-        );
-        assert!(
-            reported.contains("token rejected"),
-            "and still names what ended it: {reported}"
-        );
-    }
-
     fn dry(server: &str) -> ImportOptions {
         let mut options = ImportOptions::new("persona-id");
         options.dry_run = true;
@@ -465,10 +424,11 @@ mod tests {
         options
     }
 
-    /// One unreadable item is a line in the report, and the item behind
-    /// it still arrives.
+    /// A lost record is a line in the report and not the run's
+    /// verdict: the item behind it still lands, and nothing is recorded
+    /// as having ended the run.
     #[tokio::test]
-    async fn an_item_local_failure_does_not_end_the_scan() {
+    async fn a_lost_record_is_not_the_run_s_verdict() {
         let scanner = FailingScanner::with(SourceError::item("/tmp/bad.txt", "permission denied"));
         let summary = run_import(
             &scanner,
@@ -477,52 +437,186 @@ mod tests {
             dry("http://127.0.0.1:1"),
         )
         .await
-        .expect("an item-local failure is not the end of the run");
+        .expect("a lost record is not the end of the run");
         assert_eq!(
             summary,
             ImportSummary {
                 imported: 1,
-                failed: 1
+                failed: 1,
+                ended_by: None,
             },
-            "the failure is reported and the item behind it still lands"
+            "reported, and the item behind it still lands"
         );
     }
 
-    /// Every class but the item-local one ends this run, and the run
-    /// says which failure did it rather than folding a source-level
-    /// refusal into a count of failed items.
+    /// Every other class costs the run, and the summary says which one
+    /// did — rather than the caller reading a count of failed items and
+    /// guessing whether one of them was the source itself.
     ///
-    /// `Transient` and `RateLimited` are in the list because *this*
-    /// runner ends on them, not because the classes mean that: they are
-    /// retried by a caller with a backoff loop, and this one has none
-    /// yet. When it grows one, this test splits.
+    /// The run is still returned rather than thrown: whatever it
+    /// managed before the failure is in the counts, and this is the
+    /// moment somebody wants them.
     #[tokio::test]
-    async fn every_failure_but_an_item_local_one_ends_this_run() {
+    async fn any_other_class_costs_the_run_and_is_named_on_it() {
         for err in [
             SourceError::Config("no such directory".into()),
             SourceError::Source("malformed response".into()),
             SourceError::rate_limited("429"),
             SourceError::Transient("connection refused".into()),
         ] {
-            let expected = err.to_string();
-            let scanner = FailingScanner::with(err);
-            let outcome = run_import(
+            let scanner = FailingScanner::with(err.clone());
+            let summary = run_import(
                 &scanner,
                 &NoteParser,
                 ScanMode::Enumerate,
                 dry("http://127.0.0.1:1"),
             )
-            .await;
-            let reported = outcome
-                .expect_err("the run ends")
-                .chain()
-                .map(|e| e.to_string())
-                .collect::<Vec<_>>()
-                .join(": ");
-            assert!(
-                reported.contains(&expected),
-                "the run says which failure ended it: {reported}"
+            .await
+            .expect("a run that started is a run that reports");
+            assert_eq!(
+                summary.ended_by.as_ref(),
+                Some(&err),
+                "named on the summary"
+            );
+            assert_eq!(
+                summary.imported, 1,
+                "and what the source handed over before it is still counted"
             );
         }
+    }
+
+    /// The scanner decides when the stream ends, not the classification.
+    ///
+    /// `SqliteScanner` sends a lost record and then stops, because a row
+    /// it could not read leaves its cursor somewhere it cannot reason
+    /// about. Nothing here overrules that: the run ends where the stream
+    /// ends, with the record counted and no verdict against the run.
+    #[tokio::test]
+    async fn a_scanner_that_stops_after_a_lost_record_is_not_overruled() {
+        struct StopsAfterLoss;
+
+        impl SourceScanner for StopsAfterLoss {
+            fn scan(&self, _mode: ScanMode) -> ScanFuture<'_> {
+                Box::pin(async {
+                    Ok(Box::pin(stream::iter([Err(SourceError::item(
+                        "/db#7",
+                        "row read failed",
+                    ))])) as crate::scanner::ItemStream)
+                })
+            }
+        }
+
+        let summary = run_import(
+            &StopsAfterLoss,
+            &NoteParser,
+            ScanMode::Enumerate,
+            dry("http://127.0.0.1:1"),
+        )
+        .await
+        .expect("the stream ending is not a failure");
+        assert_eq!(
+            summary,
+            ImportSummary {
+                imported: 0,
+                failed: 1,
+                ended_by: None,
+            },
+            "one record lost, and the run itself is not condemned for it"
+        );
+    }
+
+    /// What the source handed over before a run-ending failure is sent,
+    /// not dropped.
+    ///
+    /// This is the one thing on this branch that needs a server: the
+    /// records sit in the batch buffer until something flushes them, so
+    /// "were they sent" can only be answered by something that receives
+    /// them. The first shape of the early exit returned from inside the
+    /// loop and skipped the flush entirely, and the test written for it
+    /// ran under `dry_run`, where nothing is ever buffered — it asserted
+    /// a message rather than a delivery, and would have passed with the
+    /// bug in place.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn records_accepted_before_a_run_ending_failure_are_still_sent() {
+        let received = Arc::new(std::sync::Mutex::new(Vec::<usize>::new()));
+        let port = spawn_counting_server(Arc::clone(&received)).await;
+
+        let scanner = ThenFailsScanner {
+            accepted: 3,
+            err: std::sync::Mutex::new(Some(SourceError::Config("token rejected".into()))),
+        };
+        let mut options = ImportOptions::new("persona-id");
+        options.server = format!("http://127.0.0.1:{port}");
+        // Above the number accepted, so all three are still in the
+        // buffer when the failure arrives — which is the case an early
+        // return loses.
+        options.batch_size = 50;
+
+        let summary = run_import(&scanner, &NoteParser, ScanMode::Enumerate, options)
+            .await
+            .expect("a run that started is a run that reports");
+
+        assert_eq!(
+            *received.lock().expect("the server's log"),
+            vec![3],
+            "one batch, holding every record accepted before the failure"
+        );
+        assert_eq!(summary.imported, 3, "and the server's answer is counted");
+        assert_eq!(
+            summary.ended_by,
+            Some(SourceError::Config("token rejected".into()))
+        );
+    }
+
+    /// A loopback server that answers the two calls an import makes and
+    /// records how many records each batch carried.
+    ///
+    /// Hand-rolled rather than reached for: this crate has no HTTP test
+    /// dependency, and what the test needs is a socket that says 200 and
+    /// counts. Returns the port it bound.
+    async fn spawn_counting_server(received: Arc<std::sync::Mutex<Vec<usize>>>) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let received = Arc::clone(&received);
+                tokio::spawn(async move {
+                    // One read is enough for both calls here: the health
+                    // probe has no body, and a batch of three tiny notes
+                    // arrives well inside the first segment.
+                    let mut buf = vec![0u8; 64 * 1024];
+                    let Ok(n) = socket.read(&mut buf).await else {
+                        return;
+                    };
+                    let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let body = if request.contains("/asterism/assets/add-batch") {
+                        let items = request.matches("\"locator\"").count();
+                        received.lock().expect("the server's log").push(items);
+                        let ids: Vec<String> = (0..items).map(|n| format!("\"id-{n}\"")).collect();
+                        format!(
+                            "{{\"succeeded\":[{}],\"failed\":[],\"success_count\":{items},\"failure_count\":0}}",
+                            ids.join(",")
+                        )
+                    } else {
+                        "{}".to_string()
+                    };
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    let _ = socket.flush().await;
+                });
+            }
+        });
+        port
     }
 }

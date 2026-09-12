@@ -38,40 +38,69 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// What a caller should do about a [`SourceError`].
+/// What a [`SourceError`] means for the run it happened in.
 ///
 /// Returned by [`SourceError::disposition`] so a caller branches on a
 /// decision rather than on which variant it happens to be holding — the
-/// mapping from class to action belongs to the port, not to each of its
-/// callers.
+/// mapping from class to meaning belongs to the port, not to each of
+/// its callers.
+///
+/// ## What this is not about
+///
+/// It says nothing about whether more items follow. That is the
+/// scanner's own fact, and the stream is where it is answered: a
+/// scanner with more to give yields more, one without ends. The first
+/// shape of this enum did claim it — an item failure was documented as
+/// "keeps scanning" — and `SqliteScanner` refuted it on the day it was
+/// written, because a row that fails to read leaves `rusqlite`'s cursor
+/// somewhere this code cannot reason about, so it sends the failure and
+/// stops. Both scanners were right about their own sources; the port
+/// was wrong to hold an opinion.
+///
+/// So a caller reads the stream to its end whatever it is handed, and
+/// uses this to decide what the run was worth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Disposition {
-    /// Take the next item. Something specific failed and the rest of
-    /// the scan is unaffected.
-    KeepScanning,
-    /// The same request may work later. `after` is how long to wait
-    /// when the source said so, and `None` when it did not — a caller
-    /// with a backoff policy of its own uses that instead.
-    Retry { after: Option<Duration> },
-    /// Nothing further in this run will succeed. Stop and report.
-    EndRun,
+    /// One record was lost. The run can still be a success that is
+    /// missing something, and the report names what.
+    RecordLost,
+    /// The run failed, and the same run repeated may not: a source
+    /// briefly unreachable, or one that asked us to wait. `after` is
+    /// how long it said to wait, and `None` when it did not say.
+    FailedRetryable { after: Option<Duration> },
+    /// The run failed, and repeating it changes nothing until somebody
+    /// does: a rejected configuration, a source that broke.
+    Failed,
 }
 
 /// Why a source could not be read.
 ///
-/// Each variant names an action rather than a location, and
-/// [`disposition`](Self::disposition) is where that action is written
-/// down. A caller that matches on the variants directly is free to, but
-/// it is then deciding the policy a second time.
-#[derive(Debug, thiserror::Error)]
+/// Each variant names what the failure cost rather than where it
+/// happened, and [`disposition`](Self::disposition) is where that is
+/// written down. A caller that matches on the variants directly is free
+/// to, but it is then deciding the policy a second time.
+///
+/// ## What a scanner owes
+///
+/// One thing, and it is about the stream rather than about any class: a
+/// scanner with nothing more to give **ends its stream**. A failure it
+/// cannot continue past is followed by no further items; a failure it
+/// can is followed by the next one. It does not have to say which kind
+/// it was — ending is how it says so, and that is why no class here
+/// claims to know.
+///
+/// What it must not do is emit a failure it cannot continue past and
+/// then keep emitting it. That is not a mismatched class, it is a
+/// scanner that never ends, and no caller can rescue it.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SourceError {
     /// The configuration is wrong: a path that is not there, a
     /// credential the source rejected, a query naming a column that
     /// does not exist.
     ///
-    /// **Ends the run**, and is the one class where that is not a
-    /// disappointment: retrying cannot fix it and the message is for
-    /// the person who wrote the configuration. Separated from
+    /// **The run failed**, and is the one class where that is not a
+    /// disappointment: repeating it cannot fix it and the message is
+    /// for the person who wrote the configuration. Separated from
     /// [`Source`](Self::Source) because a run that failed on the
     /// operator's settings and a run that failed on the source's own
     /// trouble ask different things of whoever reads the report.
@@ -81,17 +110,17 @@ pub enum SourceError {
     /// The source could not be reached, and the same call may well
     /// work in a moment: a refused connection, a timeout, a 503.
     ///
-    /// **Retried by a caller that has a backoff loop.** The SDK's own
-    /// [`run_import`](crate::runner::run_import) does not have one yet
-    /// and ends the run instead; what it does not do is step over this
-    /// as though one file had failed.
+    /// **The run failed and repeating it may succeed.** Whether
+    /// anything does repeat it is the caller's; what the port says is
+    /// that this is not a run to file as done.
     #[error("source temporarily unavailable: {0}")]
     Transient(String),
 
     /// The source asked us to slow down.
     ///
-    /// **Retried on the same terms as [`Transient`](Self::Transient)**,
-    /// and kept apart from it for two reasons. The wait is usually longer and told to us
+    /// **The run failed and repeating it may succeed**, on the same
+    /// terms as [`Transient`](Self::Transient), and kept apart from it
+    /// for two reasons. The wait is usually longer and told to us
     /// rather than guessed, so a caller that treats it as an ordinary
     /// transient either waits far too little and is refused again or
     /// far too much and stalls. And it is the one failure where a
@@ -117,17 +146,21 @@ pub enum SourceError {
     /// not the configuration's fault: a corrupt database, a response
     /// that does not parse, a bug here.
     ///
-    /// **Ends the run.**
+    /// **The run failed.**
     #[error("source failed: {0}")]
     Source(String),
 
-    /// One item could not be read. The scan is unaffected.
+    /// One record could not be read.
     ///
-    /// **Keeps scanning**, which is what makes this class worth having
-    /// separately: one unreadable file in a directory of ten thousand
-    /// is a line in the report, not the end of an import. It is the
-    /// only class the previous enum got right, and it carries the
-    /// locator so the report can name what was skipped.
+    /// **The run can still be a success that is missing something** —
+    /// one unreadable file in a directory of ten thousand is a line in
+    /// the report, not a failed import — which is what makes this class
+    /// worth having separately. Whether the scanner goes on to the next
+    /// record is its own business: `FsScanner` does, `SqliteScanner`
+    /// cannot and ends instead, and both are reported the same way.
+    ///
+    /// It carries the locator so the report can name the record, as
+    /// precisely as the scanner knew it at the time.
     #[error("item unreadable at {locator}: {message}")]
     Item {
         /// Where the item that failed lives, in the source's own terms.
@@ -138,25 +171,25 @@ pub enum SourceError {
 }
 
 impl SourceError {
-    /// What a caller should do about this failure.
+    /// What this failure means for the run it happened in.
     pub fn disposition(&self) -> Disposition {
         match self {
-            Self::Item { .. } => Disposition::KeepScanning,
-            Self::Transient(_) => Disposition::Retry { after: None },
-            Self::RateLimited { retry_after, .. } => Disposition::Retry {
+            Self::Item { .. } => Disposition::RecordLost,
+            Self::Transient(_) => Disposition::FailedRetryable { after: None },
+            Self::RateLimited { retry_after, .. } => Disposition::FailedRetryable {
                 after: *retry_after,
             },
-            Self::Config(_) | Self::Source(_) => Disposition::EndRun,
+            Self::Config(_) | Self::Source(_) => Disposition::Failed,
         }
     }
 
-    /// Whether the scan can carry on past this.
+    /// Whether this cost one record rather than the run.
     ///
     /// A convenience over [`disposition`](Self::disposition) for the
-    /// common loop, which only needs to know whether to take the next
-    /// item.
-    pub fn is_item_local(&self) -> bool {
-        matches!(self.disposition(), Disposition::KeepScanning)
+    /// common loop, which only needs to know which of the two it is
+    /// holding.
+    pub fn is_record_lost(&self) -> bool {
+        matches!(self.disposition(), Disposition::RecordLost)
     }
 
     /// Where the failure happened, when the class names a place.
@@ -257,28 +290,28 @@ mod tests {
     use super::*;
 
     /// The classification exists to be acted on, so each class is
-    /// pinned to the action it names.
+    /// pinned to what it says the run was worth.
     #[test]
-    fn every_class_states_what_a_caller_does() {
+    fn every_class_states_what_the_run_was_worth() {
         assert_eq!(
             SourceError::item("/a.png", "permission denied").disposition(),
-            Disposition::KeepScanning
+            Disposition::RecordLost
         );
         assert_eq!(
             SourceError::Transient("connection refused".into()).disposition(),
-            Disposition::Retry { after: None }
+            Disposition::FailedRetryable { after: None }
         );
         assert_eq!(
             SourceError::rate_limited("429").disposition(),
-            Disposition::Retry { after: None }
+            Disposition::FailedRetryable { after: None }
         );
         assert_eq!(
             SourceError::Config("no such directory".into()).disposition(),
-            Disposition::EndRun
+            Disposition::Failed
         );
         assert_eq!(
             SourceError::Source("malformed response".into()).disposition(),
-            Disposition::EndRun
+            Disposition::Failed
         );
     }
 
@@ -292,7 +325,7 @@ mod tests {
         };
         assert_eq!(
             err.disposition(),
-            Disposition::Retry {
+            Disposition::FailedRetryable {
                 after: Some(Duration::from_secs(90))
             }
         );
@@ -309,8 +342,8 @@ mod tests {
     fn a_refused_configuration_is_not_an_unreadable_item() {
         let config = SourceError::Config("token rejected".into());
         let item = SourceError::item("/photos/3.png", "token rejected");
-        assert!(!config.is_item_local());
-        assert!(item.is_item_local());
+        assert!(!config.is_record_lost());
+        assert!(item.is_record_lost());
         assert_ne!(config.disposition(), item.disposition());
     }
 
