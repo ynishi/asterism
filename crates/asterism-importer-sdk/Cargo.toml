@@ -55,3 +55,7 @@ zip          = { workspace = true }
 # hand is the chunk-boundary arithmetic this crate just stopped doing —
 # writing it again in the tests would put it back.
 pngmeta      = { version = "0.2.1", features = ["test-util"] }
+# The scanner tests need real files and a real SQLite database: what
+# each class means is a question about what the source does, and a
+# fixture built in memory would be answering a different one.
+tempfile     = "3"

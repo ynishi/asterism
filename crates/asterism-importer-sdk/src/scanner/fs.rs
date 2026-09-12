@@ -219,13 +219,16 @@ impl SourceScanner for FsScanner {
                                 Err(err) => {
                                     // `Source`, and then the task ends.
                                     // What reaches this arm is the
-                                    // watch itself failing — a read
-                                    // error on the platform's
-                                    // descriptor, or a watch refused
-                                    // because the process is at its
-                                    // limit as a new subdirectory
-                                    // appears — after which the stream
-                                    // would go quiet while the
+                                    // watch itself failing — on inotify
+                                    // a read error on the descriptor,
+                                    // or a watch refused because the
+                                    // process is at its limit as a new
+                                    // subdirectory appears; the macOS
+                                    // backend hands this channel
+                                    // nothing but events, so there the
+                                    // arm is unreachable. Where it is
+                                    // reached, the stream would
+                                    // otherwise go quiet while the
                                     // directory kept changing, which is
                                     // worse than ending.
                                     //
@@ -259,5 +262,110 @@ impl SourceScanner for FsScanner {
             }
             Ok(ReceiverStream::new(rx).boxed())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::port::Disposition;
+    use futures::StreamExt;
+
+    async fn drain(scanner: FsScanner) -> Vec<Result<RawItem, SourceError>> {
+        match scanner.scan(ScanMode::Enumerate).await {
+            Ok(stream) => stream.collect().await,
+            Err(err) => vec![Err(err)],
+        }
+    }
+
+    /// A root that is not there is the caller's answer, and the scan
+    /// never starts.
+    #[tokio::test]
+    async fn a_root_that_is_not_there_is_the_callers() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let err = FsScanner::new(tmp.path().join("nope"))
+            .scan(ScanMode::Enumerate)
+            .await
+            .err()
+            .expect("no directory, no scan");
+        assert!(matches!(err, SourceError::Config(_)), "{err}");
+        assert_eq!(err.disposition(), Disposition::Failed);
+    }
+
+    /// The other half of the port's one rule, and the half
+    /// `SqliteScanner` answers differently: a file this scanner cannot
+    /// read costs that file, and the scan goes on to the next one.
+    ///
+    /// The locator is on the failure, so the report names the file that
+    /// was skipped rather than saying that something was.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unreadable_file_costs_that_file_and_the_scan_goes_on() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Named so the walk reaches the unreadable one first.
+        let blocked = tmp.path().join("1-blocked.txt");
+        let readable = tmp.path().join("2-readable.txt");
+        std::fs::write(&blocked, b"secret").expect("write");
+        std::fs::write(&readable, b"open").expect("write");
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+
+        // Root can read anything, so the fixture cannot be built there;
+        // the walk would return two items and say nothing about the
+        // class.
+        if std::fs::read(&blocked).is_ok() {
+            eprintln!("skipped: this user can read a 0o000 file");
+            return;
+        }
+
+        let out = drain(FsScanner::new(tmp.path())).await;
+        let (items, failures): (Vec<_>, Vec<_>) = out.into_iter().partition(|r| r.is_ok());
+        assert_eq!(items.len(), 1, "the readable file still arrives");
+        assert_eq!(failures.len(), 1);
+        let err = failures.into_iter().next().unwrap().unwrap_err();
+        assert_eq!(
+            err.disposition(),
+            Disposition::RecordLost,
+            "one file, not the run: {err}"
+        );
+        assert_eq!(
+            err.locator(),
+            Some(blocked.display().to_string().as_str()),
+            "and the report names which file"
+        );
+    }
+
+    /// Every file under the root, with the payload and the address the
+    /// parser will be handed.
+    #[tokio::test]
+    async fn files_arrive_with_their_bytes_and_their_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(tmp.path().join("sub")).expect("mkdir");
+        std::fs::write(tmp.path().join("a.txt"), b"one").expect("write");
+        std::fs::write(tmp.path().join("sub/b.md"), b"two").expect("write");
+        std::fs::write(tmp.path().join("sub/c.bin"), b"three").expect("write");
+
+        let out = drain(FsScanner::new(tmp.path()).with_extensions(["txt", "md"])).await;
+        let mut got: Vec<(String, Vec<u8>)> = out
+            .into_iter()
+            .map(|r| r.expect("no failures here"))
+            .map(|item| (item.locator, item.payload))
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    tmp.path().join("a.txt").display().to_string(),
+                    b"one".to_vec()
+                ),
+                (
+                    tmp.path().join("sub/b.md").display().to_string(),
+                    b"two".to_vec()
+                ),
+            ],
+            "the extension filter keeps `c.bin` out"
+        );
     }
 }

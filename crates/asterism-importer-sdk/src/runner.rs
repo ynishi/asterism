@@ -131,12 +131,10 @@ where
             // however the scan ended, rather than an early exit having
             // to remember to do it. It did not, the first time.
             //
-            // The two costs are kept apart here and nowhere else. A
-            // lost record is counted; a failure that cost the run is
+            // A lost record is counted; a failure that cost the run is
             // carried whole on the summary. Counting that one too
             // would report a run that lost no records as having lost
-            // one, and merging those two is the distinction the
-            // classification exists to draw.
+            // one.
             Err(err) if err.is_record_lost() => {
                 progress.record_err(err.locator().unwrap_or("<scan>"), &err.to_string());
                 continue;
@@ -509,10 +507,10 @@ mod tests {
 
     /// The scanner decides when the stream ends, not the classification.
     ///
-    /// `SqliteScanner` sends a lost record and then stops, because a row
-    /// it could not read leaves its cursor somewhere it cannot reason
-    /// about. Nothing here overrules that: the run ends where the stream
-    /// ends, with the record counted and no verdict against the run.
+    /// `SqliteScanner` sends a lost record and then stops, for the
+    /// reason written beside the `break` that does it. Nothing here
+    /// overrules that: the run ends where the stream ends, with the
+    /// record counted and no verdict against the run.
     #[tokio::test]
     async fn a_scanner_that_stops_after_a_lost_record_is_not_overruled() {
         struct StopsAfterLoss;

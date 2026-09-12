@@ -538,7 +538,7 @@ where
     );
     // Checked before the count, so it is the failure the exit names:
     // "the source refused the credential" tells an operator what to do
-    // next and "3 failed record(s)" does not. The counts are printed
+    // next and "3 failed item(s)" does not. The counts are printed
     // above either way, because they are what the run managed.
     if let Some(err) = summary.ended_by {
         bail!("{name} import stopped: {err}");
