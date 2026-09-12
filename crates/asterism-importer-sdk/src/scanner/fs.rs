@@ -17,8 +17,8 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use walkdir::WalkDir;
 
-use super::{RawItem, ScanFuture, ScanMode, SourceScanner};
-use crate::port::SourceError;
+use super::{RawItem, ScanEvent, ScanFuture, ScanMode, SourceScanner};
+use crate::port::{SourceError, SyncState};
 
 /// Filesystem scanner.
 ///
@@ -64,6 +64,44 @@ impl FsScanner {
     pub fn with_source_kind(mut self, slug: impl Into<String>) -> Self {
         self.source_kind = slug.into();
         self
+    }
+
+    /// The resumable unit: this scanner's root.
+    ///
+    /// One walk, one partition. A scanner rooted somewhere else is
+    /// scanning something else, which is what makes a state from it
+    /// refusable rather than merely unhelpful.
+    fn partition(&self) -> String {
+        format!("root={}", self.root.display())
+    }
+
+    /// The path a resumption point says was the last one handled, or an
+    /// answer for a caller that has to be told why it cannot resume.
+    ///
+    /// Two refusals, both `Config`, because both are about how the
+    /// scanner was built rather than about the source. A state from
+    /// another root is one; a state whose offset this version does not
+    /// understand is the other — a scanner that shrugged and started
+    /// over would re-import the tree while looking exactly like one
+    /// that resumed.
+    fn resume_after(&self, state: Option<SyncState>) -> Result<Option<String>, SourceError> {
+        let Some(state) = state else {
+            return Ok(None);
+        };
+        if state.partition != self.partition() {
+            return Err(SourceError::Config(format!(
+                "cannot resume: the state is for {:?} and this scanner walks {:?}",
+                state.partition,
+                self.partition()
+            )));
+        }
+        match state.offset.get("after_path").and_then(|v| v.as_str()) {
+            Some(path) => Ok(Some(path.to_string())),
+            None => Err(SourceError::Config(format!(
+                "cannot resume: the state for {:?} carries no `after_path`",
+                state.partition
+            ))),
+        }
     }
 
     fn accepts(&self, path: &Path) -> bool {
@@ -119,7 +157,7 @@ impl SourceScanner for FsScanner {
         true
     }
 
-    fn scan(&self, mode: ScanMode) -> ScanFuture<'_> {
+    fn scan(&self, mode: ScanMode, resume_from: Option<SyncState>) -> ScanFuture<'_> {
         let root = self.root.clone();
         let this = self.clone();
         Box::pin(async move {
@@ -134,9 +172,15 @@ impl SourceScanner for FsScanner {
                 )));
             }
 
+            // Refused before anything is walked: a caller that asked
+            // to resume and cannot needs to hear so instead of
+            // receiving a whole tree it already has.
+            let after_path = this.resume_after(resume_from)?;
+            let partition = this.partition();
+
             // Enumerate the current tree into a channel so both modes
             // can share the same stream shape.
-            let (tx, rx) = mpsc::channel::<Result<RawItem, SourceError>>(64);
+            let (tx, rx) = mpsc::channel::<Result<ScanEvent, SourceError>>(64);
             let enumerate = {
                 let this = this.clone();
                 let root = root.clone();
@@ -146,7 +190,17 @@ impl SourceScanner for FsScanner {
                     // `walkdir::Error` (per-directory read failures on
                     // macOS especially can otherwise strand thousands
                     // of files with no user-visible signal).
-                    for entry_res in WalkDir::new(&root) {
+                    //
+                    // Sorted, which is what makes "after this path"
+                    // mean anything. `walkdir`'s default order is the
+                    // directory's own, so an unsorted walk could put a
+                    // file the resumption point excludes *after* one it
+                    // admits, and the second run would skip files it
+                    // had never seen. The order is the comparison the
+                    // resumption uses, so the two are written beside
+                    // each other deliberately.
+                    let walk = WalkDir::new(&root).sort_by_file_name();
+                    for entry_res in walk {
                         let entry = match entry_res {
                             Ok(e) => e,
                             Err(err) => {
@@ -164,8 +218,25 @@ impl SourceScanner for FsScanner {
                         if !this.accepts(entry.path()) {
                             continue;
                         }
-                        let item = this.read_item(entry.path().to_path_buf());
-                        if tx.send(item).await.is_err() {
+                        let path = entry.path().to_path_buf();
+                        let locator = path.display().to_string();
+                        if let Some(after) = &after_path
+                            && locator.as_str() <= after.as_str()
+                        {
+                            continue;
+                        }
+                        let event = this.read_item(path).map(ScanEvent::Item);
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                        // After the file, not before: the checkpoint
+                        // says everything already yielded is dealt
+                        // with, and this file has been.
+                        let checkpoint = ScanEvent::Checkpoint(SyncState::new(
+                            partition.clone(),
+                            serde_json::json!({ "after_path": locator }),
+                        ));
+                        if tx.send(Ok(checkpoint)).await.is_err() {
                             return;
                         }
                     }
@@ -251,8 +322,8 @@ impl SourceScanner for FsScanner {
                                 if !path.is_file() || !this_watch.accepts(&path) {
                                     continue;
                                 }
-                                let item = this_watch.read_item(path);
-                                if tx.send(item).await.is_err() {
+                                let event = this_watch.read_item(path).map(ScanEvent::Item);
+                                if tx.send(event).await.is_err() {
                                     return;
                                 }
                             }
@@ -271,11 +342,52 @@ mod tests {
     use crate::port::Disposition;
     use futures::StreamExt;
 
-    async fn drain(scanner: FsScanner) -> Vec<Result<RawItem, SourceError>> {
-        match scanner.scan(ScanMode::Enumerate).await {
+    /// Everything the stream yielded, checkpoints included.
+    async fn drain_events(
+        scanner: FsScanner,
+        resume_from: Option<SyncState>,
+    ) -> Vec<Result<ScanEvent, SourceError>> {
+        match scanner.scan(ScanMode::Enumerate, resume_from).await {
             Ok(stream) => stream.collect().await,
             Err(err) => vec![Err(err)],
         }
+    }
+
+    /// The same, with the bookkeeping dropped — what a parser would
+    /// ever be handed.
+    async fn drain(scanner: FsScanner) -> Vec<Result<RawItem, SourceError>> {
+        drain_events(scanner, None)
+            .await
+            .into_iter()
+            .filter_map(|r| match r {
+                Ok(ScanEvent::Item(item)) => Some(Ok(item)),
+                Ok(ScanEvent::Checkpoint(_)) => None,
+                Err(err) => Some(Err(err)),
+            })
+            .collect()
+    }
+
+    /// The locators, in the order the walk yielded them.
+    fn locators(events: &[Result<ScanEvent, SourceError>]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|r| match r {
+                Ok(ScanEvent::Item(item)) => Some(item.locator.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The last checkpoint the scan emitted, which is what a runner
+    /// would keep.
+    fn last_checkpoint(events: &[Result<ScanEvent, SourceError>]) -> Option<SyncState> {
+        events
+            .iter()
+            .filter_map(|r| match r {
+                Ok(ScanEvent::Checkpoint(state)) => Some(state.clone()),
+                _ => None,
+            })
+            .next_back()
     }
 
     /// A root that is not there is the caller's answer, and the scan
@@ -284,7 +396,7 @@ mod tests {
     async fn a_root_that_is_not_there_is_the_callers() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let err = FsScanner::new(tmp.path().join("nope"))
-            .scan(ScanMode::Enumerate)
+            .scan(ScanMode::Enumerate, None)
             .await
             .err()
             .expect("no directory, no scan");
@@ -367,5 +479,81 @@ mod tests {
             ],
             "the extension filter keeps `c.bin` out"
         );
+    }
+
+    /// What the whole resumption is for: a second scan handed the first
+    /// one's checkpoint reads what follows it, and not the tree over
+    /// again.
+    ///
+    /// The sorted walk is asserted here too, in the same test, because
+    /// it is the same property: "after this path" only names a set at
+    /// all if the order it refers to is the order the walk takes.
+    #[tokio::test]
+    async fn a_resumed_walk_yields_only_what_follows_the_checkpoint() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(tmp.path().join(name), name.as_bytes()).expect("write");
+        }
+        let at = |name: &str| tmp.path().join(name).display().to_string();
+
+        let first = drain_events(FsScanner::new(tmp.path()), None).await;
+        assert_eq!(
+            locators(&first),
+            vec![at("a.txt"), at("b.txt"), at("c.txt")],
+            "sorted, which is what lets a path stand for a position"
+        );
+
+        // The checkpoint that follows the first file — the scan got
+        // that far and no further, which is the state a run cut short
+        // after one file would have kept.
+        let after_a = match &first[1] {
+            Ok(ScanEvent::Checkpoint(state)) => state.clone(),
+            other => panic!("a checkpoint follows each file, found {other:?}"),
+        };
+
+        let second = drain_events(FsScanner::new(tmp.path()), Some(after_a)).await;
+        assert_eq!(
+            locators(&second),
+            vec![at("b.txt"), at("c.txt")],
+            "the file already handled does not come back"
+        );
+        assert_eq!(
+            last_checkpoint(&second).map(|state| state.offset),
+            Some(serde_json::json!({ "after_path": at("c.txt") })),
+            "and the resumed scan earns a point of its own"
+        );
+    }
+
+    /// A state this scanner cannot honour is refused, because the
+    /// alternative — shrugging and starting from the top — re-imports
+    /// the tree while looking exactly like a resumption that worked.
+    #[tokio::test]
+    async fn a_state_this_scanner_cannot_use_is_refused_rather_than_ignored() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(tmp.path().join("a.txt"), b"one").expect("write");
+
+        let refusals = [
+            // Written by a scanner walking somewhere else.
+            SyncState::new(
+                "root=/somewhere/else",
+                serde_json::json!({ "after_path": "/somewhere/else/a.txt" }),
+            ),
+            // This root, but an offset this version does not read.
+            SyncState::new(
+                format!("root={}", tmp.path().display()),
+                serde_json::json!({ "cursor": 7 }),
+            ),
+        ];
+        for state in refusals {
+            let err = FsScanner::new(tmp.path())
+                .scan(ScanMode::Enumerate, Some(state))
+                .await
+                .err()
+                .expect("the scan does not start");
+            assert!(
+                matches!(err, SourceError::Config(_)),
+                "how the scanner was built, not what the source did: {err}"
+            );
+        }
     }
 }

@@ -145,4 +145,6 @@ pub use parser::{ParseError, RecordAddresses, SourceParser, resolve_occurrence};
 pub use port::{Disposition, SourceError, SyncState};
 pub use progress::Progress;
 pub use runner::{ImportOptions, ImportSummary, run_import};
-pub use scanner::{RawItem, ScanMode, SourceScanner, fs::FsScanner, sqlite::SqliteScanner};
+pub use scanner::{
+    RawItem, ScanEvent, ScanMode, SourceScanner, fs::FsScanner, sqlite::SqliteScanner,
+};

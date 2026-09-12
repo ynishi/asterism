@@ -22,7 +22,7 @@ use asterism_importer_sdk::harvest::{HarvestSourceParser, schema_example_json};
 use asterism_importer_sdk::scanner::sqlite::ColumnMap;
 use asterism_importer_sdk::{
     ChatMessage, ChatRole, Doc, DocFormat, Footprint, FootprintSource, FsScanner, ImportOptions,
-    Note, OccurredSource, ParseError, RawItem, ScanMode, SourceParser, SqliteScanner,
+    Note, OccurredSource, ParseError, RawItem, ScanMode, SourceParser, SqliteScanner, SyncState,
     resolve_occurrence, run_import,
 };
 use asterism_importer_tape::TapeParser;
@@ -123,6 +123,15 @@ struct CommonArgs {
     /// Materialise the source directory hierarchy after each batch.
     #[arg(long)]
     auto_organize_base_dir: Option<String>,
+    /// Take up where a previous run stopped, given the JSON that run
+    /// printed.
+    ///
+    /// Nothing stores these yet, so an operator carries one across by
+    /// hand. What it means belongs to the scanner that wrote it, and a
+    /// scanner handed one it cannot use refuses the scan rather than
+    /// quietly starting over.
+    #[arg(long, value_parser = parse_sync_state)]
+    resume_from: Option<SyncState>,
 }
 
 impl CommonArgs {
@@ -134,8 +143,19 @@ impl CommonArgs {
             upload_concurrency: 1,
             dry_run: self.dry_run,
             auto_organize_base_dir: self.auto_organize_base_dir.clone(),
+            resume_from: self.resume_from.clone(),
         }
     }
+}
+
+/// Reads the resumption point a previous run printed.
+///
+/// Read as a whole and not field by field: the partition is half of
+/// what makes a state answerable, and a caller who could supply an
+/// offset alone would be able to point one source's position at
+/// another's.
+fn parse_sync_state(raw: &str) -> Result<SyncState, String> {
+    serde_json::from_str(raw).map_err(|err| format!("not a resumption point: {err}"))
 }
 
 #[derive(Debug, Args)]
@@ -187,6 +207,9 @@ struct HarvestArgs {
     dry_run: bool,
     #[arg(long)]
     auto_organize_base_dir: Option<String>,
+    /// Take up where a previous run stopped. See `CommonArgs`.
+    #[arg(long, value_parser = parse_sync_state)]
+    resume_from: Option<SyncState>,
 }
 
 #[derive(Debug, Args)]
@@ -536,6 +559,16 @@ where
         "\nasterism-import {name}: done — ok={} err={}",
         summary.imported, summary.failed
     );
+    // Printed because nothing keeps it: this line is how a resumption
+    // point reaches the next run, as `--resume-from`. Printed before
+    // the failure below, so a run cut short still leaves it where an
+    // operator will look — that is the case it is most wanted in.
+    if let Some(state) = &summary.resume_from {
+        eprintln!(
+            "asterism-import {name}: resume with --resume-from '{}'",
+            serde_json::to_string(state).expect("a state this crate built serialises")
+        );
+    }
     // Checked before the count, so it is the failure the exit names:
     // "the source refused the credential" tells an operator what to do
     // next and "3 failed item(s)" does not. The counts are printed
@@ -573,6 +606,7 @@ async fn run_harvest(args: HarvestArgs) -> anyhow::Result<()> {
         upload_concurrency: 1,
         dry_run: args.dry_run,
         auto_organize_base_dir: args.auto_organize_base_dir,
+        resume_from: args.resume_from,
     };
     run("harvest", &scanner, &parser, args.watch, options).await
 }

@@ -204,6 +204,21 @@ async fn drive_to_terminal(env: &DispatchRunEnv, core: &CoreCtx, dispatch_id: &s
     panic!("dispatch did not reach a terminal state in 8 ticks");
 }
 
+/// What these tests ask of a summary: how many landed, how many did
+/// not, and whether anything ended the run.
+///
+/// Not the whole struct, because it also carries the point a later run
+/// could take up from — a path inside a temporary directory that
+/// changes every run, and the scanner's bookkeeping rather than
+/// anything this round trip is about.
+fn tally(summary: &ImportSummary) -> (u64, u64, Option<String>) {
+    (
+        summary.imported,
+        summary.failed,
+        summary.ended_by.as_ref().map(ToString::to_string),
+    )
+}
+
 /// Runs the real importer over one directory: scan → parse → POST to
 /// the router on `port`.
 ///
@@ -373,14 +388,7 @@ async fn an_exported_artefact_comes_back_through_its_own_sidecar() {
 
     // Leg 1: the original arrives the way every photo does.
     let first = import_png_dir(&corpus, &persona.id, port).await;
-    assert_eq!(
-        first,
-        ImportSummary {
-            imported: 1,
-            failed: 0,
-            ended_by: None,
-        }
-    );
+    assert_eq!(tally(&first), (1, 0, None));
     let original_id = asset_id_by_locator(&core, &persona.id, &plate).await;
 
     // The original went through the same importer as the return leg;
@@ -489,14 +497,7 @@ async fn an_exported_artefact_comes_back_through_its_own_sidecar() {
     // Leg 2: the same importer, the same scan mode, a different
     // directory. Nothing about the call says "this is a return".
     let second = import_png_dir(&inbox, &persona.id, port).await;
-    assert_eq!(
-        second,
-        ImportSummary {
-            imported: 1,
-            failed: 0,
-            ended_by: None,
-        }
-    );
+    assert_eq!(tally(&second), (1, 0, None));
     let returned_id = asset_id_by_locator(&core, &persona.id, &returned_file).await;
     assert_ne!(
         std::fs::read(&returned_file).expect("read returned file"),
@@ -638,14 +639,7 @@ async fn a_return_that_left_its_sidecar_behind_is_just_a_new_artefact() {
         .expect("register persona");
 
     let first = import_png_dir(&corpus, &persona.id, port).await;
-    assert_eq!(
-        first,
-        ImportSummary {
-            imported: 1,
-            failed: 0,
-            ended_by: None,
-        }
-    );
+    assert_eq!(tally(&first), (1, 0, None));
     let original_id = asset_id_by_locator(&core, &persona.id, &plate).await;
 
     let export = export_original(&core, &db_path, &persona.id, &original_id, &outbox).await;
@@ -668,14 +662,7 @@ async fn a_return_that_left_its_sidecar_behind_is_just_a_new_artefact() {
     // from the happy path.
 
     let second = import_png_dir(&inbox, &persona.id, port).await;
-    assert_eq!(
-        second,
-        ImportSummary {
-            imported: 1,
-            failed: 0,
-            ended_by: None,
-        }
-    );
+    assert_eq!(tally(&second), (1, 0, None));
     let returned_id = asset_id_by_locator(&core, &persona.id, &returned_file).await;
 
     let returned_extra = extra_of(&core, &returned_id).await;
@@ -750,14 +737,7 @@ async fn a_sidecar_naming_an_export_this_library_never_ran_still_lands_the_file(
         .expect("register persona");
 
     let first = import_png_dir(&corpus, &persona.id, port).await;
-    assert_eq!(
-        first,
-        ImportSummary {
-            imported: 1,
-            failed: 0,
-            ended_by: None,
-        }
-    );
+    assert_eq!(tally(&first), (1, 0, None));
     let original_id = asset_id_by_locator(&core, &persona.id, &plate).await;
 
     let export = export_original(&core, &db_path, &persona.id, &original_id, &outbox).await;
@@ -788,12 +768,8 @@ async fn a_sidecar_naming_an_export_this_library_never_ran_still_lands_the_file(
 
     let second = import_png_dir(&inbox, &persona.id, port).await;
     assert_eq!(
-        second,
-        ImportSummary {
-            imported: 1,
-            failed: 0,
-            ended_by: None,
-        },
+        tally(&second),
+        (1, 0, None),
         "an unresolvable claim is not a failed import"
     );
     let returned_id = asset_id_by_locator(&core, &persona.id, &returned_file).await;

@@ -433,12 +433,17 @@
     {
       "path": "asterism_importer_sdk::scanner::ItemStream",
       "kind": "type_alias",
-      "docs": "Async stream of scanned items, or failures.\n\nA failure on this stream is not necessarily the end of it, and what\nit is followed by is this scanner's to decide: another item, or\nnothing. [`SourceError::disposition`](crate::SourceError::disposition)\nsays what the failure cost the run, which is a different question\nand deliberately not this one."
+      "docs": "Async stream of scan events, or failures.\n\nA failure on this stream is not necessarily the end of it, and what\nit is followed by is this scanner's to decide: another event, or\nnothing. [`SourceError::disposition`](crate::SourceError::disposition)\nsays what the failure cost the run, which is a different question\nand deliberately not this one."
     },
     {
       "path": "asterism_importer_sdk::scanner::RawItem",
       "kind": "struct",
       "docs": "A raw scanned item — a payload plus the metadata needed to attribute\nit back to its origin."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::ScanEvent",
+      "kind": "enum",
+      "docs": "What a scanner puts on its stream: a record, or a point it could be\nresumed from.\n\nThe two travel together rather than through separate calls, which is\nwhere every inbound framework surveyed put it — Airbyte's state\nmessages, Singer's `STATE`, the offset Kafka Connect hangs on each\nrecord. The reason is that a resumption point means nothing on its\nown: it says \"everything before this is dealt with\", and *before\nthis* is a position in the stream it arrived on."
     },
     {
       "path": "asterism_importer_sdk::scanner::ScanFuture",
@@ -453,7 +458,7 @@
     {
       "path": "asterism_importer_sdk::scanner::SourceScanner",
       "kind": "trait",
-      "docs": "Trait every source scanner implements.\n\n`scan` returns a boxed async stream of `RawItem`s, or failures. A\nfailure does not by itself end the stream — whether anything follows\nit is this scanner's answer, and `FsScanner` and `SqliteScanner`\ngive different ones about a record they could not read."
+      "docs": "Trait every source scanner implements.\n\n`scan` returns a boxed async stream of [`ScanEvent`]s, or failures.\nA failure does not by itself end the stream — whether anything\nfollows it is this scanner's answer, and `FsScanner` and\n`SqliteScanner` give different ones about a record they could not\nread."
     },
     {
       "path": "asterism_importer_sdk::scanner::fs",

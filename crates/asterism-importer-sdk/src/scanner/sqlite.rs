@@ -29,8 +29,8 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use super::{RawItem, ScanFuture, ScanMode, SourceScanner};
-use crate::port::SourceError;
+use super::{RawItem, ScanEvent, ScanFuture, ScanMode, SourceScanner};
+use crate::port::{SourceError, SyncState};
 
 /// Column-to-`RawItem` mapping supplied by the importer.
 #[derive(Debug, Clone)]
@@ -77,6 +77,7 @@ pub struct SqliteScanner {
     query: String,
     columns: ColumnMap,
     source_kind: String,
+    ordered_by_id: bool,
 }
 
 impl SqliteScanner {
@@ -87,6 +88,70 @@ impl SqliteScanner {
             query: query.into(),
             columns,
             source_kind: "sqlite".into(),
+            ordered_by_id: false,
+        }
+    }
+
+    /// Declares that the query returns rows in ascending order of the
+    /// id column, which is what makes this scanner resumable.
+    ///
+    /// The caller has to say it because only the caller can know it.
+    /// Resuming means "take up after row N", and that is only the same
+    /// set as "the rows not yet seen" if the order is ascending by id
+    /// and stable between runs. A `SELECT` without an `ORDER BY`
+    /// promises no order at all, so resuming one would skip rows that
+    /// happened to sort before N on the second run and were never
+    /// yielded on the first — silently, and with nothing to notice it
+    /// by afterwards.
+    ///
+    /// Nothing here can check the claim. What it can do is refuse to
+    /// resume without it, which is what it does: a resumption asked for
+    /// and not available is a [`Config`](crate::SourceError::Config)
+    /// failure, not a quiet start from the beginning.
+    ///
+    /// Note what this buys and what it does not. The rows before the
+    /// resumption point are still read out of SQLite — the query is the
+    /// caller's and is not rewritten — and what is saved is the
+    /// parsing, the upload and the server-side work for every record
+    /// already handled.
+    pub fn ordered_by_id(mut self) -> Self {
+        self.ordered_by_id = true;
+        self
+    }
+
+    /// The resumable unit: this database and this query.
+    ///
+    /// Both, because a different query over the same file selects a
+    /// different set of rows, and a row id from one says nothing about
+    /// a position in the other.
+    fn partition(&self) -> String {
+        format!("db={}|query={}", self.db_path.display(), self.query)
+    }
+
+    /// The row id a resumption point says was the last one handled, or
+    /// an answer for a caller that has to be told why it cannot resume.
+    fn resume_after(&self, state: Option<SyncState>) -> Result<Option<String>, SourceError> {
+        let Some(state) = state else {
+            return Ok(None);
+        };
+        if !self.ordered_by_id {
+            return Err(SourceError::Config(
+                "cannot resume: this scanner has not been told its query orders rows by the \
+                 id column, and resuming an unordered query skips rows nobody has seen — \
+                 see SqliteScanner::ordered_by_id"
+                    .into(),
+            ));
+        }
+        if state.partition != self.partition() {
+            return Err(SourceError::Config(
+                "cannot resume: the state was written for another database or another query".into(),
+            ));
+        }
+        match state.offset.get("after_id").and_then(|v| v.as_str()) {
+            Some(id) => Ok(Some(id.to_string())),
+            None => Err(SourceError::Config(
+                "cannot resume: the state carries no `after_id`".into(),
+            )),
         }
     }
 
@@ -98,7 +163,7 @@ impl SqliteScanner {
 }
 
 impl SourceScanner for SqliteScanner {
-    fn scan(&self, mode: ScanMode) -> ScanFuture<'_> {
+    fn scan(&self, mode: ScanMode, resume_from: Option<SyncState>) -> ScanFuture<'_> {
         let this = self.clone();
         Box::pin(async move {
             if !this.db_path.exists() {
@@ -117,14 +182,31 @@ impl SourceScanner for SqliteScanner {
                 ));
             }
 
-            let (tx, rx) = mpsc::channel::<Result<RawItem, SourceError>>(64);
+            // Refused before the query runs, so a caller that asked to
+            // resume and cannot hears it instead of receiving the whole
+            // table again.
+            let after_id = this.resume_after(resume_from)?;
+            // `None` when the caller has not vouched for the order: a
+            // scan with no resumable position emits no checkpoints,
+            // rather than points it would refuse to honour.
+            let partition = this.ordered_by_id.then(|| this.partition());
+
+            let (tx, rx) = mpsc::channel::<Result<ScanEvent, SourceError>>(64);
             let db_path = this.db_path.clone();
             let query = this.query.clone();
             let columns = this.columns.clone();
             let source_kind = this.source_kind.clone();
 
             tokio::task::spawn_blocking(move || {
-                run_query(&db_path, &query, &columns, &source_kind, &tx);
+                run_query(
+                    &db_path,
+                    &query,
+                    &columns,
+                    &source_kind,
+                    partition.as_deref(),
+                    after_id.as_deref(),
+                    &tx,
+                );
             });
 
             Ok(ReceiverStream::new(rx).boxed())
@@ -132,12 +214,17 @@ impl SourceScanner for SqliteScanner {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_query(
     db_path: &Path,
     query: &str,
     columns: &ColumnMap,
     source_kind: &str,
-    tx: &mpsc::Sender<Result<RawItem, SourceError>>,
+    // The partition to checkpoint under, or `None` for a scan with no
+    // resumable position.
+    partition: Option<&str>,
+    after_id: Option<&str>,
+    tx: &mpsc::Sender<Result<ScanEvent, SourceError>>,
 ) {
     let conn = match Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
         Ok(c) => c,
@@ -262,6 +349,16 @@ fn run_query(
                 }
                 extras.insert("__row_id".into(), json!(id_repr.clone()));
 
+                // Skipped in this process rather than in the query:
+                // the statement is the caller's and is not rewritten,
+                // so SQLite still reads these rows. What resuming saves
+                // is everything after this line.
+                if let Some(after) = after_id
+                    && id_repr.as_str() <= after
+                {
+                    continue;
+                }
+
                 let item = RawItem {
                     source_kind: source_kind.to_string(),
                     locator: format!("{}#{}", db_path.display(), id_repr),
@@ -269,8 +366,25 @@ fn run_query(
                     occurred_at,
                     extra: serde_json::Value::Object(extras),
                 };
-                if tx.blocking_send(Ok(item)).is_err() {
+                if tx.blocking_send(Ok(ScanEvent::Item(item))).is_err() {
                     return;
+                }
+                // After the row, because a checkpoint says everything
+                // already yielded is dealt with.
+                //
+                // Only when the caller vouched for the order, which is
+                // why the partition arrives as an `Option`. A scanner
+                // that emitted points it would later refuse to resume
+                // from would hand its caller something to store, print
+                // and pass back, and answer it with a `Config` failure.
+                if let Some(partition) = partition {
+                    let checkpoint = ScanEvent::Checkpoint(SyncState::new(
+                        partition.to_string(),
+                        json!({ "after_id": id_repr }),
+                    ));
+                    if tx.blocking_send(Ok(checkpoint)).is_err() {
+                        return;
+                    }
                 }
             }
             Ok(None) => break,
@@ -372,12 +486,53 @@ mod tests {
         ColumnMap::new("id", "body")
     }
 
-    /// Runs a scan and returns everything the stream yielded.
-    async fn drain(scanner: SqliteScanner) -> Vec<Result<RawItem, SourceError>> {
-        match scanner.scan(ScanMode::Enumerate).await {
+    /// Runs a scan and returns everything the stream yielded,
+    /// checkpoints included.
+    async fn drain_events(
+        scanner: SqliteScanner,
+        resume_from: Option<SyncState>,
+    ) -> Vec<Result<ScanEvent, SourceError>> {
+        match scanner.scan(ScanMode::Enumerate, resume_from).await {
             Ok(stream) => stream.collect().await,
             Err(err) => vec![Err(err)],
         }
+    }
+
+    /// The same, with the bookkeeping dropped — what a parser would
+    /// ever be handed.
+    async fn drain(scanner: SqliteScanner) -> Vec<Result<RawItem, SourceError>> {
+        drain_events(scanner, None)
+            .await
+            .into_iter()
+            .filter_map(|r| match r {
+                Ok(ScanEvent::Item(item)) => Some(Ok(item)),
+                Ok(ScanEvent::Checkpoint(_)) => None,
+                Err(err) => Some(Err(err)),
+            })
+            .collect()
+    }
+
+    /// The locators, in the order the query yielded them.
+    fn locators(events: &[Result<ScanEvent, SourceError>]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|r| match r {
+                Ok(ScanEvent::Item(item)) => Some(item.locator.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The last checkpoint the scan emitted, which is what a runner
+    /// would keep.
+    fn last_checkpoint(events: &[Result<ScanEvent, SourceError>]) -> Option<SyncState> {
+        events
+            .iter()
+            .filter_map(|r| match r {
+                Ok(ScanEvent::Checkpoint(state)) => Some(state.clone()),
+                _ => None,
+            })
+            .next_back()
     }
 
     /// The classification is only worth having if a scanner can fill it
@@ -469,7 +624,7 @@ mod tests {
     async fn a_database_that_is_not_there_is_the_callers() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let err = SqliteScanner::new(tmp.path().join("nope.sqlite"), "SELECT 1", columns())
-            .scan(ScanMode::Enumerate)
+            .scan(ScanMode::Enumerate, None)
             .await
             .err()
             .expect("no file, no scan");
@@ -493,5 +648,94 @@ mod tests {
         assert_eq!(item.payload, b"hello");
         assert_eq!(item.locator, format!("{}#1", db.display()));
         assert_eq!(item.source_kind, "sqlite");
+    }
+
+    /// The same property as the filesystem's, over the other source: a
+    /// resumed query yields the rows after the checkpoint and not the
+    /// table again.
+    #[tokio::test]
+    async fn a_resumed_query_yields_only_the_rows_after_the_checkpoint() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("many.sqlite");
+        let conn = Connection::open(&path).expect("create");
+        conn.execute_batch(
+            "CREATE TABLE entries(id INTEGER PRIMARY KEY, body TEXT);
+             INSERT INTO entries VALUES(1, 'one'), (2, 'two'), (3, 'three');",
+        )
+        .expect("seed");
+        drop(conn);
+
+        let scanner = || {
+            SqliteScanner::new(&path, "SELECT id, body FROM entries ORDER BY id", columns())
+                .ordered_by_id()
+        };
+        let at = |id: u32| format!("{}#{id}", path.display());
+
+        let first = drain_events(scanner(), None).await;
+        assert_eq!(locators(&first), vec![at(1), at(2), at(3)]);
+
+        let after_first = match &first[1] {
+            Ok(ScanEvent::Checkpoint(state)) => state.clone(),
+            other => panic!("a checkpoint follows each row, found {other:?}"),
+        };
+
+        let second = drain_events(scanner(), Some(after_first)).await;
+        assert_eq!(
+            locators(&second),
+            vec![at(2), at(3)],
+            "the row already handled does not come back"
+        );
+        assert_eq!(
+            last_checkpoint(&second).map(|state| state.offset),
+            Some(json!({ "after_id": "3" })),
+        );
+    }
+
+    /// Resuming a query nobody has promised is ordered would skip rows
+    /// that sorted before the checkpoint on this run and were never
+    /// yielded on the last — silently. So it is refused, and refused
+    /// before the query runs.
+    #[tokio::test]
+    async fn resuming_is_refused_unless_the_caller_vouched_for_the_order() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db = a_database(tmp.path(), "good.sqlite");
+        let query = "SELECT id, body FROM entries";
+        let partition = format!("db={}|query={query}", db.display());
+
+        // And without the promise there is nothing to offer in the
+        // first place: a scan that would refuse to resume does not hand
+        // out points to resume from.
+        let events = drain_events(SqliteScanner::new(&db, query, columns()), None).await;
+        assert_eq!(locators(&events).len(), 1, "the row still arrives");
+        assert_eq!(
+            last_checkpoint(&events),
+            None,
+            "and nothing that looks like a position it would honour"
+        );
+
+        let err = SqliteScanner::new(&db, query, columns())
+            .scan(
+                ScanMode::Enumerate,
+                Some(SyncState::new(partition, json!({ "after_id": "1" }))),
+            )
+            .await
+            .err()
+            .expect("no promise, no resumption");
+        assert!(matches!(err, SourceError::Config(_)), "{err}");
+
+        // And with the promise, a state written for another query is
+        // still refused: a row id means nothing outside the query that
+        // produced it.
+        let elsewhere = SyncState::new(
+            "db=/other.sqlite|query=SELECT 1",
+            json!({ "after_id": "1" }),
+        );
+        let err = SqliteScanner::new(&db, query, columns())
+            .ordered_by_id()
+            .scan(ScanMode::Enumerate, Some(elsewhere))
+            .await
+            .err()
+            .expect("another query's position is not this one's");
+        assert!(matches!(err, SourceError::Config(_)), "{err}");
     }
 }

@@ -9,8 +9,9 @@ instead of writing their own.
 
 ## Types
 
-- `ItemStream` — Async stream of scanned items, or failures.
+- `ItemStream` — Async stream of scan events, or failures.
 - `RawItem` — A raw scanned item — a payload plus the metadata needed to attribute
+- `ScanEvent` — What a scanner puts on its stream: a record, or a point it could be
 - `ScanFuture` — Future returned by [`SourceScanner::scan`] — resolves to the item
 - `ScanMode` — Scan mode passed to [`SourceScanner::scan`].
 
