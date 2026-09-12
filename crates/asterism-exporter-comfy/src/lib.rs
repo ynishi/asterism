@@ -15,10 +15,12 @@
 //!   batch count is a placeholder in the graph and a value in the
 //!   params rather than a literal to edit in the node.
 //! - Every input the graph names lands in ComfyUI's `input/` through
-//!   the upload route, under a subfolder of our own, and the name the
-//!   backend answers with is what the `LoadImage` node is given. Stock
-//!   ComfyUI refuses a path outside `input/`, so this is the only way
-//!   an image gets in.
+//!   the upload route, under a directory of this dispatch's own, and
+//!   the `<subfolder>/<name>` the backend answers with is what the
+//!   `LoadImage` node is given — ComfyUI resolves that pair against
+//!   `input/`, and a bare name would name a file in another directory.
+//!   Stock ComfyUI refuses a path outside `input/`, so the upload is
+//!   the only way an image gets in.
 //! - Every image a node emitted (`outputs.<node>.images[]`; other
 //!   output kinds are left where they are) is fetched and written under
 //!   the profile's custody root
@@ -106,10 +108,31 @@ pub const ACTION_IMG2IMG: &str = "img2img";
 /// `asterism-server schema` CLI (`exporter:comfy:params`).
 pub const SCHEMA_NAME: &str = "exporter:comfy:params";
 
-/// The subfolder under ComfyUI's `input/` every upload goes to.
+/// The subfolder under ComfyUI's `input/` every upload goes to, above
+/// a directory per dispatch ([`upload_subfolder`]).
+///
 /// ComfyUI never prunes `input/`, so a name of our own keeps what this
 /// process wrote apart from what the user dropped there by hand.
 pub const UPLOAD_SUBFOLDER: &str = "asterism";
+
+/// Where one dispatch's inputs go: `asterism/<dispatch_id>`.
+///
+/// A directory per dispatch, because the upload is named after the
+/// asset's own file and two assets can share a basename — this
+/// exporter's own outputs do, since custody names them by their
+/// position in the harvest, so re-dispatching two dispatches' first
+/// images as a reference and a mask would send `000-asterism_00001_.png`
+/// twice. With `overwrite=true` the second upload would land on the
+/// first and both nodes would load one image, with nothing to report.
+/// It is not only a within-dispatch problem: `LoadImage` reads the
+/// file when the prompt executes, so an upload from a later dispatch
+/// could change what an already-queued one loads.
+pub fn upload_subfolder(dispatch_id: &str) -> String {
+    // The id is a UUID from our own ledger, so it is already one path
+    // segment; ComfyUI validates the joined path stays under `input/`
+    // regardless, and answers 400 if it does not.
+    format!("{UPLOAD_SUBFOLDER}/{dispatch_id}")
+}
 
 /// Canonical example JSON for [`ComfyDispatchParams`] — streamed by
 /// `asterism-server schema print exporter:comfy:params`.
@@ -405,6 +428,7 @@ impl ComfyHttpExporter {
     async fn upload_input(
         &self,
         endpoint: &str,
+        subfolder: &str,
         input: &AssetCardDto,
     ) -> Result<UploadResponse, ExporterError> {
         let path = PathBuf::from(&input.source_locator);
@@ -427,7 +451,7 @@ impl ComfyHttpExporter {
             .part("image", part)
             .text("overwrite", "true")
             .text("type", "input")
-            .text("subfolder", UPLOAD_SUBFOLDER);
+            .text("subfolder", subfolder.to_string());
         let url = format!("{}/upload/image", trim_trailing_slash(endpoint));
         let resp = self
             .http
@@ -599,6 +623,7 @@ impl Exporter for ComfyHttpExporter {
         let mut workflow = render_workflow(&self.grammar, &params.workflow, &env)?;
         // Template first, uploads second: the name the backend answers
         // with is data, and must not be read as a template.
+        let subfolder = upload_subfolder(ctx.dispatch_id);
         let mut uploads: Vec<UploadRecord> = Vec::new();
         for (node_id, index) in params.input_slot.entries() {
             let input = ctx.inputs.get(index).ok_or_else(|| {
@@ -607,7 +632,9 @@ impl Exporter for ComfyHttpExporter {
                     ctx.inputs.len()
                 ))
             })?;
-            let uploaded = self.upload_input(&params.endpoint, input).await?;
+            let uploaded = self
+                .upload_input(&params.endpoint, &subfolder, input)
+                .await?;
             let image = uploaded.image_ref();
             set_workflow_image(&mut workflow, &node_id, &image)?;
             uploads.push(UploadRecord {

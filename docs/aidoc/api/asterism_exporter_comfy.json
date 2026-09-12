@@ -35,12 +35,17 @@
     {
       "path": "asterism_exporter_comfy::UPLOAD_SUBFOLDER",
       "kind": "constant",
-      "docs": "The subfolder under ComfyUI's `input/` every upload goes to.\nComfyUI never prunes `input/`, so a name of our own keeps what this\nprocess wrote apart from what the user dropped there by hand."
+      "docs": "The subfolder under ComfyUI's `input/` every upload goes to, above\na directory per dispatch ([`upload_subfolder`]).\n\nComfyUI never prunes `input/`, so a name of our own keeps what this\nprocess wrote apart from what the user dropped there by hand."
     },
     {
       "path": "asterism_exporter_comfy::params_example_json",
       "kind": "function",
       "docs": "Canonical example JSON for [`ComfyDispatchParams`] — streamed by\n`asterism-server schema print exporter:comfy:params`."
+    },
+    {
+      "path": "asterism_exporter_comfy::upload_subfolder",
+      "kind": "function",
+      "docs": "Where one dispatch's inputs go: `asterism/<dispatch_id>`.\n\nA directory per dispatch, because the upload is named after the\nasset's own file and two assets can share a basename — this\nexporter's own outputs do, since custody names them by their\nposition in the harvest, so re-dispatching two dispatches' first\nimages as a reference and a mask would send `000-asterism_00001_.png`\ntwice. With `overwrite=true` the second upload would land on the\nfirst and both nodes would load one image, with nothing to report.\nIt is not only a within-dispatch problem: `LoadImage` reads the\nfile when the prompt executes, so an upload from a later dispatch\ncould change what an already-queued one loads."
     }
   ]
 }

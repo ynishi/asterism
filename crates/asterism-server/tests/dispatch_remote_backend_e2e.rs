@@ -1070,10 +1070,11 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
     .await;
 
     // (A) What the backend was actually told.
+    let upload_dir = format!("asterism/{}", export.dispatch_id);
     assert_eq!(
         backend.uploads(),
-        vec![("plate.png".to_string(), "asterism".to_string())],
-        "the one slot's member went up under the exporter's own subfolder"
+        vec![("plate.png".to_string(), upload_dir.clone())],
+        "the one slot's member went up under this dispatch's own directory"
     );
     let submissions = backend.submissions();
     assert_eq!(submissions.len(), 1, "one dispatch, one submit");
@@ -1083,8 +1084,10 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
         "Comfy's client id is the dispatch, so the backchannel names the job Asterism knows"
     );
     assert_eq!(
-        body["prompt"]["10"]["inputs"]["image"], "asterism/plate.png",
-        "the loader is given the name the upload answered with, not a path on this machine"
+        body["prompt"]["10"]["inputs"]["image"],
+        format!("{upload_dir}/plate.png"),
+        "the loader is given the subfolder and name the upload answered with, \
+         not a path on this machine"
     );
     assert_eq!(
         body["prompt"]["11"]["inputs"]["image"], "<set from input_slot after upload>",
@@ -1173,7 +1176,7 @@ async fn a_comfy_export_waits_for_the_backend_and_harvests_what_it_made() {
             "node_id": "10",
             "input_index": 0,
             "source_locator": plate.display().to_string(),
-            "image": "asterism/plate.png",
+            "image": format!("{upload_dir}/plate.png"),
         }])
     );
 
@@ -1387,19 +1390,8 @@ async fn a_comfy_export_feeds_every_slot_from_the_snapshot_member_it_names() {
         )
         .await
         .expect("register persona");
-    let original = core
-        .asset_service
-        .add(
-            add_command(
-                &persona.id,
-                plate.to_str().expect("utf-8 fixture path"),
-                1_785_000_000_000,
-                None,
-            ),
-            &unattributed(),
-        )
-        .await
-        .expect("add original");
+    // Created mask-first and frozen plate-first on purpose: see the
+    // slot assertions below.
     let mask_asset = core
         .asset_service
         .add(
@@ -1413,6 +1405,26 @@ async fn a_comfy_export_feeds_every_slot_from_the_snapshot_member_it_names() {
         )
         .await
         .expect("add mask");
+    let original = core
+        .asset_service
+        .add(
+            add_command(
+                &persona.id,
+                plate.to_str().expect("utf-8 fixture path"),
+                1_785_000_000_000,
+                None,
+            ),
+            &unattributed(),
+        )
+        .await
+        .expect("add original");
+    assert!(
+        mask_asset.id < original.id,
+        "the fixture needs the mask's id to sort first, so that freeze order \
+         and id order disagree: {} vs {}",
+        mask_asset.id,
+        original.id
+    );
 
     let export = export_via(
         &core,
@@ -1428,20 +1440,30 @@ async fn a_comfy_export_feeds_every_slot_from_the_snapshot_member_it_names() {
     )
     .await;
 
+    let upload_dir = format!("asterism/{}", export.dispatch_id);
     assert_eq!(
         backend.uploads(),
         vec![
-            ("plate.png".to_string(), "asterism".to_string()),
-            ("mask.png".to_string(), "asterism".to_string()),
+            ("plate.png".to_string(), upload_dir.clone()),
+            ("mask.png".to_string(), upload_dir.clone()),
         ],
-        "one upload per slot, in slot order"
+        "one upload per slot, in slot order, both under this dispatch's directory"
     );
     let body = &backend.submissions()[0];
+    // Slot 0 is the plate and slot 1 the mask because that is the order
+    // the snapshot was frozen in — and the snapshot was frozen in the
+    // reverse of the order the two assets were created, so an
+    // implementation that handed the exporter its members in id order
+    // (which is creation order, the ids being UUIDv7) would put each
+    // image in the other's node and report success.
     assert_eq!(
         body["prompt"]["10"]["inputs"]["image"],
-        "asterism/plate.png"
+        format!("{upload_dir}/plate.png")
     );
-    assert_eq!(body["prompt"]["11"]["inputs"]["image"], "asterism/mask.png");
+    assert_eq!(
+        body["prompt"]["11"]["inputs"]["image"],
+        format!("{upload_dir}/mask.png")
+    );
     assert_eq!(
         export.ticks,
         vec![

@@ -230,13 +230,27 @@ pub async fn run_dispatch_run(
     let snapshot = env.snapshots.find(&job.snapshot_id).await?.ok_or_else(|| {
         DomainError::Validation(format!("snapshot vanished: {}", job.snapshot_id))
     })?;
-    let cards: Vec<AssetCard> = asterism_core::application::fold_redirect::hydrate_named(
+    let named = asterism_core::application::fold_redirect::hydrate_named(
         env.assets.as_ref(),
         &snapshot.asset_ids,
         &Viewer::Owner,
     )
-    .await?
-    .cards;
+    .await?;
+    // Re-projected onto the ids rather than taken as it came back.
+    // `NamedCards.cards` is a set — the repository answers a
+    // `WHERE id IN (…)` and SQLite may serve it from the id index, so
+    // the order is the ids' own and not the freeze's. An exporter whose
+    // params say "this node takes member 1" is reading a position, and
+    // a position is only a fact once something establishes the order;
+    // the freeze is what does, so the order the snapshot was named in
+    // is the order the exporter sees. Members the viewer cannot see are
+    // dropped here as they are there, which shortens the list rather
+    // than shifting one member into another's place.
+    let cards: Vec<AssetCard> = named
+        .ids
+        .iter()
+        .filter_map(|id| named.cards.iter().find(|c| &c.id == id).cloned())
+        .collect();
     // Project every AssetCard through the contract-owned
     // AssetCardDto so the SDK sees the same wire shape the Tauri UI
     // already receives. Persona id on the DispatchJob wins over the

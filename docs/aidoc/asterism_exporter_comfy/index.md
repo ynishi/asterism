@@ -17,10 +17,12 @@ ComfyUI's filesystem by hand.
   batch count is a placeholder in the graph and a value in the
   params rather than a literal to edit in the node.
 - Every input the graph names lands in ComfyUI's `input/` through
-  the upload route, under a subfolder of our own, and the name the
-  backend answers with is what the `LoadImage` node is given. Stock
-  ComfyUI refuses a path outside `input/`, so this is the only way
-  an image gets in.
+  the upload route, under a directory of this dispatch's own, and
+  the `<subfolder>/<name>` the backend answers with is what the
+  `LoadImage` node is given — ComfyUI resolves that pair against
+  `input/`, and a bare name would name a file in another directory.
+  Stock ComfyUI refuses a path outside `input/`, so the upload is
+  the only way an image gets in.
 - Every image a node emitted (`outputs.<node>.images[]`; other
   output kinds are left where they are) is fetched and written under
   the profile's custody root
