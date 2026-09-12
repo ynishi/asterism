@@ -19,6 +19,27 @@
 //! signer, carrying the release act and the pursuit's shape — is
 //! answered in `asterism-infra`'s own tests, beside the certificate
 //! fixture that can produce one.
+//!
+//! **Why `CoreMode::ReadOnly`.** One test here asserts an absence.
+//! `a_member_that_cannot_be_stamped_is_recorded_rather_than_skipped`
+//! lands two members and fingerprints one of them, and what it is
+//! about is the row the release writes for the member that has none.
+//! But every asset added through `/asterism/assets/add` leaves a
+//! `MaterialHash` job behind — `AssetService::add` enqueues one per
+//! asset, below the default priority — and that job supplies exactly
+//! what the fixture is withholding. Under a mode that drains the queue
+//! the suite is racing its own fixture: whichever of the release and
+//! the hash reaches the member first decides the answer, and when the
+//! hash wins there is nothing unstampable left to find. `ReadOnly`
+//! opens the queue without a `Monitor`, so those jobs sit where they
+//! were pushed. It was a failure of exactly this that cost CI run
+//! 34672262204 its first attempt.
+//!
+//! It opens Tantivy without the writer lock as well, which this suite
+//! notices only in that nothing here reads search.
+//!
+//! Nothing here needs the worker. `run_to_done` advances the release's
+//! dispatch itself, through a `DispatchRunEnv` of its own.
 
 use std::sync::Arc;
 
@@ -42,7 +63,7 @@ async fn harness(tmp: &std::path::Path) -> (CoreCtx, Router) {
     let core = init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        CoreMode::ReadOnly,
         Some(&tmp.join("tantivy")),
     )
     .await
@@ -643,7 +664,9 @@ async fn releasing_a_change_point_that_carries_nothing_is_refused() {
 async fn a_member_that_cannot_be_stamped_is_recorded_rather_than_skipped() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let (core, router) = harness(tmp.path()).await;
-    // Two members, one of them still waiting on the hash job.
+    // Two members, one of them still waiting on the hash job — and the
+    // one the module doc's `CoreMode::ReadOnly` is for. A harness that
+    // drained the queue would hash it out from under this assertion.
     let (line, point, assets, _) = a_landed_line(&router, tmp.path(), 2, 1).await;
     let out = tmp.path().join("outbound");
 
