@@ -237,6 +237,7 @@
 - [asterism-importer-sdk::harvest::parser](asterism_importer_sdk/harvest__parser.md): [`SourceParser`] impl that decodes `asterism_agent_harvest` JSON
 - [asterism-importer-sdk::mapper](asterism_importer_sdk/mapper.md): Convenience shape for parser output plus the mapping to the wire
 - [asterism-importer-sdk::parser](asterism_importer_sdk/parser.md): `SourceParser` — turn a scanned [`RawItem`] into one or more
+- [asterism-importer-sdk::port](asterism_importer_sdk/port.md): The inbound port's shared vocabulary: what a failure is, and what a
 - [asterism-importer-sdk::progress](asterism_importer_sdk/progress.md): Tiny progress reporter — running success / failure counters, plus
 - [asterism-importer-sdk::runner](asterism_importer_sdk/runner.md): Shared importer execution pipeline.
 - [asterism-importer-sdk::scanner](asterism_importer_sdk/scanner.md): `SourceScanner` trait and shared item type.

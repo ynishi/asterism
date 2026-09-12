@@ -10025,6 +10025,12 @@ Scanner  ─→ RawItem  ─→ Parser  ─→ Footprint  ─→ AssetSpec  ─�
 - [`AssetSpec`] is the flat intermediate the SDK converts each
   footprint to before batching; plugin authors do not touch it
   directly (see [`Footprint::into_asset_spec`]).
+- [`port`] holds the vocabulary the scanners are written against:
+  [`SourceError`], which says what a caller does about a failure
+  rather than where it happened, and [`SyncState`], which is where a
+  scan's resumption point will live. Nothing persists the latter
+  yet — the type and its wire form are settled first, because the
+  question of who starts an adapter is not.
 - [`ApiClient`] performs the HTTP POSTs (single or batch).
 - [`Progress`] keeps a running success / failure tally.
 - [`run_import`] owns the shared scan / parse / batch / progress
@@ -10112,6 +10118,7 @@ per-target split rules, locator patterns, and unverified fields.
 - [`harvest::parser`](harvest__parser.md): [`SourceParser`] impl that decodes `asterism_agent_harvest` JSON
 - [`mapper`](mapper.md): Convenience shape for parser output plus the mapping to the wire
 - [`parser`](parser.md): `SourceParser` — turn a scanned [`RawItem`] into one or more
+- [`port`](port.md): The inbound port's shared vocabulary: what a failure is, and what a
 - [`progress`](progress.md): Tiny progress reporter — running success / failure counters, plus
 - [`runner`](runner.md): Shared importer execution pipeline.
 - [`scanner`](scanner.md): `SourceScanner` trait and shared item type.
@@ -11428,6 +11435,43 @@ no record has the id `L3`, so the body never resolves.
 - `SourceParser` — Trait every source parser implements.
 
 
+<!-- asterism_importer_sdk/port.md -->
+# asterism-importer-sdk::port
+
+The inbound port's shared vocabulary: what a failure is, and what a
+resumption point holds.
+
+These two types are what the scanner traits are written against, and
+they are deliberately the part of the port that does not depend on
+how an adapter is run — whether Asterism starts it and reads it, or
+it runs itself and pushes. A rate limit is a rate limit either way,
+and a cursor holds the same thing either way.
+
+## Why a classification at all
+
+[`SourceError`] replaced a three-variant enum whose variants said
+where the failure happened rather than what to do about it, and the
+runner treated all three alike: record the message, carry on to the
+next item. A source that had gone away was handled as one unreadable
+file, so an import against a moved directory or an expired
+credential spun through its whole stream reporting errors instead of
+stopping and saying so. With seven importers that is a bad hour;
+with thirty it is thirty separate answers to the same question.
+
+The five classes here are the ones inbound frameworks converged on —
+Airbyte's `config_error` / `transient_error` / `system_error` with
+`RATE_LIMITED` broken out as its own action, and Kafka Connect's
+coarser `RetriableException` — plus the per-item class this port
+already had and which none of those needs, because they stream rows
+rather than read files.
+
+## Types
+
+- `Disposition` — What a caller should do about a [`SourceError`].
+- `SourceError` — Why a source could not be read.
+- `SyncState` — Where a scan left off, so the next one can start there.
+
+
 <!-- asterism_importer_sdk/progress.md -->
 # asterism-importer-sdk::progress
 
@@ -11488,9 +11532,8 @@ reuse one instead of writing their own.
 
 ## Types
 
-- `ItemStream` — Async stream of scanned items (or per-item errors).
+- `ItemStream` — Async stream of scanned items, or failures.
 - `RawItem` — A raw scanned item — a payload plus the metadata needed to attribute
-- `ScanError` — Errors returned by scanners.
 - `ScanFuture` — Future returned by [`SourceScanner::scan`] — resolves to the item
 - `ScanMode` — Scan mode passed to [`SourceScanner::scan`].
 

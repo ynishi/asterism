@@ -378,6 +378,26 @@
       "docs": "The `occurred_at` fallback ladder, applied: the first rung that has\na value wins, and the answer says which rung that was.\n\n`record` is rung 1 — a timestamp inside the payload — together with\nthe source it is if present (`Exif` for an image's capture time,\n`Record` for anything a record states). `container` is rung 2, what\nthe scanner derived ([`RawItem::occurred_at`]), and is always\n`Mtime`. Nothing on either rung is rung 3: the import moment, taken\nhere so that the caller's `Utc::now()` and its `Import` cannot be\npaired with anything else.\n\nA parser with more than one candidate on rung 1 (a message's own\nstamp, then its conversation's) folds them with `or` first — they\nare the same rung — and hands the result in once."
     },
     {
+      "path": "asterism_importer_sdk::port",
+      "kind": "module",
+      "docs": "The inbound port's shared vocabulary: what a failure is, and what a\nresumption point holds.\n\nThese two types are what the scanner traits are written against, and\nthey are deliberately the part of the port that does not depend on\nhow an adapter is run — whether Asterism starts it and reads it, or\nit runs itself and pushes. A rate limit is a rate limit either way,\nand a cursor holds the same thing either way.\n\n## Why a classification at all\n\n[`SourceError`] replaced a three-variant enum whose variants said\nwhere the failure happened rather than what to do about it, and the\nrunner treated all three alike: record the message, carry on to the\nnext item. A source that had gone away was handled as one unreadable\nfile, so an import against a moved directory or an expired\ncredential spun through its whole stream reporting errors instead of\nstopping and saying so. With seven importers that is a bad hour;\nwith thirty it is thirty separate answers to the same question.\n\nThe five classes here are the ones inbound frameworks converged on —\nAirbyte's `config_error` / `transient_error` / `system_error` with\n`RATE_LIMITED` broken out as its own action, and Kafka Connect's\ncoarser `RetriableException` — plus the per-item class this port\nalready had and which none of those needs, because they stream rows\nrather than read files."
+    },
+    {
+      "path": "asterism_importer_sdk::port::Disposition",
+      "kind": "enum",
+      "docs": "What a caller should do about a [`SourceError`].\n\nReturned by [`SourceError::disposition`] so a caller branches on a\ndecision rather than on which variant it happens to be holding — the\nmapping from class to action belongs to the port, not to each of its\ncallers."
+    },
+    {
+      "path": "asterism_importer_sdk::port::SourceError",
+      "kind": "enum",
+      "docs": "Why a source could not be read.\n\nEach variant names an action rather than a location, and\n[`disposition`](Self::disposition) is where that action is written\ndown. A caller that matches on the variants directly is free to, but\nit is then deciding the policy a second time."
+    },
+    {
+      "path": "asterism_importer_sdk::port::SyncState",
+      "kind": "struct",
+      "docs": "Where a scan left off, so the next one can start there.\n\nTwo levels, not one. `partition` names a unit that can be resumed on\nits own — a folder, an album, a table, one account's stream — and\n`offset` is the position reached inside it. Every inbound framework\nthat started with a single opaque blob has since split it: Kafka\nConnect carries `sourcePartition` and `sourceOffset` as two maps,\nand Airbyte's protocol still names its single-blob form `LEGACY`\nbeside the per-stream one that replaced it. The reason is that a\nsource with several independently-advancing parts cannot be\ndescribed by one position, and a run that stops halfway through the\nthird of nine folders has to be able to say which folder.\n\n## What the core may look at\n\n`offset` is opaque: it belongs to the adapter that wrote it, and\nnothing here parses, validates or migrates it. `partition` is opaque\ntoo, with one exception — its **identity**. The core compares\npartitions to know which state a checkpoint replaces, and stores\nthem to know which ones exist. It never interprets what the string\nmeans.\n\nThat is why `partition` is a string and not a JSON value, though\nConnect's equivalent is a map. This workspace builds `serde_json`\nwith `preserve_order`, so a map's serialised form follows insertion\norder; two partitions with identical content written in a different\norder would not compare equal as text, and making them compare\nequal would mean the core owning a canonicalisation of a value it is\nnot supposed to read. An adapter whose partition is compound encodes\nit — `\"account=me/album=2019\"` — and owns that encoding, which is\nthe same bargain as `offset`."
+    },
+    {
       "path": "asterism_importer_sdk::progress",
       "kind": "module",
       "docs": "Tiny progress reporter — running success / failure counters, plus\nan event stream to stderr."
@@ -412,7 +432,7 @@
     {
       "path": "asterism_importer_sdk::scanner::ItemStream",
       "kind": "type_alias",
-      "docs": "Async stream of scanned items (or per-item errors)."
+      "docs": "Async stream of scanned items, or failures.\n\nA failure on this stream is not necessarily the end of it: which\nones the caller may carry on past is\n[`SourceError::disposition`](crate::SourceError::disposition), and\nthe loop in [`run_import`](crate::runner::run_import) is written\nagainst that rather than against the variants."
     },
     {
       "path": "asterism_importer_sdk::scanner::RawItem",
@@ -420,14 +440,9 @@
       "docs": "A raw scanned item — a payload plus the metadata needed to attribute\nit back to its origin."
     },
     {
-      "path": "asterism_importer_sdk::scanner::ScanError",
-      "kind": "enum",
-      "docs": "Errors returned by scanners."
-    },
-    {
       "path": "asterism_importer_sdk::scanner::ScanFuture",
       "kind": "type_alias",
-      "docs": "Future returned by [`SourceScanner::scan`] — resolves to the item\nstream once the scanner has finished setup."
+      "docs": "Future returned by [`SourceScanner::scan`] — resolves to the item\nstream once the scanner has finished setup.\n\nA failure here is a failure to *start*, which no disposition can\nsoften: there is no stream to carry on with."
     },
     {
       "path": "asterism_importer_sdk::scanner::ScanMode",
