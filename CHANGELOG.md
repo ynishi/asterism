@@ -10,6 +10,38 @@ and this project adheres to
 
 ### Added
 
+- **An import takes up where the last one stopped** (#293). The inbound port had
+  a vocabulary for resumption and no way to use it: `SyncState` existed, nothing
+  emitted one, and every scan began at the beginning — which for a source of any
+  size is the difference between an importer somebody runs and one they run
+  once. A scanner now puts two kinds of thing on its stream. A record, as
+  before, and a **checkpoint**: the scanner saying everything it has already
+  handed over is dealt with, and a later scan given that state would take up
+  after it. The two travel together because a resumption point means nothing
+  apart from the stream it arrived on, which is where Airbyte, Singer and Kafka
+  Connect all put theirs. A scan takes the point to resume from, and a scanner
+  handed one it cannot use **refuses the scan** — starting over quietly is the
+  one answer not available, because it re-imports the source while looking, from
+  the outside, exactly like a resumption that worked. What a state can be
+  honoured inside is its **partition**, and a partition names everything that
+  decides what a scan yields: for the filesystem the root and the extension
+  filter, since `import image --dir ~/Pictures` and
+  `import video --dir ~/Pictures` walk one tree and hand over two different sets
+  of files; for SQLite the database and the query. A resumption is also a
+  comparison, and each scanner makes it in its own source's order — paths
+  component by component, which is the order the walk takes, and an id as the
+  integer or string SQLite stored, because the text of an id says `"10" <= "9"`.
+  SQLite resumes only a query whose caller has vouched for its order
+  (`ordered_by_id`, `--ordered-by-id` on the subcommand) and emits no
+  checkpoints without that promise, rather than handing out positions it would
+  later refuse. A run hands back the last checkpoint it saw **and only when
+  nothing failed**: a checkpoint is a promise that everything before it landed,
+  and a run with a failed record cannot make it — the next run re-reads instead,
+  which costs reading rather than a record nobody notices is missing. Nothing
+  stores these yet, so `asterism-import` prints the point a run earned and takes
+  one back as `--resume-from`; where they are kept is the transport's question,
+  and that is not settled.
+
 - **The grid filters by calendar day** (#282). "What is from these days" and
   "what happened on this day, any year" are two more fields on the list query —
   `day_from` / `day_until` (a `YYYY-MM-DD` range, exclusive at the end, like the
