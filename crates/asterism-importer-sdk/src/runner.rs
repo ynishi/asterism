@@ -70,7 +70,14 @@ impl ImportOptions {
 pub struct ImportSummary {
     /// Records the server accepted.
     pub imported: u64,
-    /// Records that failed, including any the source could not read.
+    /// Records that did not land: one the source could not read, one
+    /// no parser would take, one the server refused.
+    ///
+    /// Not the failure that cost the run — that is
+    /// [`ended_by`](Self::ended_by). Counting it here would put "the
+    /// source refused our credential" and "one file would not open"
+    /// back into the one number the classification exists to tell
+    /// apart, and a run that lost no records would report one.
     pub failed: u64,
     /// The failure that cost the run, if one did. `None` is a run that
     /// ended on the source's own terms — which is not the same as a run
@@ -111,29 +118,35 @@ where
     while let Some(next) = stream.next().await {
         let raw = match next {
             Ok(item) => item,
-            // Both arms record and read on. The loop ends when the
-            // stream does, which is the scanner's call and not this
+            // A failure never leaves this loop. It ends when the stream
+            // does, which is the scanner's call and not this
             // function's: `SqliteScanner` stops after a row it could
-            // not read, because its cursor is no longer somewhere this
-            // code can reason about, and `FsScanner` takes the next
-            // file. Neither is wrong about its own source, and a runner
-            // that jumped out on the class would have overruled one of
-            // them.
+            // not read and `FsScanner` takes the next file, each for a
+            // reason about its own source that this function does not
+            // have. A runner that jumped out on the class would have
+            // overruled one of them.
             //
             // Reading on also means the ordinary tail below — flush
             // what is buffered, wait for what is in flight — runs
             // however the scan ended, rather than an early exit having
             // to remember to do it. It did not, the first time.
-            Err(err) => {
+            //
+            // The two costs are kept apart here and nowhere else. A
+            // lost record is counted; a failure that cost the run is
+            // carried whole on the summary. Counting that one too
+            // would report a run that lost no records as having lost
+            // one, and merging those two is the distinction the
+            // classification exists to draw.
+            Err(err) if err.is_record_lost() => {
                 progress.record_err(err.locator().unwrap_or("<scan>"), &err.to_string());
-                if !err.is_record_lost() {
-                    // The last one wins. A scanner that keeps its side
-                    // of the bargain sends at most one, because it ends
-                    // after a failure it cannot continue past; one that
-                    // sends several is reported by the one it finished
-                    // on.
-                    ended_by = Some(err);
-                }
+                continue;
+            }
+            Err(err) => {
+                // The last one wins. A scanner that keeps its side of
+                // the bargain sends at most one, because it ends after
+                // a failure it cannot continue past; one that sends
+                // several is reported by the one it finished on.
+                ended_by = Some(err);
                 continue;
             }
         };
@@ -425,8 +438,9 @@ mod tests {
     }
 
     /// A lost record is a line in the report and not the run's
-    /// verdict: the item behind it still lands, and nothing is recorded
-    /// as having ended the run.
+    /// verdict. The fixture puts the failure *first*, so what this
+    /// pins is that the loop went on to read the item behind it — and
+    /// that nothing was recorded as having ended the run.
     #[tokio::test]
     async fn a_lost_record_is_not_the_run_s_verdict() {
         let scanner = FailingScanner::with(SourceError::item("/tmp/bad.txt", "permission denied"));
@@ -450,12 +464,14 @@ mod tests {
     }
 
     /// Every other class costs the run, and the summary says which one
-    /// did — rather than the caller reading a count of failed items and
-    /// guessing whether one of them was the source itself.
+    /// did — rather than the caller reading a count of failed records
+    /// and guessing whether one of them was the source itself. The
+    /// fixture puts the failure first and an item behind it, so the
+    /// count also shows the loop did not stop reading.
     ///
     /// The run is still returned rather than thrown: whatever it
-    /// managed before the failure is in the counts, and this is the
-    /// moment somebody wants them.
+    /// managed is in the counts, and this is the moment somebody wants
+    /// them.
     #[tokio::test]
     async fn any_other_class_costs_the_run_and_is_named_on_it() {
         for err in [
@@ -481,6 +497,12 @@ mod tests {
             assert_eq!(
                 summary.imported, 1,
                 "and what the source handed over before it is still counted"
+            );
+            assert_eq!(
+                summary.failed, 0,
+                "and it is not also counted as a record that did not land — \
+                 no record failed here, and a report saying one did is the \
+                 distinction this classification exists to draw, undone"
             );
         }
     }
@@ -588,14 +610,36 @@ mod tests {
                 };
                 let received = Arc::clone(&received);
                 tokio::spawn(async move {
-                    // One read is enough for both calls here: the health
-                    // probe has no body, and a batch of three tiny notes
-                    // arrives well inside the first segment.
-                    let mut buf = vec![0u8; 64 * 1024];
-                    let Ok(n) = socket.read(&mut buf).await else {
-                        return;
-                    };
-                    let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                    // Read until the body is whole rather than once: a
+                    // single `read` returns whatever one segment
+                    // carried, and a batch split across two would be
+                    // counted as a batch of nothing — a test failing
+                    // for a reason that is not the code's.
+                    let mut request = String::new();
+                    let mut buf = vec![0u8; 8 * 1024];
+                    loop {
+                        let Ok(n) = socket.read(&mut buf).await else {
+                            return;
+                        };
+                        if n == 0 {
+                            break;
+                        }
+                        request.push_str(&String::from_utf8_lossy(&buf[..n]));
+                        let Some(head_end) = request.find("\r\n\r\n") else {
+                            continue;
+                        };
+                        let declared = request
+                            .split("\r\n")
+                            .find_map(|line| {
+                                line.strip_prefix("content-length: ")
+                                    .or_else(|| line.strip_prefix("Content-Length: "))
+                            })
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        if request.len() - (head_end + 4) >= declared {
+                            break;
+                        }
+                    }
                     let body = if request.contains("/asterism/assets/add-batch") {
                         let items = request.matches("\"locator\"").count();
                         received.lock().expect("the server's log").push(items);

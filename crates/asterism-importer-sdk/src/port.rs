@@ -9,29 +9,26 @@
 //! reads it, or it runs itself and pushes. A rate limit is a rate limit
 //! either way, and a cursor holds the same thing either way.
 //!
-//! ## Why a classification at all
+//! ## Why the classes are what they are
 //!
-//! [`SourceError`] replaced a three-variant enum whose variants said
-//! where a failure happened rather than what to do about it. Nothing
-//! downstream could act on that, so the decision moved into the
-//! scanners: `SqliteScanner` returned from its own reader thread after
-//! sending a source-level failure, ending the stream, and `FsScanner`
-//! let its watch task fall out of its loop. Each author decided, in
-//! their own way, that this failure meant stop — and an adapter that
-//! decided otherwise would keep a dead scan alive with nothing able to
-//! tell. One adapter deciding that is a preference. Thirty or forty
-//! deciding it separately is thirty or forty answers to one question,
-//! and an upstream change moves every one of them.
+//! [`SourceError`] replaced a three-variant enum that named where a
+//! failure happened — source unavailable, item read failed, other.
+//! Nothing downstream could act on that, so a run against a rejected
+//! credential and a run that skipped one unreadable file produced the
+//! same report: a count, and a message only a person could read.
 //!
-//! The five classes here are the ones inbound frameworks converged on:
-//! Airbyte's `config_error` / `transient_error` / `system_error`
-//! failure types, `RATE_LIMITED` broken out as an action of its own,
-//! and Kafka Connect's coarser `RetriableException`. Carrying on past a
-//! single bad record is in both of those too — Connect's
-//! `errors.tolerance` with a dead-letter queue, Airbyte's `IGNORE`
-//! action — but as an operator setting rather than a thing the source
-//! says. Here it is a variant, because the scanner is what knows that
-//! one file would not open while the directory is fine.
+//! The classes here are cuts a caller acts on differently. A
+//! configuration nobody has changed will be refused again, so the run
+//! stops and the message is for whoever wrote it. A source that was
+//! briefly unreachable will not, so the same run repeated is worth
+//! something — and a rate limit is that case with the wait stated
+//! rather than guessed, which is what lets a report say when the source
+//! is expected back instead of only that it failed. A record that could
+//! not be read costs that record, and a run missing one file out of ten
+//! thousand is not a failed import.
+//!
+//! What the classification does not do is tell a scanner how to behave.
+//! That is [`SourceError`]'s own section below, and it is one rule.
 
 use std::time::Duration;
 
@@ -52,10 +49,9 @@ use serde_json::Value;
 /// scanner with more to give yields more, one without ends. The first
 /// shape of this enum did claim it — an item failure was documented as
 /// "keeps scanning" — and `SqliteScanner` refuted it on the day it was
-/// written, because a row that fails to read leaves `rusqlite`'s cursor
-/// somewhere this code cannot reason about, so it sends the failure and
-/// stops. Both scanners were right about their own sources; the port
-/// was wrong to hold an opinion.
+/// written: a row it cannot read ends its stream, for the reason
+/// written beside the `break` that does it. Both scanners were right
+/// about their own sources; the port was wrong to hold an opinion.
 ///
 /// So a caller reads the stream to its end whatever it is handed, and
 /// uses this to decide what the run was worth.

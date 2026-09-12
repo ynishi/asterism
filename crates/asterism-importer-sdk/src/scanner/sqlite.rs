@@ -143,11 +143,12 @@ fn run_query(
         Ok(c) => c,
         Err(err) => {
             // `Config`, beside the `exists` check above it: the file
-            // is the one the caller named, and what SQLite refuses
-            // here is usually a permission or a file that is not a
-            // database — both answers about that choice. A database
-            // that opens and is corrupt says so later, at `query`,
-            // where it is the source's own trouble.
+            // is the one the caller named, and `sqlite3_open_v2` does
+            // not read it — what it refuses is the path and the
+            // permissions, which are that choice. What is *in* the
+            // file is not answered here at all; `prepare` below is the
+            // first thing that opens a page, and where a file that is
+            // not a database says so.
             let _ = tx.blocking_send(Err(SourceError::Config(format!("open failed: {err}"))));
             return;
         }
@@ -155,9 +156,23 @@ fn run_query(
     let mut stmt = match conn.prepare(query) {
         Ok(s) => s,
         Err(err) => {
-            // The query came from the caller, so SQLite refusing to
-            // prepare it is a configuration answer, not an outage.
-            let _ = tx.blocking_send(Err(SourceError::Config(format!("prepare failed: {err}"))));
+            // Two different answers arrive here, and the difference
+            // matters to whoever reads the report. `prepare` is the
+            // first thing that reads the file — opening does not — so
+            // it is where "this is not a database" surfaces, and that
+            // is the source's own trouble rather than the caller's
+            // choice. A query SQLite will not parse *is* the caller's.
+            // Told apart by the code and not by the message, which is
+            // prose SQLite is free to reword.
+            let failure = match &err {
+                rusqlite::Error::SqliteFailure(e, _)
+                    if e.code == rusqlite::ErrorCode::NotADatabase =>
+                {
+                    SourceError::Source(format!("prepare failed: {err}"))
+                }
+                _ => SourceError::Config(format!("prepare failed: {err}")),
+            };
+            let _ = tx.blocking_send(Err(failure));
             return;
         }
     };
@@ -229,6 +244,22 @@ fn run_query(
             }
             Ok(None) => break,
             Err(err) => {
+                // One row was lost, and this scan is over — which the
+                // port allows to be two separate facts, because they
+                // are.
+                //
+                // Over, because `rusqlite` resets the statement when a
+                // step fails and detaches it (`Rows::next` calls
+                // `reset`, whose own comment says it "prevents infinite
+                // loop on error"), so every later `next` answers
+                // `Ok(None)`. Continuing would not read the remaining
+                // rows, it would report the query as finished. Ending
+                // says the true thing.
+                //
+                // The locator is the database rather than the row: the
+                // id is read out of the row that just failed to read,
+                // so at this point there is nothing more precise to
+                // name.
                 let _ = tx.blocking_send(Err(SourceError::item(
                     db_path.display().to_string(),
                     format!("row read failed: {err}"),

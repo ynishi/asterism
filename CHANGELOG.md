@@ -377,30 +377,33 @@ and this project adheres to
   a deliberate act.
 
 - **An import says what a failure cost it** (#291). The inbound port's error
-  type had three variants that named where a failure happened rather than what
-  it cost, so nothing downstream could act on the difference: the runner
-  recorded all three the same way, and a scanner that wanted a failure to end
-  the scan had to end its own stream to make that happen. Two bundled scanners
-  made that call two different ways. With thirty or forty adapters, which is
-  what an adapter-led strategy implies, it is that many answers to one question.
-  `SourceError` names the cost instead. A configuration the source refused and
-  trouble inside the source both cost the run; a transient failure and a rate
-  limit cost it too but may not if it is repeated, the rate limit carrying the
-  wait the source stated — the difference between a progress line that reads
-  "failed" and one that reads when the source is expected back; and a record
-  that could not be read costs that record, leaving a run that can still be a
-  success with something missing. What the classification deliberately does
-  _not_ say is whether more items follow: that is the scanner's own fact and the
-  stream is where it is answered, which is why `SqliteScanner` can stop after a
-  row it could not read — its cursor is no longer somewhere the code can reason
-  about — while `FsScanner` takes the next file, and neither is overruled. A run
-  that started is now always reported rather than thrown: `ImportSummary`
-  carries what the run managed and the failure that cost it, so a caller reads
-  both from one place instead of losing the counts at the moment it wants them.
-  A companion type for where a scan left off, `SyncState`, is defined with all
-  this and used by nothing: the resumption point is two levels, the unit that
-  can be resumed and the position within it, and settling its serialised form is
-  what has to happen before anything can carry it.
+  type had three variants that named where a failure happened — source
+  unavailable, item read failed, other — and nothing downstream could act on
+  that: a run against a rejected credential and a run that skipped one
+  unreadable file produced the same report, a count and a message only a person
+  could read. With the thirty or forty adapters an adapter-led strategy implies,
+  that is one question answered thirty or forty times. `SourceError` names the
+  cost instead. A configuration the source refused and trouble inside the source
+  both cost the run; a transient failure and a rate limit cost it too but may
+  not if the run is repeated, the rate limit carrying the wait the source stated
+  — the difference between a report that says "failed" and one that says when
+  the source is expected back; and a record that could not be read costs that
+  record, leaving a run that can still be a success with something missing. What
+  the classification deliberately does _not_ say is whether more items follow:
+  that is the scanner's own fact and the stream is where it is answered, which
+  is why `SqliteScanner` ends after a row it could not read — SQLite has reset
+  the statement out from under it, so carrying on would report the query as
+  finished rather than read the rest — while `FsScanner` takes the next file,
+  and neither is overruled. A run that started is now always reported rather
+  than thrown: `ImportSummary` carries what the run managed and the failure that
+  cost it, so a caller reads both from one place instead of losing the counts at
+  the moment it wants them, and `failed` counts records that did not land rather
+  than also counting the one failure that was not a record. `asterism-import`
+  exits naming that failure where it used to exit naming a count. A companion
+  type for where a scan left off, `SyncState`, is defined with all this and used
+  by nothing: the resumption point is two levels, the unit that can be resumed
+  and the position within it, and settling its serialised form is what has to
+  happen before anything can carry it.
 
 ### Fixed
 

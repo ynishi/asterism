@@ -278,7 +278,8 @@ async fn the_digest_the_importer_declares_is_the_one_the_hash_job_computes() {
         summary,
         ImportSummary {
             imported: 1,
-            failed: 0
+            failed: 0,
+            ended_by: None,
         }
     );
     let asset_id = asset_id_by_locator(&core, &persona, &plate).await;
@@ -371,7 +372,8 @@ async fn an_exact_copy_is_proposed_at_ingest_without_the_server_reading_it() {
         import_png_dir(&first_dir, &persona, port).await,
         ImportSummary {
             imported: 1,
-            failed: 0
+            failed: 0,
+            ended_by: None,
         }
     );
     let incumbent_id = asset_id_by_locator(&core, &persona, &original).await;
@@ -399,7 +401,8 @@ async fn an_exact_copy_is_proposed_at_ingest_without_the_server_reading_it() {
         import_png_dir(&second_dir, &persona, port).await,
         ImportSummary {
             imported: 1,
-            failed: 0
+            failed: 0,
+            ended_by: None,
         },
         "a duplicate is a finding, not a failed import"
     );
@@ -602,7 +605,8 @@ async fn a_source_with_no_payload_declares_nothing_and_ingests_anyway() {
         import_png_dir(&corpus, &persona, port).await,
         ImportSummary {
             imported: 1,
-            failed: 0
+            failed: 0,
+            ended_by: None,
         }
     );
     let file_id = asset_id_by_locator(&core, &persona, &plate).await;
@@ -630,7 +634,8 @@ async fn a_source_with_no_payload_declares_nothing_and_ingests_anyway() {
         summary,
         ImportSummary {
             imported: 1,
-            failed: 0
+            failed: 0,
+            ended_by: None,
         },
         "a declaration on `<db>#<id>` would have been refused, and the row \
          would be counted here as a failure"

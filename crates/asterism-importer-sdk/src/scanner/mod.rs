@@ -2,8 +2,8 @@
 //!
 //! Enumerates or watches an external source and produces [`RawItem`]s.
 //! Bundled implementations live in the sibling modules
-//! ([`fs`], and future `sqlite` / `http`); importer authors typically
-//! reuse one instead of writing their own.
+//! ([`fs`] and [`sqlite`]); importer authors typically reuse one
+//! instead of writing their own.
 
 pub mod fs;
 pub mod sqlite;
@@ -79,28 +79,29 @@ pub enum ScanMode {
 
 /// Async stream of scanned items, or failures.
 ///
-/// A failure on this stream is not necessarily the end of it: which
-/// ones the caller may carry on past is
-/// [`SourceError::disposition`](crate::SourceError::disposition), and
-/// the loop in [`run_import`](crate::runner::run_import) is written
-/// against that rather than against the variants.
+/// A failure on this stream is not necessarily the end of it, and what
+/// it is followed by is this scanner's to decide: another item, or
+/// nothing. [`SourceError::disposition`](crate::SourceError::disposition)
+/// says what the failure cost the run, which is a different question
+/// and deliberately not this one.
 pub type ItemStream = BoxStream<'static, Result<RawItem, SourceError>>;
 
 /// Future returned by [`SourceScanner::scan`] — resolves to the item
 /// stream once the scanner has finished setup.
 ///
-/// A failure here is a failure to *start*: there is no stream, so
-/// [`Disposition::KeepScanning`](crate::Disposition::KeepScanning) has
-/// nothing to keep scanning. The other dispositions still read — a
-/// scanner refused with a 503 says [`Transient`](crate::SourceError),
-/// and a caller with a backoff loop retries the start.
+/// A failure here is a failure to *start*, and the classes read the
+/// same as anywhere else: a scanner refused with a 503 says
+/// [`Transient`](crate::SourceError::Transient), and a caller with a
+/// backoff loop may try the scan again.
 pub type ScanFuture<'a> =
     Pin<Box<dyn std::future::Future<Output = Result<ItemStream, SourceError>> + Send + 'a>>;
 
 /// Trait every source scanner implements.
 ///
-/// `scan` returns a boxed async stream of `RawItem`s (or per-item
-/// errors, so a single bad row does not tear the whole scan down).
+/// `scan` returns a boxed async stream of `RawItem`s, or failures. A
+/// failure does not by itself end the stream — whether anything follows
+/// it is this scanner's answer, and `FsScanner` and `SqliteScanner`
+/// give different ones about a record they could not read.
 pub trait SourceScanner: Send + Sync {
     /// Starts scanning; the returned future resolves to a stream that
     /// yields items one at a time.

@@ -377,7 +377,8 @@ async fn an_exported_artefact_comes_back_through_its_own_sidecar() {
         first,
         ImportSummary {
             imported: 1,
-            failed: 0
+            failed: 0,
+            ended_by: None,
         }
     );
     let original_id = asset_id_by_locator(&core, &persona.id, &plate).await;
@@ -492,7 +493,8 @@ async fn an_exported_artefact_comes_back_through_its_own_sidecar() {
         second,
         ImportSummary {
             imported: 1,
-            failed: 0
+            failed: 0,
+            ended_by: None,
         }
     );
     let returned_id = asset_id_by_locator(&core, &persona.id, &returned_file).await;
@@ -640,7 +642,8 @@ async fn a_return_that_left_its_sidecar_behind_is_just_a_new_artefact() {
         first,
         ImportSummary {
             imported: 1,
-            failed: 0
+            failed: 0,
+            ended_by: None,
         }
     );
     let original_id = asset_id_by_locator(&core, &persona.id, &plate).await;
@@ -669,7 +672,8 @@ async fn a_return_that_left_its_sidecar_behind_is_just_a_new_artefact() {
         second,
         ImportSummary {
             imported: 1,
-            failed: 0
+            failed: 0,
+            ended_by: None,
         }
     );
     let returned_id = asset_id_by_locator(&core, &persona.id, &returned_file).await;
@@ -750,7 +754,8 @@ async fn a_sidecar_naming_an_export_this_library_never_ran_still_lands_the_file(
         first,
         ImportSummary {
             imported: 1,
-            failed: 0
+            failed: 0,
+            ended_by: None,
         }
     );
     let original_id = asset_id_by_locator(&core, &persona.id, &plate).await;
@@ -786,7 +791,8 @@ async fn a_sidecar_naming_an_export_this_library_never_ran_still_lands_the_file(
         second,
         ImportSummary {
             imported: 1,
-            failed: 0
+            failed: 0,
+            ended_by: None,
         },
         "an unresolvable claim is not a failed import"
     );

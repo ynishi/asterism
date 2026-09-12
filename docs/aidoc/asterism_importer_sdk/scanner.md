@@ -4,8 +4,8 @@
 
 Enumerates or watches an external source and produces [`RawItem`]s.
 Bundled implementations live in the sibling modules
-([`fs`], and future `sqlite` / `http`); importer authors typically
-reuse one instead of writing their own.
+([`fs`] and [`sqlite`]); importer authors typically reuse one
+instead of writing their own.
 
 ## Types
 

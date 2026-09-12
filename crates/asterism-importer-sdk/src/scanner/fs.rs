@@ -218,17 +218,23 @@ impl SourceScanner for FsScanner {
                                 Ok(ev) => ev,
                                 Err(err) => {
                                     // `Source`, and then the task ends.
-                                    // A `notify` error on this channel
-                                    // is a dropped or overflowed batch
-                                    // of events — changes that happened
-                                    // and were not delivered — so the
-                                    // watch is no longer telling the
-                                    // truth about the directory, and
-                                    // `Item` would be the wrong shape
-                                    // twice over: there is no item to
-                                    // name, and a watch that keeps
-                                    // reporting it is a stream that
-                                    // never ends.
+                                    // What reaches this arm is the
+                                    // watch itself failing — a read
+                                    // error on the platform's
+                                    // descriptor, or a watch refused
+                                    // because the process is at its
+                                    // limit as a new subdirectory
+                                    // appears — after which the stream
+                                    // would go quiet while the
+                                    // directory kept changing, which is
+                                    // worse than ending.
+                                    //
+                                    // Not `Item`: there is no item to
+                                    // name, and `Item` is the class a
+                                    // caller carries on past, so a
+                                    // watch that had begun failing
+                                    // would report this for as long as
+                                    // it lived.
                                     let _ = tx
                                         .send(Err(SourceError::Source(format!(
                                             "watching {}: {err}",
