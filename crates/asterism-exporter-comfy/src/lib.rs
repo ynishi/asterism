@@ -17,22 +17,25 @@
 //! - Every input the graph names lands in ComfyUI's `input/` through
 //!   the upload route, under a directory of this dispatch's own, and
 //!   the `<subfolder>/<name>` the backend answers with is what the
-//!   `LoadImage` node is given — ComfyUI resolves that pair against
-//!   `input/`, and a bare name would name a file in another directory.
-//!   Stock ComfyUI refuses a path outside `input/`, so the upload is
-//!   the only way an image gets in.
+//!   `LoadImage` node is given. An unannotated value resolves against
+//!   `input/`, so a file this process holds — which is in none of
+//!   ComfyUI's own directories — has to be put there first, and the
+//!   upload is what puts it there.
 //!
-//!   That a path works there at all is worth writing down, because the
-//!   node's own `INPUT_TYPES` lists the top level of `input/` and
-//!   nothing else, and a reader who stops there concludes this cannot
-//!   work. `image` is a combo input, and `validate_inputs` skips the
-//!   "value is one of these" check for any input the node's
+//!   That a path rather than a bare name works is worth writing down,
+//!   because the node's own `INPUT_TYPES` lists the top level of
+//!   `input/` and nothing else, and a reader who stops there concludes
+//!   this cannot work. `image` is a combo input, and `validate_inputs`
+//!   skips the "value is one of these" check for any input the node's
 //!   `VALIDATE_INPUTS` names — `LoadImage`'s names `image`, so what
-//!   actually runs is `exists_annotated_filepath`, which joins the
-//!   value onto `input/` and asks only that the result stay inside it.
-//! - Every image a saver wrote (`outputs.<node>.images[]` with
-//!   `type: "output"`; previews and other output kinds are left where
-//!   they are) is fetched and written under the profile's custody root
+//!   runs instead is `exists_annotated_filepath`. That asks two
+//!   things: that the resolved path stay inside the directory it
+//!   resolved against, and that the file be *there*. The second is why
+//!   the upload has to have finished before the graph is submitted.
+//! - Every image a saver wrote (`outputs.<node>.images[]`, minus any
+//!   entry whose `type` names one of ComfyUI's other directories —
+//!   a preview says `temp`) is fetched and written under the profile's
+//!   custody root
 //!   ([`asterism_exporter_common::CustodyPaths`]), and that path is the
 //!   reified asset's locator. ComfyUI's own directories are not a place
 //!   a locator can point: `temp/` is wiped on restart, file names are a
@@ -86,19 +89,19 @@
 //! ## What the produced PNG carries
 //!
 //! The submit sets `extra_data.extra_pnginfo.asterism` to the dispatch
-//! id and the prompt id. A saver that declares the `EXTRA_PNGINFO`
-//! hidden input — stock `SaveImage` and `PreviewImage` do — writes
+//! id and the prompt id. A saving node that declares the
+//! `EXTRA_PNGINFO` hidden input — stock `SaveImage` is one — writes
 //! every key of `extra_pnginfo` as a tEXt chunk of that name beside
-//! ComfyUI's own `prompt`, so a file that reaches the library by some
-//! other route, dragged out of ComfyUI's output directory, still says
-//! which dispatch made it.
+//! ComfyUI's own `prompt`, so the file on ComfyUI's disk says which
+//! dispatch made it even though this library's own copy came back
+//! through `/view`.
 //!
 //! Two things put that beyond this exporter's reach, and neither is an
 //! error here: a graph saving through a node that asks for no such
 //! hidden input, and a ComfyUI started with `--disable-metadata`, which
-//! writes no chunks at all. What the dispatch itself produced carries
-//! the same ids on its own row either way; the chunk is for the copy
-//! that leaves.
+//! writes no chunks at all. Nothing in this workspace reads the chunk
+//! back yet — what the dispatch produced carries the same ids on its
+//! own row. The chunk is for the copy that stays behind.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -782,9 +785,11 @@ impl Exporter for ComfyHttpExporter {
             ))
         })?;
         // Walk `outputs.<node_id>.images[]`. Each image is
-        // `{ filename, subfolder, type }`; each is fetched through
-        // `/view` and written into custody, and the custody path is the
-        // locator. The `/view` parameters ride along as provenance.
+        // `{ filename, subfolder, type }`; the ones a saver wrote are
+        // fetched through `/view` and written into custody, and the
+        // custody path is the locator. The `/view` parameters ride
+        // along as provenance. What is skipped, and why, is at the
+        // guard below.
         let outputs = entry
             .get("outputs")
             .and_then(|v| v.as_object())
@@ -812,13 +817,18 @@ impl Exporter for ComfyHttpExporter {
                     .unwrap_or_default();
                 let kind = img.get("type").and_then(|v| v.as_str()).unwrap_or("output");
                 // `temp` is ComfyUI showing you something rather than
-                // keeping it. `PreviewImage` subclasses `SaveImage` with
-                // the temp directory and reports under the same
-                // `images` key, so a graph that previews what it also
-                // saves — which is most graphs — lists the same picture
-                // twice, and a walk that took both would mint two assets
-                // for one generation. What the library wants is what a
-                // saver wrote, so only `output` is collected.
+                // keeping it. `PreviewImage` subclasses `SaveImage`,
+                // swapping in the temp directory and reporting under
+                // the same `images` key, so a graph that previews what
+                // it also saves lists one generation twice and a walk
+                // that took both would mint two assets for it. What the
+                // library wants is what a saver wrote.
+                //
+                // Stated as "not somewhere else" rather than "is
+                // `output`" because the field is the directory the
+                // entry lives in, and an entry that names none — a
+                // custom node that omits it — is read above as the
+                // ordinary case rather than dropped unseen.
                 if kind != "output" {
                     continue;
                 }

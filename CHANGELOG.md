@@ -378,6 +378,24 @@ and this project adheres to
 
 ### Fixed
 
+- **A ComfyUI dispatch collects what was saved, not what was previewed** (#289).
+  #285's harvest fetched every image the history named, and ComfyUI's
+  `PreviewImage` is a `SaveImage` that writes to the temp directory and reports
+  under the same key — so a graph that previews what it also saves, and a
+  preview is how you watch a run, listed one generation twice and the library
+  kept two assets for it. Only what a saver wrote is collected now. It survived
+  #285 because every image in that change's own fixture said it was a save, so
+  the field the guard reads had nothing to distinguish; the fixture carries a
+  preview now and asserts the exporter never fetches it. Two claims in the
+  crate's documentation are corrected alongside, both promising more than the
+  exporter can answer for on its own: the tEXt chunk the submit asks for is
+  written only by a saving node that declares the hidden input for it, and only
+  when ComfyUI was not started with `--disable-metadata`; and what makes an
+  uploaded `<subfolder>/<name>` legal — the combo check being skipped for an
+  input the node's own validator names — is now stated, because the node's
+  declared list of files says the opposite and a reader who stops there
+  concludes the upload cannot work.
+
 - **A ComfyUI dispatch goes round without touching ComfyUI's disk** (#285). The
   `comfy` exporter was open at both ends. On the way in it wrote the input's
   absolute path into the `LoadImage` node, which a current ComfyUI refuses —
@@ -394,31 +412,31 @@ and this project adheres to
   because an upload is named after the asset's file and two assets can share a
   basename, this exporter's own outputs among them, and `overwrite=true` would
   quietly land the second on the first and feed one image to both nodes; every
-  image a node emitted is fetched through `/view` and written under the
-  profile's custody root, beside what the http exporter writes, and that path is
-  the locator, with the `/view` parameters kept as provenance; the verdict is
-  read from `status.status_str` and the `execution_error` entry in
-  `status.messages`. `output_dir` is gone from the params. The graph is also
-  rendered through the shared `{{...}}` template before it is sent, so a prompt,
-  a seed or a batch count is `{{params.prompt}}` in the node and a value in the
-  params rather than a literal to edit — a leaf that is one placeholder keeps
-  its value's type, so an integer input gets an integer — and a seed the caller
-  leaves blank is drawn per dispatch, since a graph re-sent with the same
-  literal seed is answered from ComfyUI's cache with no new image; the graph as
-  sent is on the dispatch's attempt record. `input_slot` takes a map from node
-  id to snapshot member (`{ "10": 0, "11": 1 }`) so a reference and a mask can
-  come from one snapshot, the bare-string spelling still means the first member,
-  and a txt2img graph may name none; the exporter accepts any action name. **A
-  member is addressed by its position in the freeze**, and that position is now
-  a fact: every exporter receives `DispatchContext.inputs` in the order the
-  Selection was frozen in. The runner used to hand over the cards as the
-  repository returned them, which is a `WHERE id IN (…)` the database may answer
-  in id order — so with a two-input graph the mask could land in the reference's
-  node and the run report success. A member the viewer cannot see is absent
-  rather than replaced, which shortens the list; an index past its end is an
-  error the exporter reports. The submit sets `extra_pnginfo.asterism` to the
-  dispatch id and the prompt id, so the PNG ComfyUI writes says which dispatch
-  made it even when it reaches the library by some other road.
+  image a saver wrote is fetched through `/view` and written under the profile's
+  custody root, beside what the http exporter writes, and that path is the
+  locator, with the `/view` parameters kept as provenance; the verdict is read
+  from `status.status_str` and the `execution_error` entry in `status.messages`.
+  `output_dir` is gone from the params. The graph is also rendered through the
+  shared `{{...}}` template before it is sent, so a prompt, a seed or a batch
+  count is `{{params.prompt}}` in the node and a value in the params rather than
+  a literal to edit — a leaf that is one placeholder keeps its value's type, so
+  an integer input gets an integer — and a seed the caller leaves blank is drawn
+  per dispatch, since a graph re-sent with the same literal seed is answered
+  from ComfyUI's cache with no new image; the graph as sent is on the dispatch's
+  attempt record. `input_slot` takes a map from node id to snapshot member
+  (`{ "10": 0, "11": 1 }`) so a reference and a mask can come from one snapshot,
+  the bare-string spelling still means the first member, and a txt2img graph may
+  name none; the exporter accepts any action name. **A member is addressed by
+  its position in the freeze**, and that position is now a fact: every exporter
+  receives `DispatchContext.inputs` in the order the Selection was frozen in.
+  The runner used to hand over the cards as the repository returned them, which
+  is a `WHERE id IN (…)` the database may answer in id order — so with a
+  two-input graph the mask could land in the reference's node and the run report
+  success. A member the viewer cannot see is absent rather than replaced, which
+  shortens the list; an index past its end is an error the exporter reports. The
+  submit sets `extra_pnginfo.asterism` to the dispatch id and the prompt id, so
+  the PNG ComfyUI writes says which dispatch made it even when it reaches the
+  library by some other road.
 
 - **Audio already in a library gets the format it should have had** (#262).
   #259's entry closes by saying that files already imported keep the format they
