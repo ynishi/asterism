@@ -4305,29 +4305,27 @@ pub trait AssetLinkRepository: Send + Sync {
 /// Persistence port for an importer's resumption point
 /// (`import_state` table).
 ///
-/// Two verbs and no third. There is no list, because nothing asks "what
-/// is every importer's position" — a run knows its own key and asks for
-/// that one. There is no delete, because a partition that changes
-/// simply leaves a row nothing will ask for again; forgetting a
-/// position is a request nobody has made, and a delete nobody calls is
-/// a delete nobody has tested.
+/// No list, because nothing asks "what is every importer's position" —
+/// a run knows its own key and asks for that one. No delete, because a
+/// partition that changes simply leaves a row nothing will ask for
+/// again, and forgetting a position is a request nobody has made.
 #[async_trait]
 pub trait ImportStateRepository: Send + Sync {
     /// The position stored under `key`, or `None` for a source nothing
     /// has imported yet.
     ///
-    /// Absence is an answer and not a failure: a first run is the
-    /// ordinary case, and a caller that had to distinguish "no row"
-    /// from "the store is broken" by reading an error message would get
-    /// it wrong on the day it mattered.
+    /// Absence is an answer and not a failure — a first run is the
+    /// ordinary case. What that costs a caller who gets it wrong is at
+    /// the two ends that face one: the SDK's
+    /// `SyncStore::read`, and the read route's `null`.
     async fn find(&self, key: &ImportStateKey) -> Result<Option<ImportState>, DomainError>;
 
     /// Inserts or replaces the position for `state.key`.
     ///
-    /// Replaces unconditionally. Whether this run had earned the right
-    /// to move the position is decided before the call — in the
-    /// importer, which is the only place that knows what happened to
-    /// the records in front of the checkpoint — and a store that second
-    /// guessed it would be a second opinion on the same question.
+    /// Replaces unconditionally, and deliberately does not ask whether
+    /// it should: that decision is made in the importer, which is the
+    /// only place that knows what became of the records in front of the
+    /// checkpoint. A check here would be a second opinion on one
+    /// question.
     async fn upsert(&self, state: &ImportState) -> Result<(), DomainError>;
 }

@@ -152,9 +152,14 @@ impl HttpSyncStore {
 /// A request that did not complete is [`Transient`](SourceError::Transient):
 /// the server is not running yet, the socket went away, and the same
 /// call in a moment may well work. A request that completed and was
-/// refused is [`Config`](SourceError::Config): a persona that does not
-/// exist, a body this build spelled wrong, and repeating it changes
-/// nothing until somebody does.
+/// refused is [`Config`](SourceError::Config): a body this build
+/// spelled wrong, a route this server does not have, and repeating it
+/// changes nothing until somebody does. An answer that arrived and
+/// could not be made sense of is [`Source`](SourceError::Source) —
+/// trouble at the far end rather than in the configuration.
+///
+/// Only the first is built here; the other two are raised where they
+/// are noticed, beside the calls that notice them.
 fn unreachable(what: &str, err: reqwest::Error) -> SourceError {
     SourceError::Transient(format!("{what}: {err}"))
 }

@@ -18,9 +18,10 @@ adapter that runs itself and pushes is the shape taken today, and one
 Asterism starts and reads is the one that was not. A port is what
 lets the second arrive without the runner learning about it.
 
-[`HttpSyncStore`](crate::client::HttpSyncStore) is the implementation
-that exists, and it is thirty lines over the same `ApiClient` every
-record already travels through.
+[`HttpSyncStore`](crate::client::HttpSyncStore) implements it over
+the same `ApiClient` every record already travels through, which is
+why an adapter that keeps its position needs nothing it did not
+already have.
 
 ## Types
 

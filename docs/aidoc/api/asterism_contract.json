@@ -385,7 +385,7 @@
     {
       "path": "asterism_contract::command::ReadImportStateCommand",
       "kind": "struct",
-      "docs": "Looks up an importer's resumption point\n(`POST /asterism/import/state/read`).\n\nA read, sent as a POST, because the partition is an arbitrary string\nan adapter chose: a filesystem path, a whole SQL query, a `|` between\nthe two. That does not belong in a path segment or a query\nparameter, and this tree already answers questions with bodies where\nthe question is not a name — `search_assets` is the same shape for\nthe same reason.\n\nAbsence is an answer: a source nobody has imported yet has no point,\nand that is the ordinary first run rather than a failure."
+      "docs": "Looks up an importer's resumption point\n(`POST /asterism/import/state/read`).\n\nA read, sent as a POST, because the partition is an arbitrary string\nan adapter chose: a filesystem path, a whole SQL query, a `|` between\nthe two. That does not belong in a path segment or a query\nparameter, and this tree already answers questions with bodies where\nthe question is not a name — `search_assets` is the same shape for\nthe same reason.\n\nAbsence is an answer: a source nobody has imported yet has no point,\nand the route says so with `null` rather than a status code — see the\nhandler for why."
     },
     {
       "path": "asterism_contract::command::RebuildEdgesCommand",
@@ -555,7 +555,7 @@
     {
       "path": "asterism_contract::command::WriteImportStateCommand",
       "kind": "struct",
-      "docs": "Stores an importer's resumption point\n(`POST /asterism/import/state/write`).\n\nReplaces whatever the same key held. A point is only ever moved\nforward by the adapter that wrote the last one, and which run has\nearned the right to move it is the importer's decision, not this\nendpoint's — see `ImportSummary::resume_from` in the importer SDK."
+      "docs": "Stores an importer's resumption point\n(`POST /asterism/import/state/write`).\n\nReplaces whatever the same key held. Which run has earned the right\nto move a position is the importer's decision and not this\nendpoint's — `ImportSummary::resume_from` in the importer SDK is\nwhere it is made."
     },
     {
       "path": "asterism_contract::digest",

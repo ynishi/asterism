@@ -25,6 +25,9 @@
 //! is the adapter's own statement of what it is scanning — and the
 //! adapter names it fully, its own kind included, so two adapters cannot
 //! collide inside one persona by both calling something `root=/photos`.
+//! That is also why the key is a pair and not a triple with the kind
+//! beside it: the adapter owns the encoding, the way it owns the
+//! offset's.
 
 use chrono::{DateTime, Utc};
 

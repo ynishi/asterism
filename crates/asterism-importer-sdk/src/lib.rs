@@ -35,12 +35,17 @@
 //!   [`SourceScanner`] is written against, and names what a failure
 //!   cost — one record, or the run — rather than where it happened.
 //!   [`SyncState`] is where a scan's resumption point lives; its type
-//!   and serialised form are settled independently of whatever comes
-//!   to store one.
+//!   and serialised form are settled independently of where one is
+//!   stored.
 //! - [`ApiClient`] performs the HTTP POSTs (single or batch).
+//! - [`store`] is where a resumption point is kept between runs, as a
+//!   port; [`HttpSyncStore`] keeps one in the server the records
+//!   already go to.
 //! - [`Progress`] keeps a running success / failure tally.
 //! - [`run_import`] owns the shared scan / parse / batch / progress
 //!   loop after the outer CLI has resolved arguments and environment.
+//!   [`run_import_with`] is the same loop against a [`SyncStore`], so
+//!   the run takes up where the last one stopped.
 //!   It also fills in [`AssetSpec::declared_content_hash`] for the
 //!   records where it is a true statement — the scanner read a whole
 //!   artefact ([`SourceScanner::payload_is_whole_artefact`]) and the

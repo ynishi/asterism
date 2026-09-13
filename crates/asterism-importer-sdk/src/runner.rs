@@ -146,9 +146,10 @@ pub struct ImportSummary {
     /// having: a source that rate-limits halfway is exactly when a
     /// caller wants to take up rather than begin again.
     ///
-    /// Handed back rather than kept: where a resumption point is
-    /// stored is the transport's question and not this function's, and
-    /// answering it here would settle it for every caller.
+    /// Handed back whether or not it was also kept. Where a resumption
+    /// point is stored is the caller's question — [`run_import_with`]
+    /// writes it to a [`SyncStore`] when given one, and this field is
+    /// what a caller without one has.
     pub resume_from: Option<SyncState>,
 }
 
@@ -168,8 +169,7 @@ where
 /// The same run, against a given place to keep the resumption point.
 ///
 /// [`run_import`] is this with no store, which is the shape a caller
-/// that does not want a position kept asks for — and the shape every
-/// test that is not about resumption keeps using.
+/// that does not want a position kept asks for.
 ///
 /// The store is reached twice and in one place each: once before the
 /// scan, to ask where to take up, and once after everything the run sent
@@ -369,9 +369,14 @@ where
     let failed = progress.err_count();
     let resume_from = if failed == 0 { last_checkpoint } else { None };
 
-    // Written after the counts are final and before the summary is
-    // handed back, so a caller reading `resume_from` off the summary is
-    // reading what was stored rather than what might be.
+    // Written after the counts are final, which is the first line at
+    // which what the server did with every record is known.
+    //
+    // Not the same as `summary.resume_from`, which says what the run
+    // *earned*: a dry run, a `Resume::No`, a caller with no store and a
+    // scan with no partition each leave it `Some` with nothing written.
+    // A caller that needs to know whether a point went anywhere reads
+    // the conditions below, which is what `asterism-import` does.
     //
     // A store that will not take it fails the run. The alternative —
     // carrying on and reporting success — would leave a caller with an
@@ -381,9 +386,12 @@ where
     // Never under `dry_run`. A stored point says the records in front
     // of it landed, and in a dry run nothing landed at all; writing one
     // would make the next real run skip everything the rehearsal
-    // pretended to import. A dry run still *reads* a point, because
-    // rehearsing the work the next real run would do is the whole
-    // purpose.
+    // pretended to import.
+    //
+    // Reading is a separate question and not this function's: a dry run
+    // handed a store reads from it, and whether to hand it one is the
+    // caller's. `asterism-import` withholds it, because its `--dry-run`
+    // promises to contact nothing — see the flag.
     if keeps_position
         && !options.dry_run
         && let (Some(store), Some(key), Some(state)) = (store, &state_key, &resume_from)
@@ -930,16 +938,16 @@ mod tests {
         );
     }
 
-    /// **The point of the whole slice.** A second run over a source
-    /// nothing has changed imports nothing.
+    /// This loop's half of "a second run imports nothing": the point
+    /// the first run earned reaches the second and is acted on.
     ///
-    /// Nobody types a resumption point here: the first run stores what
-    /// it earned and the second finds it, which is the difference
-    /// between an import that is incremental and one that only could
-    /// be. Driven by the real `FsScanner` over real files against a
-    /// server that counts what it receives, because every cheaper
-    /// version of this test asserts something other than "the records
-    /// did not come back".
+    /// Nobody types a resumption point here. Driven by the real
+    /// `FsScanner` over real files against a server that counts what it
+    /// receives, because every cheaper version asserts something other
+    /// than "the records did not come back" — but the store is an
+    /// in-memory one, so what this cannot answer is whether the halves
+    /// agree across HTTP and SQLite. `import_state_e2e` is where that
+    /// is asked.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_second_run_over_an_unchanged_source_imports_nothing() {
         let received = Arc::new(std::sync::Mutex::new(Vec::<usize>::new()));

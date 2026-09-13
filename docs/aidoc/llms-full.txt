@@ -1329,21 +1329,18 @@ came out.
 Reading and writing where an importer got to.
 
 Thin on purpose, and the thinness is the design. Every judgement
-about a resumption point — whether a scan has one at all, whether a
-run earned the right to move it, what the offset means — is made in
-the importer, which is the only place that can make it. This service
-is the other end of the wire: it stores what it is given and hands
-back what it stored.
+about a resumption point is made in the importer, which is the only
+place that can make one. This service is the other end of the wire:
+it stores what it is given and hands back what it stored.
 
 Two things it deliberately does not do. It does not validate the
-offset, because the offset belongs to the adapter that wrote it and
-a validator here would be this side inventing an opinion about a
-shape it cannot know — see [`import_state`](crate::domain::import_state)
-for the rule and why this is where it would break first. And it does
-not check whether the persona exists: an import that reaches this
-point has been posting assets to that persona all along, and a
-second existence check here would answer a question the write path
-already answered, in a place with nothing to do about the answer.
+offset — see [`import_state`](crate::domain::import_state) for that
+rule. And it does not check whether the persona exists: a write
+arrives from an import that has been posting assets to that persona
+all along, so the check would repeat one the asset path has already
+made; and a read arrives before anything has been posted, where the
+honest answer to an unknown persona is the same as to a known one
+with nothing stored — nothing.
 
 ## Types
 
@@ -6264,6 +6261,9 @@ being ahead says nothing about the other. The partition, because it
 is the adapter's own statement of what it is scanning — and the
 adapter names it fully, its own kind included, so two adapters cannot
 collide inside one persona by both calling something `root=/photos`.
+That is also why the key is a pair and not a triple with the kind
+beside it: the adapter owns the encoding, the way it owns the
+offset's.
 
 ## Types
 
@@ -10100,12 +10100,17 @@ Scanner  ─→ RawItem  ─→ Parser  ─→ Footprint  ─→ AssetSpec  ─�
   [`SourceScanner`] is written against, and names what a failure
   cost — one record, or the run — rather than where it happened.
   [`SyncState`] is where a scan's resumption point lives; its type
-  and serialised form are settled independently of whatever comes
-  to store one.
+  and serialised form are settled independently of where one is
+  stored.
 - [`ApiClient`] performs the HTTP POSTs (single or batch).
+- [`store`] is where a resumption point is kept between runs, as a
+  port; [`HttpSyncStore`] keeps one in the server the records
+  already go to.
 - [`Progress`] keeps a running success / failure tally.
 - [`run_import`] owns the shared scan / parse / batch / progress
   loop after the outer CLI has resolved arguments and environment.
+  [`run_import_with`] is the same loop against a [`SyncStore`], so
+  the run takes up where the last one stopped.
   It also fills in [`AssetSpec::declared_content_hash`] for the
   records where it is a true statement — the scanner read a whole
   artefact ([`SourceScanner::payload_is_whole_artefact`]) and the
@@ -11517,8 +11522,8 @@ resumption point holds.
 
 [`SourceError`] is what the scanner traits are written against.
 [`SyncState`] is what a scanner emits and takes back, and its type
-and serialised form are settled independently of whatever comes to
-*store* one. Both are deliberately the part of the port that does
+and serialised form are settled independently of where one is
+*stored* — which is why [`crate::store`] is a port and not a call. Both are deliberately the part of the port that does
 not depend on how an adapter is run — whether Asterism starts it and
 reads it, or it runs itself and pushes. A rate limit is a rate limit
 either way, and a cursor holds the same thing either way.
@@ -11705,9 +11710,10 @@ adapter that runs itself and pushes is the shape taken today, and one
 Asterism starts and reads is the one that was not. A port is what
 lets the second arrive without the runner learning about it.
 
-[`HttpSyncStore`](crate::client::HttpSyncStore) is the implementation
-that exists, and it is thirty lines over the same `ApiClient` every
-record already travels through.
+[`HttpSyncStore`](crate::client::HttpSyncStore) implements it over
+the same `ApiClient` every record already travels through, which is
+why an adapter that keeps its position needs nothing it did not
+already have.
 
 ## Types
 
@@ -14308,10 +14314,9 @@ SQLite adapter for the `ImportStateRepository` port.
 
 Two statements over one table, and the interest is in what is absent
 from them. Nothing reads inside `offset_json` — no `json_extract`, no
-comparison, no ordering by anything in it — because the offset
-belongs to the adapter that wrote it and this is the layer with the
-tools to break that rule most convincingly. The column goes in as
-text and comes out as text.
+comparison, no ordering by anything in it. The column goes in as text
+and comes out as text; why that rule exists is
+[`import_state`](asterism_core::domain::import_state).
 
 The one row a key can have is the primary key's doing, so `upsert`
 is an `ON CONFLICT` over the whole key rather than a read followed by
@@ -14970,9 +14975,10 @@ What that leaves on each side is a set of sanctioned differences,
 and what makes one sanctioned is part of the rule. A route may
 stand without a command when it is the same job under another name,
 or when it is one a person never invokes through the app: the
-process's own controls, byte-serving routes the app reaches through
-Tauri's asset protocol instead, diagnostics a socket client reads,
-and a single-key read the desktop already answers with a wider one.
+process's own controls, an adapter's own bookkeeping, byte-serving
+routes the app reaches through Tauri's asset protocol instead,
+diagnostics a socket client reads, and a single-key read the desktop
+already answers with a wider one.
 A command may stand without a route on the same first ground, when
 it stages or ends something of the desktop's a socket client does
 not have — a fact it keeps, a wait it holds — when it is a batch

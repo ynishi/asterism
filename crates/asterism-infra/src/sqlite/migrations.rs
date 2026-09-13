@@ -8071,21 +8071,17 @@ ALTER TABLE asset ADD COLUMN occurred_local_date TEXT;
 ///
 /// # The key is the whole primary key
 ///
-/// A persona and a partition, together, and nothing else identifies a
-/// row. The same source imported into two personas holds two
-/// independent positions, and two adapters inside one persona are kept
-/// apart by the partition, which each adapter names fully — its own
-/// kind included. A surrogate id would let the same key exist twice,
-/// and a second row under one key is a position nobody can read.
+/// No surrogate id. Why a persona and a partition identify a position
+/// is the domain's; what this adds is that they are the *only* thing
+/// identifying a row, because an id column beside them would let one
+/// key exist twice, and a second row under one key is a position nobody
+/// can read.
 ///
-/// # `offset_json` is text, and nothing here looks inside it
+/// # `offset_json` is text, and the schema says nothing about it
 ///
-/// The offset belongs to the adapter that wrote it. There is no index
-/// on it, no CHECK, no generated column reading a field out of it —
-/// every one of which would be this side forming an opinion about a
-/// shape it cannot know, and the schema is where such an opinion would
-/// look most like a fact. `TEXT` is a deliberate floor: it has nothing
-/// to be clever about.
+/// No index on it, no CHECK, no generated column reading a field out of
+/// it. `TEXT` is a deliberate floor: it has nothing to be clever about,
+/// which is the most a schema can do to keep a rule it cannot state.
 const V111_IMPORT_STATE: &str = r#"
 CREATE TABLE import_state (
     persona_id   TEXT NOT NULL,

@@ -2249,25 +2249,24 @@ pub struct ResetSettingCommand {
 /// the same reason.
 ///
 /// Absence is an answer: a source nobody has imported yet has no point,
-/// and that is the ordinary first run rather than a failure.
+/// and the route says so with `null` rather than a status code — see the
+/// handler for why.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadImportStateCommand {
-    /// Persona the import lands in. Part of the key because the same
-    /// source imported into two personas has two independent positions,
-    /// and one being ahead says nothing about the other.
+    /// Persona the import lands in — half the key.
     pub persona_id: String,
-    /// The adapter's own name for what it is scanning. Opaque here:
-    /// this end compares it and never interprets it.
+    /// The adapter's own name for what it is scanning, and the other
+    /// half. Opaque here: this end compares it and never interprets it.
     pub partition: String,
 }
 
 /// Stores an importer's resumption point
 /// (`POST /asterism/import/state/write`).
 ///
-/// Replaces whatever the same key held. A point is only ever moved
-/// forward by the adapter that wrote the last one, and which run has
-/// earned the right to move it is the importer's decision, not this
-/// endpoint's — see `ImportSummary::resume_from` in the importer SDK.
+/// Replaces whatever the same key held. Which run has earned the right
+/// to move a position is the importer's decision and not this
+/// endpoint's — `ImportSummary::resume_from` in the importer SDK is
+/// where it is made.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WriteImportStateCommand {
     /// Persona the import lands in.
@@ -2276,11 +2275,13 @@ pub struct WriteImportStateCommand {
     pub partition: String,
     /// The position itself, as the adapter wrote it.
     ///
-    /// Stored and handed back byte for byte. Nothing here parses,
-    /// validates or migrates it — that rule is the inbound port's and
-    /// this is the place it would be easiest to quietly break. JSON
-    /// text rather than a value because `schema-bridge` cannot codegen
-    /// `serde_json::Value`, the same reason
-    /// [`RecordEventCommand::payload_json`] carries text.
+    /// Stored and handed back byte for byte; nothing on this side
+    /// parses, validates or migrates it.
+    ///
+    /// JSON text rather than a value because `schema-bridge` cannot
+    /// codegen `serde_json::Value`, the same reason
+    /// [`RecordEventCommand::payload_json`] carries text — which here
+    /// happens to suit the rule, since text has nothing to be clever
+    /// about.
     pub offset_json: String,
 }

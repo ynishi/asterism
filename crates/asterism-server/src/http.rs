@@ -26,9 +26,10 @@
 //! and what makes one sanctioned is part of the rule. A route may
 //! stand without a command when it is the same job under another name,
 //! or when it is one a person never invokes through the app: the
-//! process's own controls, byte-serving routes the app reaches through
-//! Tauri's asset protocol instead, diagnostics a socket client reads,
-//! and a single-key read the desktop already answers with a wider one.
+//! process's own controls, an adapter's own bookkeeping, byte-serving
+//! routes the app reaches through Tauri's asset protocol instead,
+//! diagnostics a socket client reads, and a single-key read the desktop
+//! already answers with a wider one.
 //! A command may stand without a route on the same first ground, when
 //! it stages or ends something of the desktop's a socket client does
 //! not have — a fact it keeps, a wait it holds — when it is a batch

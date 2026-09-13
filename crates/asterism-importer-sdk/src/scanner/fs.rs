@@ -72,16 +72,18 @@ impl FsScanner {
         self
     }
 
-    /// The resumable unit: this root, walked through this filter, as
-    /// [`SourceScanner::partition`] asks for it.
+    /// The resumable unit: this scanner's kind, its root, and the
+    /// filter it walks through — as [`SourceScanner::partition`] asks
+    /// for it.
     ///
-    /// Both, because a partition has to name what a position inside it
-    /// is a position *in*, and [`accepts`](Self::accepts) is half of
-    /// what this walk yields. `asterism-import image --dir ~/Pictures`
-    /// and `asterism-import video --dir ~/Pictures` walk one tree and
-    /// hand over two different sets of files; on the root alone their
-    /// states would be interchangeable, and one would take up after a
-    /// path the other had never reached.
+    /// All three, because a partition has to name what a position
+    /// inside it is a position *in*. The kind keeps this walk's
+    /// positions apart from every other importer's. The filter matters
+    /// for the case the kind cannot answer: two runs of the *same*
+    /// importer over one tree, `--ext png` and `--ext mp4`, hand over
+    /// two different sets of files, and on the root alone their states
+    /// would be interchangeable — one would take up after a path the
+    /// other had never reached.
     fn partition_key(&self) -> String {
         // Sorted, because `accepts` reads the extensions as a set and
         // two callers who named the same set in a different order are

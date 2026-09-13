@@ -541,8 +541,9 @@ pub struct CoreCtx {
     /// `app_setting` row → environment variable.
     pub app_setting_service: Arc<AppSettingService>,
     /// Where an importer got to, kept so the next run does not start
-    /// over. Read and written by adapters over HTTP; nothing in the app
-    /// asks it anything.
+    /// over. An adapter's own bookkeeping, read and written over HTTP —
+    /// which is why its two routes are on the transport-parity test's
+    /// recorded list rather than paired with Tauri commands.
     pub import_state_service: Arc<ImportStateService>,
     /// Session 1st-class entity lifecycle — SessionsView
     /// list source in P1b, HTTP CRUD backend in P2, importer

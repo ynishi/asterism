@@ -16,9 +16,10 @@
 //! Asterism starts and reads is the one that was not. A port is what
 //! lets the second arrive without the runner learning about it.
 //!
-//! [`HttpSyncStore`](crate::client::HttpSyncStore) is the implementation
-//! that exists, and it is thirty lines over the same `ApiClient` every
-//! record already travels through.
+//! [`HttpSyncStore`](crate::client::HttpSyncStore) implements it over
+//! the same `ApiClient` every record already travels through, which is
+//! why an adapter that keeps its position needs nothing it did not
+//! already have.
 
 use async_trait::async_trait;
 
@@ -53,9 +54,10 @@ impl StateKey {
 
 /// Somewhere to keep a resumption point between runs.
 ///
-/// Two verbs, and the absence of a third is deliberate: nothing lists,
-/// because a run knows its own key and asks for that one, and nothing
-/// deletes, because forgetting a position is a request nobody has made.
+/// Nothing lists, because a run knows its own key and asks for that
+/// one. Nothing deletes, because forgetting a position is a request
+/// nobody has made — and a delete nobody calls is a delete nobody has
+/// tested.
 ///
 /// Failures come back as [`SourceError`] rather than a type of this
 /// module's own, so that a caller has one classification to act on. A

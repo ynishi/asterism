@@ -117,7 +117,12 @@ struct CommonArgs {
     /// Number of assets sent per add-batch request.
     #[arg(long, default_value_t = 50)]
     batch_size: usize,
-    /// Validate and report without writing to Asterism.
+    /// Validate and report without contacting Asterism at all.
+    ///
+    /// Nothing is written, and nothing is asked either — including
+    /// where the last run stopped. So a dry run walks the whole source
+    /// rather than the part an ordinary run would, which is the price
+    /// of a rehearsal that needs nothing running.
     #[arg(long)]
     dry_run: bool,
     /// Materialise the source directory hierarchy after each batch.
@@ -172,7 +177,7 @@ fn resume_policy(resume_from: Option<SyncState>, no_resume: bool) -> Resume {
     }
 }
 
-/// Reads the resumption point a previous run printed.
+/// Reads a resumption point typed on the command line.
 ///
 /// Read as a whole and not field by field: the partition is half of
 /// what makes a state answerable, and a caller who could supply an
@@ -599,10 +604,27 @@ where
     // runs itself, pushes what it read, and keeps its position in the
     // place it was already talking to — so nothing has to start it, and
     // nothing has to read its output, for the import to be incremental.
-    let store = HttpSyncStore::new(ApiClient::new(options.server.clone()));
+    //
+    // Withheld under `--dry-run`, which is a promise about the whole
+    // process and not only about writes: the run skips the health
+    // probe, and a rehearsal that then failed on an unreachable store
+    // would be a rehearsal that needed the thing it was standing in
+    // for. The cost is stated where the flag is: a dry run walks the
+    // source from the beginning, because asking where the last one
+    // stopped is the contact it is not making.
     let dry_run = options.dry_run;
+    let store = (!dry_run).then(|| HttpSyncStore::new(ApiClient::new(options.server.clone())));
     let kept = !dry_run && !matches!(options.resume, Resume::No);
-    let summary = run_import_with(scanner, parser, mode, options, Some(&store)).await?;
+    let summary = run_import_with(
+        scanner,
+        parser,
+        mode,
+        options,
+        store
+            .as_ref()
+            .map(|s| s as &dyn asterism_importer_sdk::SyncStore),
+    )
+    .await?;
     // Printed for every run that started, including one a failure cut
     // short: the counts are what it managed, and they are worth having
     // either way.

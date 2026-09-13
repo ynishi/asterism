@@ -4,10 +4,9 @@ SQLite adapter for the `ImportStateRepository` port.
 
 Two statements over one table, and the interest is in what is absent
 from them. Nothing reads inside `offset_json` — no `json_extract`, no
-comparison, no ordering by anything in it — because the offset
-belongs to the adapter that wrote it and this is the layer with the
-tools to break that rule most convincingly. The column goes in as
-text and comes out as text.
+comparison, no ordering by anything in it. The column goes in as text
+and comes out as text; why that rule exists is
+[`import_state`](asterism_core::domain::import_state).
 
 The one row a key can have is the primary key's doing, so `upsert`
 is an `ON CONFLICT` over the whole key rather than a read followed by

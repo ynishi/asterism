@@ -20,11 +20,12 @@
 
 use std::sync::Arc;
 
-use asterism_contract::command::RegisterPersonaCommand;
+use asterism_contract::command::{ReadImportStateCommand, RegisterPersonaCommand};
+use asterism_contract::dto::ImportStateDto;
 use asterism_importer_sdk::{
     ApiClient, Footprint, FootprintSource, FsScanner, HttpSyncStore, ImportOptions, Note,
-    ParseError, RawItem, Resume, ScanMode, SourceParser, SourceScanner, StateKey, SyncStore,
-    run_import_with,
+    ParseError, RawItem, Resume, ScanMode, SourceParser, SourceScanner, StateKey, SyncState,
+    SyncStore, run_import_with,
 };
 use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
@@ -213,8 +214,53 @@ async fn the_stored_offset_survives_the_round_trip_unchanged() {
         .expect("the point the run just stored");
     assert_eq!(
         stored, earned,
-        "the partition it was filed under is the scanner's own, and the \
-         offset is the text that went out"
+        "filed under the scanner's own partition, and it decodes to the \
+         value that went out"
+    );
+
+    // And now the part that comparison cannot make. `SyncState`'s
+    // offset is a `serde_json::Value`, and under `preserve_order` a
+    // `Map` is an `IndexMap` whose `PartialEq` ignores key order — so
+    // the assertion above would hold over an offset that came back
+    // reordered.
+    //
+    // Two things this needs that a real walk cannot supply. An offset
+    // with more than one key, because `FsScanner` writes exactly one
+    // and a single key cannot be out of order; and those keys in an
+    // order that is not their sorted one, because sorting is what a
+    // helpful canonicalisation on the way past would do. So the offset
+    // here is written rather than earned, and read back as **text** off
+    // the route rather than through the client that decodes it.
+    let awkward = SyncState::new(
+        key.partition.clone(),
+        serde_json::json!({ "zz_last": 1, "aa_first": 2 }),
+    );
+    let as_written =
+        serde_json::to_string(&awkward.offset).expect("the fixture's own offset serialises");
+    assert!(
+        as_written.starts_with(r#"{"zz_last""#),
+        "this fixture is worth nothing unless the keys start out unsorted: {as_written}"
+    );
+    store.write(&key, &awkward).await.expect("storing it");
+
+    let raw: Option<ImportStateDto> = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{port}/asterism/import/state/read"
+        ))
+        .json(&ReadImportStateCommand {
+            persona_id: persona.clone(),
+            partition: key.partition.clone(),
+        })
+        .send()
+        .await
+        .expect("the read route answers")
+        .json()
+        .await
+        .expect("and answers with a state or a null");
+    assert_eq!(
+        raw.expect("the point is there").offset_json,
+        as_written,
+        "byte for byte, keys in the order the adapter wrote them"
     );
 }
 
