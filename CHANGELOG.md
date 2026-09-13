@@ -37,10 +37,38 @@ and this project adheres to
   later refuse. A run hands back the last checkpoint it saw **and only when
   nothing failed**: a checkpoint is a promise that everything before it landed,
   and a run with a failed record cannot make it — the next run re-reads instead,
-  which costs reading rather than a record nobody notices is missing. Nothing
-  stores these yet, so `asterism-import` prints the point a run earned and takes
-  one back as `--resume-from`; where they are kept is the transport's question,
-  and that is not settled.
+  which costs reading rather than a record nobody notices is missing. Where a
+  point is kept was left open here and is settled below, by #295.
+
+- **An import takes up where it left off, without being told to** (#295). #293
+  made a scan resumable and left the resumption point homeless: a run printed
+  what it earned, an operator copied it off the terminal and handed it back, and
+  if they did not, the next run read the whole source again. Asterism now keeps
+  one. An `import_state` row is filed under the persona and the partition
+  together — the persona because the same source imported into two personas has
+  two independent positions, the partition because it is the adapter's own
+  statement of what it is scanning, its own kind included — and two routes reach
+  it. Both POST, because a partition holds a filesystem path, a whole SQL query,
+  a `|` between the two, and none of that belongs in a URL. A key nothing has
+  written answers `null` and not `404`: a first run is the ordinary case, not a
+  miss. The offset is stored as **text and nothing looks inside it** — no index,
+  no CHECK, no generated column — because it belongs to the adapter that wrote
+  it, and the storage layer is where an opinion about its shape would look most
+  like a fact. **Which transport this settles:** adapters run themselves and
+  push, rather than Asterism spawning each one and reading its stdout. That is
+  the seam that already existed, so an importer keeping its position needs
+  nothing new from either end; the launch hook the same shape implies is not
+  here, because a schedule with nowhere to keep a position is a loop that
+  re-reads the source every time it fires. A scanner now says what it is
+  scanning (`SourceScanner::partition`), which is what lets a caller look a
+  position up, and one `Option` decides all three of whether a checkpoint is
+  emitted, whether a resumption is accepted, and whether anything is stored. A
+  run reads once before scanning and writes once after every record it sent has
+  been answered — never mid-run, where the promise would be made before it could
+  be true, and never under `--dry-run`, which now contacts Asterism for nothing
+  at all and therefore walks the whole source. `--no-resume` reads everything
+  again and leaves the stored position where it was, because "read it all again"
+  and "forget where I was" are different requests and only the first is common.
 
 - **The grid filters by calendar day** (#282). "What is from these days" and
   "what happened on this day, any year" are two more fields on the list query —

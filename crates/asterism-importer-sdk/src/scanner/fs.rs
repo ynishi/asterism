@@ -5,8 +5,9 @@
 //!
 //! The walk is sorted and resumable: a checkpoint behind each file
 //! carries the path it stopped at, and a later scan handed one takes up
-//! after it. The partition is the root *and* the extension filter,
-//! because both decide what the walk yields. In `Watch` mode
+//! after it. The partition is this scanner's kind, its root *and* its
+//! extension filter, because all three decide what the walk yields. In
+//! `Watch` mode
 //! the scanner also stays live and streams filesystem-change events via
 //! `notify` — new / modified files are re-emitted, deletions are
 //! ignored (deletions on the source do not automatically delete the
@@ -71,22 +72,35 @@ impl FsScanner {
         self
     }
 
-    /// The resumable unit: this root, walked through this filter.
+    /// The resumable unit: this scanner's kind, its root, and the
+    /// filter it walks through — as [`SourceScanner::partition`] asks
+    /// for it.
     ///
-    /// Both, because a partition has to name what a position inside it
-    /// is a position *in*, and [`accepts`](Self::accepts) is half of
-    /// what this walk yields. `asterism-import image --dir ~/Pictures`
-    /// and `asterism-import video --dir ~/Pictures` walk one tree and
-    /// hand over two different sets of files; on the root alone their
-    /// states would be interchangeable, and one would take up after a
-    /// path the other had never reached.
-    fn partition(&self) -> String {
+    /// All three, because a partition has to name what a position
+    /// inside it is a position *in*. The kind keeps this walk's
+    /// positions apart from every other importer's. The filter matters
+    /// for the case the kind cannot answer: two runs of the *same*
+    /// importer over one tree, `--ext png` and `--ext mp4`, hand over
+    /// two different sets of files, and on the root alone their states
+    /// would be interchangeable — one would take up after a path the
+    /// other had never reached.
+    fn partition_key(&self) -> String {
         // Sorted, because `accepts` reads the extensions as a set and
         // two callers who named the same set in a different order are
         // scanning the same thing.
         let mut extensions: Vec<&str> = self.extensions.iter().map(String::as_str).collect();
         extensions.sort_unstable();
-        format!("root={}|ext={}", self.root.display(), extensions.join(","))
+        // The kind leads, so two adapters cannot collide inside one
+        // persona by both calling something `root=/photos`. The slug is
+        // the importer's own and stable across releases, which is what
+        // makes it usable in a key — see
+        // [`RawItem::source_kind`](super::RawItem::source_kind).
+        format!(
+            "kind={}|root={}|ext={}",
+            self.source_kind,
+            self.root.display(),
+            extensions.join(",")
+        )
     }
 
     /// The path a resumption point says was the last one handled, or an
@@ -102,11 +116,11 @@ impl FsScanner {
         let Some(state) = state else {
             return Ok(None);
         };
-        if state.partition != self.partition() {
+        if state.partition != self.partition_key() {
             return Err(SourceError::Config(format!(
                 "cannot resume: the state is for {:?} and this scanner walks {:?}",
                 state.partition,
-                self.partition()
+                self.partition_key()
             )));
         }
         match state.offset.get("after_path").and_then(|v| v.as_str()) {
@@ -171,6 +185,12 @@ impl SourceScanner for FsScanner {
         true
     }
 
+    /// Always one: a walk of a directory has a position in it
+    /// whatever the directory holds.
+    fn partition(&self) -> Option<String> {
+        Some(self.partition_key())
+    }
+
     fn scan(&self, mode: ScanMode, resume_from: Option<SyncState>) -> ScanFuture<'_> {
         let root = self.root.clone();
         let this = self.clone();
@@ -190,7 +210,7 @@ impl SourceScanner for FsScanner {
             // to resume and cannot needs to hear so instead of
             // receiving a whole tree it already has.
             let after_path = this.resume_after(resume_from)?;
-            let partition = this.partition();
+            let partition = this.partition_key();
 
             // Enumerate the current tree into a channel so both modes
             // can share the same stream shape.
@@ -624,9 +644,14 @@ mod tests {
                 "root=/somewhere/else",
                 serde_json::json!({ "after_path": "/somewhere/else/a.txt" }),
             ),
-            // This root, but an offset this version does not read.
+            // This scanner's own partition, but an offset this
+            // version does not read. Asked for rather than spelled:
+            // a hand-written partition would fail the check above
+            // instead, and this case would stop being tested with
+            // nothing to say so.
             SyncState::new(
-                format!("root={}", tmp.path().display()),
+                SourceScanner::partition(&FsScanner::new(tmp.path()))
+                    .expect("a walk always has a partition"),
                 serde_json::json!({ "cursor": 7 }),
             ),
         ];

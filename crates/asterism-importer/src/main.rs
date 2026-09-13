@@ -21,9 +21,9 @@ use asterism_importer_sdk::card::CharaSourceParser;
 use asterism_importer_sdk::harvest::{HarvestSourceParser, schema_example_json};
 use asterism_importer_sdk::scanner::sqlite::ColumnMap;
 use asterism_importer_sdk::{
-    ChatMessage, ChatRole, Doc, DocFormat, Footprint, FootprintSource, FsScanner, ImportOptions,
-    Note, OccurredSource, ParseError, RawItem, ScanMode, SourceParser, SqliteScanner, SyncState,
-    resolve_occurrence, run_import,
+    ApiClient, ChatMessage, ChatRole, Doc, DocFormat, Footprint, FootprintSource, FsScanner,
+    HttpSyncStore, ImportOptions, Note, OccurredSource, ParseError, RawItem, Resume, ScanMode,
+    SourceParser, SqliteScanner, SyncState, resolve_occurrence, run_import_with,
 };
 use asterism_importer_tape::TapeParser;
 use asterism_importer_text::TextParser;
@@ -117,28 +117,37 @@ struct CommonArgs {
     /// Number of assets sent per add-batch request.
     #[arg(long, default_value_t = 50)]
     batch_size: usize,
-    /// Validate and report without writing to Asterism.
+    /// Validate and report without contacting Asterism at all.
+    ///
+    /// Nothing is written, and nothing is asked either — including
+    /// where the last run stopped. So a dry run walks the whole source
+    /// rather than the part an ordinary run would, which is the price
+    /// of a rehearsal that needs nothing running.
     #[arg(long)]
     dry_run: bool,
     /// Materialise the source directory hierarchy after each batch.
     #[arg(long)]
     auto_organize_base_dir: Option<String>,
-    /// Take up where a previous run stopped, given the JSON that run
-    /// printed.
+    /// Take up from this point instead of the stored one.
     ///
-    /// Not every source hands one out, and the run itself is how to
-    /// tell: a scan that can be resumed prints its point when it
-    /// finishes, and one that prints nothing has none to give. The
-    /// `sqlite` subcommand is the case worth knowing — it prints a
-    /// point only under `--ordered-by-id`, because only the person who
-    /// wrote the query knows whether it has an order to resume inside.
+    /// Rarely needed: a run keeps its own position and the next one
+    /// finds it. This is for putting the position somewhere a run would
+    /// not have — back before a batch that needs importing again, say.
+    /// What a person types beats what a machine stored, and the run
+    /// stores the point it then earns.
     ///
-    /// Nothing stores these yet, so an operator carries one across by
-    /// hand. What it means belongs to the scanner that wrote it, and a
+    /// What the JSON means belongs to the scanner that wrote it, and a
     /// scanner handed one it cannot use refuses the scan rather than
     /// quietly starting over.
-    #[arg(long, value_parser = parse_sync_state)]
+    #[arg(long, value_parser = parse_sync_state, conflicts_with = "no_resume")]
     resume_from: Option<SyncState>,
+    /// Read the whole source, and leave the stored position alone.
+    ///
+    /// For re-reading a source after a parser changed, or checking what
+    /// a run would do. It does not forget where the import was: the
+    /// next ordinary run takes up from the same place it would have.
+    #[arg(long)]
+    no_resume: bool,
 }
 
 impl CommonArgs {
@@ -150,12 +159,25 @@ impl CommonArgs {
             upload_concurrency: 1,
             dry_run: self.dry_run,
             auto_organize_base_dir: self.auto_organize_base_dir.clone(),
-            resume_from: self.resume_from.clone(),
+            resume: resume_policy(self.resume_from.clone(), self.no_resume),
         }
     }
 }
 
-/// Reads the resumption point a previous run printed.
+/// The three answers the two flags spell.
+///
+/// Clap refuses both at once, so the order here is not a precedence
+/// anybody can trip over — it is a total function over the states that
+/// can arrive.
+fn resume_policy(resume_from: Option<SyncState>, no_resume: bool) -> Resume {
+    match (resume_from, no_resume) {
+        (_, true) => Resume::No,
+        (Some(state), false) => Resume::From(state),
+        (None, false) => Resume::Stored,
+    }
+}
+
+/// Reads a resumption point typed on the command line.
 ///
 /// Read as a whole and not field by field: the partition is half of
 /// what makes a state answerable, and a caller who could supply an
@@ -214,9 +236,14 @@ struct HarvestArgs {
     dry_run: bool,
     #[arg(long)]
     auto_organize_base_dir: Option<String>,
-    /// Take up where a previous run stopped. See `CommonArgs`.
-    #[arg(long, value_parser = parse_sync_state)]
+    /// Take up from this point instead of the stored one. See
+    /// `CommonArgs`.
+    #[arg(long, value_parser = parse_sync_state, conflicts_with = "no_resume")]
     resume_from: Option<SyncState>,
+    /// Read the whole source, and leave the stored position alone. See
+    /// `CommonArgs`.
+    #[arg(long)]
+    no_resume: bool,
 }
 
 #[derive(Debug, Args)]
@@ -572,7 +599,32 @@ where
     } else {
         ScanMode::Enumerate
     };
-    let summary = run_import(scanner, parser, mode, options).await?;
+    // The store is the same server the records go to, over the same
+    // client. That is the whole of the transport decision: an adapter
+    // runs itself, pushes what it read, and keeps its position in the
+    // place it was already talking to — so nothing has to start it, and
+    // nothing has to read its output, for the import to be incremental.
+    //
+    // Withheld under `--dry-run`, which is a promise about the whole
+    // process and not only about writes: the run skips the health
+    // probe, and a rehearsal that then failed on an unreachable store
+    // would be a rehearsal that needed the thing it was standing in
+    // for. The cost is stated where the flag is: a dry run walks the
+    // source from the beginning, because asking where the last one
+    // stopped is the contact it is not making.
+    let dry_run = options.dry_run;
+    let store = (!dry_run).then(|| HttpSyncStore::new(ApiClient::new(options.server.clone())));
+    let kept = !dry_run && !matches!(options.resume, Resume::No);
+    let summary = run_import_with(
+        scanner,
+        parser,
+        mode,
+        options,
+        store
+            .as_ref()
+            .map(|s| s as &dyn asterism_importer_sdk::SyncStore),
+    )
+    .await?;
     // Printed for every run that started, including one a failure cut
     // short: the counts are what it managed, and they are worth having
     // either way.
@@ -580,15 +632,31 @@ where
         "\nasterism-import {name}: done — ok={} err={}",
         summary.imported, summary.failed
     );
-    // This line is how a resumption point reaches the next run, as
-    // `--resume-from`. Printed before the failure below, so a run cut
-    // short still leaves it where an operator will look — that is the
-    // case it is most wanted in.
+    // Two lines for two situations, and the difference is whether the
+    // point this run earned went anywhere.
+    //
+    // When it was stored, saying so is enough: the next run finds it
+    // and nobody has to carry anything. Printing the JSON every time
+    // would be a line of noise per run for a value nobody copies.
+    //
+    // When it was not — a dry run, or `--no-resume` — this line is the
+    // only place it exists, so it is printed in full. Printed before
+    // the failure below, so a run cut short still leaves it where an
+    // operator will look; that is the case it is most wanted in.
     if let Some(state) = &summary.resume_from {
-        eprintln!(
-            "asterism-import {name}: resume with --resume-from '{}'",
-            serde_json::to_string(state).expect("a state this crate built serialises")
-        );
+        if kept {
+            eprintln!(
+                "asterism-import {name}: position kept at {}",
+                state.partition
+            );
+        } else {
+            eprintln!(
+                "asterism-import {name}: not stored ({}); to take up here, \
+                 pass --resume-from '{}'",
+                if dry_run { "dry run" } else { "--no-resume" },
+                serde_json::to_string(state).expect("a state this crate built serialises")
+            );
+        }
     }
     // Checked before the count, so it is the failure the exit names:
     // "the source refused the credential" tells an operator what to do
@@ -627,7 +695,7 @@ async fn run_harvest(args: HarvestArgs) -> anyhow::Result<()> {
         upload_concurrency: 1,
         dry_run: args.dry_run,
         auto_organize_base_dir: args.auto_organize_base_dir,
-        resume_from: args.resume_from,
+        resume: resume_policy(args.resume_from, args.no_resume),
     };
     run("harvest", &scanner, &parser, args.watch, options).await
 }

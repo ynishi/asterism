@@ -148,6 +148,16 @@
       "docs": "Conversation use-case service."
     },
     {
+      "path": "asterism_core::application::import_state_service",
+      "kind": "module",
+      "docs": "Reading and writing where an importer got to.\n\nThin on purpose, and the thinness is the design. Every judgement\nabout a resumption point is made in the importer, which is the only\nplace that can make one. This service is the other end of the wire:\nit stores what it is given and hands back what it stored.\n\nTwo things it deliberately does not do. It does not validate the\noffset — see [`import_state`](crate::domain::import_state) for that\nrule. And it does not check whether the persona exists: a write\narrives from an import that has been posting assets to that persona\nall along, so the check would repeat one the asset path has already\nmade; and a read arrives before anything has been posted, where the\nhonest answer to an unknown persona is the same as to a known one\nwith nothing stored — nothing."
+    },
+    {
+      "path": "asterism_core::application::import_state_service::ImportStateService",
+      "kind": "struct",
+      "docs": "Where an importer got to, read and written."
+    },
+    {
       "path": "asterism_core::application::mapping",
       "kind": "module",
       "docs": "Conversion between domain types and contract DTOs.\n\n`asterism-contract` is a leaf crate and does not know the domain types;\nevery conversion goes through this module. Wire-representation rules\n(id = UUID hyphenated string, timestamps = unix epoch milliseconds, and\nso on) live in `asterism-contract`'s crate docs."
@@ -2188,6 +2198,21 @@
       "docs": "A group paired with the number of assets currently linked to it,\nused to render the sidebar Groups section and chip count badges."
     },
     {
+      "path": "asterism_core::domain::import_state",
+      "kind": "module",
+      "docs": "Where an importer got to, kept so the next run does not start over.\n\nAn importer scans a source and hands records to the server. #293 gave\nit a way to say where it stopped — a checkpoint on the scan's own\nstream, carried out of a run that earned one — and no way to keep\nthat anywhere. This is the place it is kept, and the whole of what\nthis layer does with it is store it and hand it back.\n\n## The one rule\n\n**The offset is opaque here.** It belongs to the adapter that wrote\nit, and nothing on this side parses, validates, migrates or compares\nit. That rule is stated in the inbound port's own vocabulary\n(`asterism-importer-sdk`'s `SyncState`), and this is the layer where\nbreaking it would be easiest and least visible: a column tempting\nsomebody to index, a service tempted to \"fix up\" a shape it\nrecognises. It is carried as text for that reason as much as for the\nbindings — text has nothing to be clever about.\n\nThe **key** is not opaque, because a store that could not compare\nkeys could not find anything. It is a persona and a partition, and\nboth halves are load-bearing. The persona, because the same source\nimported into two personas has two independent positions and one\nbeing ahead says nothing about the other. The partition, because it\nis the adapter's own statement of what it is scanning — and the\nadapter names it fully, its own kind included, so two adapters cannot\ncollide inside one persona by both calling something `root=/photos`.\nThat is also why the key is a pair and not a triple with the kind\nbeside it: the adapter owns the encoding, the way it owns the\noffset's."
+    },
+    {
+      "path": "asterism_core::domain::import_state::ImportState",
+      "kind": "struct",
+      "docs": "A resumption point as this side holds it."
+    },
+    {
+      "path": "asterism_core::domain::import_state::ImportStateKey",
+      "kind": "struct",
+      "docs": "What a stored position is a position *in*.\n\nCompared, never interpreted. An adapter that scans something compound\nencodes it into the one string and owns that encoding — the same\nbargain the offset has, one level up."
+    },
+    {
       "path": "asterism_core::domain::instance",
       "kind": "module",
       "docs": "Instance identity — the referent behind\n[`Author::Owner`](crate::domain::attribution::Author::Owner).\n\nOne profile database is one Asterism instance, and one instance has\nexactly one owner. Before this record existed, `Owner` was a variant\nwith nothing behind it: the write path could stamp it, but nothing\ncould answer \"which owner\". A single row fixes that — `Owner` is an\nindirect reference to it, the same way a foreign key refers rather\nthan copies.\n\n**Co-ownership is not modelled.** Sharing adds subjects\n([`Visibility::Restricted`](crate::domain::value::Visibility::Restricted)),\nit does not add owners; an instance with two owners would make\n\"whose instance is this\" unanswerable at exactly the moment the\nanswer starts to matter.\n\n`owner_subject` is `None` while Asterism runs locally: there is no\nauthentication, so no token names the person at the keyboard, and\ninventing one would be a value where there is a question. It is\nbound once, when authentication arrives, and from then on `Owner`\nresolves to a name that lives in the same namespace as sharing\nsubjects (see the [`attribution`](crate::domain::attribution) module\ndocs)."
@@ -2711,6 +2736,11 @@
       "path": "asterism_core::domain::repository::GroupRepository",
       "kind": "trait",
       "docs": "Persistence port for [`Group`] and its many-to-many link with\nassets. Unlike [`TagRepository`], `create` is caller-driven\n(there is no auto-materialisation) — a group only comes into\nbeing when the user says so."
+    },
+    {
+      "path": "asterism_core::domain::repository::ImportStateRepository",
+      "kind": "trait",
+      "docs": "Persistence port for an importer's resumption point\n(`import_state` table).\n\nNo list, because nothing asks \"what is every importer's position\" —\na run knows its own key and asks for that one. No delete, because a\npartition that changes simply leaves a row nothing will ask for\nagain, and forgetting a position is a request nobody has made."
     },
     {
       "path": "asterism_core::domain::repository::IndexDoc",

@@ -84,6 +84,7 @@ convert them into domain types and surface any validation failures as
 - `PurgeAssetCommand` — Permanently deletes an **already-trashed** asset. Irreversible:
 - `PurgeGroupCommand` — Permanently deletes an **already-trashed** Group and every
 - `PurgePersonaCommand` — Permanently deletes an **already-trashed** persona. Irreversible, and
+- `ReadImportStateCommand` — Looks up an importer's resumption point
 - `RebuildEdgesCommand` — Enqueues an incremental constellation-edge rebuild for the asset.
 - `RecordDiagCommand` — Appends one webview-origin diagnostic to `diag_log`
 - `RecordEventCommand` — Appends one telemetry event to the local `event_log` (dogfooding
@@ -117,4 +118,5 @@ convert them into domain types and surface any validation failures as
 - `UpdateModalityCommand` — Partially updates a Modality master row
 - `UpdateQueryGroupQueryCommand` — Rewrites a Query Group's rule ("Update query"): validate,
 - `UpdateSeriesStrategyCommand` — Partially updates a series Strategy
+- `WriteImportStateCommand` — Stores an importer's resumption point
 

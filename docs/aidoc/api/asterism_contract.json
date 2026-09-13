@@ -383,6 +383,11 @@
       "docs": "Permanently deletes an **already-trashed** persona. Irreversible, and\nthe widest destructive verb in the system: the DB cascade takes every\nasset of that persona (with their tags, comments, group filings, body\ntext and thumbnails), plus its Groups, snapshots and dispatch\nhistory.\n\nRejected with a conflict when the persona is still live."
     },
     {
+      "path": "asterism_contract::command::ReadImportStateCommand",
+      "kind": "struct",
+      "docs": "Looks up an importer's resumption point\n(`POST /asterism/import/state/read`).\n\nA read, sent as a POST, because the partition is an arbitrary string\nan adapter chose: a filesystem path, a whole SQL query, a `|` between\nthe two. That does not belong in a path segment or a query\nparameter, and this tree already answers questions with bodies where\nthe question is not a name — `search_assets` is the same shape for\nthe same reason.\n\nAbsence is an answer: a source nobody has imported yet has no point,\nand the route says so with `null` rather than a status code — see the\nhandler for why."
+    },
+    {
       "path": "asterism_contract::command::RebuildEdgesCommand",
       "kind": "struct",
       "docs": "Enqueues an incremental constellation-edge rebuild for the asset."
@@ -546,6 +551,11 @@
       "path": "asterism_contract::command::UpdateSeriesStrategyCommand",
       "kind": "struct",
       "docs": "Partially updates a series Strategy\n(`PATCH /asterism/series-strategies/{id}`). Every field is `None =\nleave unchanged`, mirroring [`UpdateModalityCommand`]. The target id\nis supplied by the path; the body `id` field is ignored.\n\n**Four of the five fields invalidate.** `applies_to`, `decode`,\n`include` and `exclude` are what the derivation reads, so changing\nany of them makes every key already derived under this rule a key\nnothing would derive again; `name` is a label and moves nothing. The\nservice compares the four and only invalidates when one actually\ndiffers, so renaming a rule does not cost a re-derivation of the\nlibrary.\n\nThe id is not among them. It is what derived rows are filed under —\na rule that could change it would strand its own keys."
+    },
+    {
+      "path": "asterism_contract::command::WriteImportStateCommand",
+      "kind": "struct",
+      "docs": "Stores an importer's resumption point\n(`POST /asterism/import/state/write`).\n\nReplaces whatever the same key held. Which run has earned the right\nto move a position is the importer's decision and not this\nendpoint's — `ImportSummary::resume_from` in the importer SDK is\nwhere it is made."
     },
     {
       "path": "asterism_contract::digest",
@@ -726,6 +736,11 @@
       "path": "asterism_contract::dto::HeadStatusDto",
       "kind": "struct",
       "docs": "Which trained head scores tags, and what stands between the\nrulings on disk and the next one (#130, #132).\n\nDeliberately not part of [`VisualModelStatusDto`]: that answers\nwhich encoder this process bound — app infrastructure, bundled,\nnothing to manage — and this answers what a person manages. The\ntwo are read together and stay two reads."
+    },
+    {
+      "path": "asterism_contract::dto::ImportStateDto",
+      "kind": "struct",
+      "docs": "An importer's stored resumption point.\n\nThe read route answers `null` for a key nothing has stored, which is\nwhat a first run over a source looks like."
     },
     {
       "path": "asterism_contract::dto::JobDto",

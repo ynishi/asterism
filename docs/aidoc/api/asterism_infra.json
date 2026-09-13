@@ -1093,6 +1093,16 @@
       "docs": "SQLite adapter (writer isle)."
     },
     {
+      "path": "asterism_infra::sqlite::repo::import_state",
+      "kind": "module",
+      "docs": "SQLite adapter for the `ImportStateRepository` port.\n\nTwo statements over one table, and the interest is in what is absent\nfrom them. Nothing reads inside `offset_json` — no `json_extract`, no\ncomparison, no ordering by anything in it. The column goes in as text\nand comes out as text; why that rule exists is\n[`import_state`](asterism_core::domain::import_state).\n\nThe one row a key can have is the primary key's doing, so `upsert`\nis an `ON CONFLICT` over the whole key rather than a read followed by\na write: two runs of the same importer finishing at once would\notherwise both read \"nothing\", both insert, and one would lose to a\nconstraint the other had not seen.\n\nA timestamp this build cannot represent is *not* treated the way\n`app_setting` treats one. There, an uninterpretable row reads as\n\"not overridden\" and the settings screen still renders; here the\nequivalent would be a resumption point silently reading as absent,\nand an importer told a source it has read is a source it has not\nwould re-import the whole thing. So the read fails and says so —\n`updated_at` is a stamp for a person, and losing a position over one\nis the trade that runs the wrong way."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::import_state::SqliteImportStateRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `ImportStateRepository` (uses a writer isle)."
+    },
+    {
       "path": "asterism_infra::sqlite::repo::instance",
       "kind": "module",
       "docs": "SQLite adapter for the `InstanceRepository` port.\n\nOne row, minted by the V49 migration. The adapter deliberately does\n**not** create it on read: a migrated database always has it, so an\nempty table is an anomaly, and minting a replacement would hand out\nan identity that disagrees with whatever the rows on disk were\nattributed against."

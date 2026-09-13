@@ -96,6 +96,14 @@ const ROUTES_WITHOUT_COMMAND: &[(&str, &str)] = &[
         "one of four routes behind `list_forge_threads_about`",
     ),
     // What a person never invokes.
+    (
+        "read_import_state",
+        "an importer's own bookkeeping: a person never asks where an adapter got to",
+    ),
+    (
+        "write_import_state",
+        "an importer's own bookkeeping: a person never says where an adapter got to",
+    ),
     ("health", "the process's own control, not a person's verb"),
     (
         "shutdown_process",

@@ -3,8 +3,8 @@
 //!
 //! [`SourceError`] is what the scanner traits are written against.
 //! [`SyncState`] is what a scanner emits and takes back, and its type
-//! and serialised form are settled independently of whatever comes to
-//! *store* one. Both are deliberately the part of the port that does
+//! and serialised form are settled independently of where one is
+//! *stored* — which is why [`crate::store`] is a port and not a call. Both are deliberately the part of the port that does
 //! not depend on how an adapter is run — whether Asterism starts it and
 //! reads it, or it runs itself and pushes. A rate limit is a rate limit
 //! either way, and a cursor holds the same thing either way.
@@ -236,11 +236,10 @@ impl SourceError {
 ///
 /// `offset` is opaque: it belongs to the adapter that wrote it, and
 /// nothing here parses, validates or migrates it. `partition` is opaque
-/// too, with one exception — its **identity**. Whatever comes to store
-/// these will compare partitions, to know which state a checkpoint
-/// replaces and which ones exist; it will never interpret what the
-/// string means. Nothing stores them yet, and that reservation is the
-/// whole of what the core is allowed to do with the field.
+/// too, with one exception — its **identity**. A store compares
+/// partitions, to know which state a checkpoint replaces; it never
+/// interprets what the string means. That reservation is the whole of
+/// what this side is allowed to do with the field.
 ///
 /// That is why `partition` is a string and not a JSON value, though
 /// Connect's equivalent is a map. This workspace builds `serde_json`

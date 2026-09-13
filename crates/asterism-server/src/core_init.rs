@@ -23,7 +23,7 @@ use asterism_core::application::DispatchService;
 use asterism_core::application::disclosure_service::DisclosureService;
 use asterism_core::application::query_group_invalidation::QueryGroupInvalidator;
 use asterism_core::application::{
-    AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
+    AppSettingService, AssetCommentService, AssetService, ImportStateService, MaterialLayerService,
     MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,
     SessionService, SnapshotService, ThreadService, ThumbService,
 };
@@ -540,6 +540,11 @@ pub struct CoreCtx {
     /// Application settings, resolved as code default → stored
     /// `app_setting` row → environment variable.
     pub app_setting_service: Arc<AppSettingService>,
+    /// Where an importer got to, kept so the next run does not start
+    /// over. An adapter's own bookkeeping, read and written over HTTP —
+    /// which is why its two routes are on the transport-parity test's
+    /// recorded list rather than paired with Tauri commands.
+    pub import_state_service: Arc<ImportStateService>,
     /// Session 1st-class entity lifecycle — SessionsView
     /// list source in P1b, HTTP CRUD backend in P2, importer
     /// find-or-create in P3.
@@ -714,6 +719,8 @@ pub async fn init_core_with(
     let modalities = sqlite::repo::SqliteModalityRepository::new(isle.clone());
     let app_settings = Arc::new(sqlite::repo::SqliteAppSettingRepository::new(isle.clone()));
     let app_setting_service = Arc::new(AppSettingService::new(app_settings));
+    let import_states = Arc::new(sqlite::repo::SqliteImportStateRepository::new(isle.clone()));
+    let import_state_service = Arc::new(ImportStateService::new(import_states));
     let asset_bodies = sqlite::repo::SqliteAssetBodyRepository::new(isle.clone());
     let snapshots = Arc::new(sqlite::repo::SqliteSnapshotRepository::new(isle.clone()));
     let telemetry = asterism_infra::telemetry::Telemetry::new(isle.clone());
@@ -1484,6 +1491,7 @@ pub async fn init_core_with(
             job_queue_arc.clone(),
         )),
         app_setting_service,
+        import_state_service,
         session_service,
         asset_comment_service: Arc::new(AssetCommentService::new(
             asset_comments,

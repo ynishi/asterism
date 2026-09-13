@@ -125,13 +125,22 @@ impl SqliteScanner {
         self
     }
 
-    /// The resumable unit: this database and this query.
+    /// The resumable unit: this scanner's kind, this database and this
+    /// query.
     ///
-    /// Both, because a different query over the same file selects a
-    /// different set of rows, and a row id from one says nothing about
-    /// a position in the other.
-    fn partition(&self) -> String {
-        format!("db={}|query={}", self.db_path.display(), self.query)
+    /// The database and the query because a different query over the
+    /// same file selects a different set of rows, and a row id from one
+    /// says nothing about a position in the other. The kind because a
+    /// position is stored beside every other importer's, and a slug
+    /// that leads the string is what keeps two of them from colliding
+    /// inside one persona.
+    fn partition_key(&self) -> String {
+        format!(
+            "kind={}|db={}|query={}",
+            self.source_kind,
+            self.db_path.display(),
+            self.query
+        )
     }
 
     /// The row id a resumption point says was the last one handled, or
@@ -148,7 +157,7 @@ impl SqliteScanner {
                     .into(),
             ));
         }
-        if state.partition != self.partition() {
+        if state.partition != self.partition_key() {
             return Err(SourceError::Config(
                 "cannot resume: the state was written for another database or another query".into(),
             ));
@@ -171,6 +180,17 @@ impl SqliteScanner {
 }
 
 impl SourceScanner for SqliteScanner {
+    /// One only when the caller has vouched for the query's order.
+    ///
+    /// The same `Option` decides three things that must not be allowed
+    /// to disagree: whether a checkpoint is emitted, whether a
+    /// resumption is accepted, and whether a caller can look a position
+    /// up at all. Until somebody says the query has an order, there is
+    /// no position to have.
+    fn partition(&self) -> Option<String> {
+        self.ordered_by_id.then(|| self.partition_key())
+    }
+
     fn scan(&self, mode: ScanMode, resume_from: Option<SyncState>) -> ScanFuture<'_> {
         let this = self.clone();
         Box::pin(async move {
@@ -196,8 +216,11 @@ impl SourceScanner for SqliteScanner {
             let after_id = this.resume_after(resume_from)?;
             // `None` when the caller has not vouched for the order: a
             // scan with no resumable position emits no checkpoints,
-            // rather than points it would refuse to honour.
-            let partition = this.ordered_by_id.then(|| this.partition());
+            // rather than points it would refuse to honour. Read from
+            // the trait method rather than restated here, so the rule
+            // that decides all three — checkpoint, resumption, lookup —
+            // has one statement.
+            let partition = SourceScanner::partition(&this);
 
             let (tx, rx) = mpsc::channel::<Result<ScanEvent, SourceError>>(64);
             let db_path = this.db_path.clone();
@@ -841,7 +864,12 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let db = a_database(tmp.path(), "good.sqlite");
         let query = "SELECT id, body FROM entries";
-        let partition = format!("db={}|query={query}", db.display());
+        // Asked for rather than spelled: this scan is refused because
+        // nobody vouched for the order, and a hand-written partition
+        // would let it be refused for the wrong reason instead.
+        let partition =
+            SourceScanner::partition(&SqliteScanner::new(&db, query, columns()).ordered_by_id())
+                .expect("vouched for, so there is one");
 
         // And without the promise there is nothing to offer in the
         // first place: a scan that would refuse to resume does not hand

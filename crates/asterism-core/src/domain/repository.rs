@@ -35,6 +35,7 @@ use crate::domain::dispatch::DispatchJob;
 use crate::domain::duplicate_conflict::{ConflictResolution, DuplicateAxis, DuplicateConflict};
 use crate::domain::edge::{ConstellationEdge, EdgeKind, IncidentEdge};
 use crate::domain::group::{Group, GroupLink, GroupSummary};
+use crate::domain::import_state::{ImportState, ImportStateKey};
 use crate::domain::instance::InstanceIdentity;
 use crate::domain::job::JobKind;
 use crate::domain::material_layer::{LayerRole, MaterialLayer};
@@ -4299,4 +4300,32 @@ pub trait AssetLinkRepository: Send + Sync {
     /// Removes the named rows, and nothing else. Answers how many
     /// existed to be removed.
     async fn reap(&self, keys: &[AssetLinkKey]) -> Result<u64, DomainError>;
+}
+
+/// Persistence port for an importer's resumption point
+/// (`import_state` table).
+///
+/// No list, because nothing asks "what is every importer's position" —
+/// a run knows its own key and asks for that one. No delete, because a
+/// partition that changes simply leaves a row nothing will ask for
+/// again, and forgetting a position is a request nobody has made.
+#[async_trait]
+pub trait ImportStateRepository: Send + Sync {
+    /// The position stored under `key`, or `None` for a source nothing
+    /// has imported yet.
+    ///
+    /// Absence is an answer and not a failure — a first run is the
+    /// ordinary case. What that costs a caller who gets it wrong is at
+    /// the two ends that face one: the SDK's
+    /// `SyncStore::read`, and the read route's `null`.
+    async fn find(&self, key: &ImportStateKey) -> Result<Option<ImportState>, DomainError>;
+
+    /// Inserts or replaces the position for `state.key`.
+    ///
+    /// Replaces unconditionally, and deliberately does not ask whether
+    /// it should: that decision is made in the importer, which is the
+    /// only place that knows what became of the records in front of the
+    /// checkpoint. A check here would be a second opinion on one
+    /// question.
+    async fn upsert(&self, state: &ImportState) -> Result<(), DomainError>;
 }

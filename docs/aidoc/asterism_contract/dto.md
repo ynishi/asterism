@@ -38,6 +38,7 @@ the domain types.
 - `GroupLinkDto` — One Group-in-Group connection (Are.na channel-in-channel). The
 - `GroupSummaryDto` — A group paired with the number of distinct assets attached, used
 - `HeadStatusDto` — Which trained head scores tags, and what stands between the
+- `ImportStateDto` — An importer's stored resumption point.
 - `JobDto` — Job status payload.
 - `JobKindSnapshotDto` — Per-kind slice of the background-jobs table (wire form of the
 - `JobLogDto` — One job run (`GET /asterism/jobs/log`).

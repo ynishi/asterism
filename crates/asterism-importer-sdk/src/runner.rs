@@ -30,8 +30,8 @@ use asterism_contract::digest;
 use futures::stream::{FuturesUnordered, StreamExt};
 
 use crate::{
-    ApiClient, Progress, ScanEvent, ScanMode, SourceError, SourceParser, SourceScanner, SyncState,
-    spec_to_command,
+    ApiClient, Progress, ScanEvent, ScanMode, SourceError, SourceParser, SourceScanner, StateKey,
+    SyncState, SyncStore, spec_to_command,
 };
 
 #[derive(Debug, Clone)]
@@ -42,13 +42,45 @@ pub struct ImportOptions {
     pub upload_concurrency: usize,
     pub dry_run: bool,
     pub auto_organize_base_dir: Option<String>,
-    /// Where to take up, or `None` to start at the beginning.
+    /// Where this run takes up.
+    pub resume: Resume,
+}
+
+/// Where a run takes up, and what it does about the point it earns.
+///
+/// Three answers rather than an `Option`, because "start at the
+/// beginning" and "start at the beginning **this once**" are different
+/// requests and only one of them should disturb what is stored. An
+/// operator re-reading a source to repair something is making the
+/// second, and a run that quietly forgot their position as the price
+/// would be a surprise paid for later.
+#[derive(Debug, Clone, Default)]
+pub enum Resume {
+    /// Take up from what the store holds, and store the point this run
+    /// earns.
     ///
-    /// Handed to the scanner unread: what it means belongs to whoever
-    /// wrote it. A scanner that cannot use it refuses the scan, so a
-    /// caller that asked to resume and could not is told — see
-    /// [`SourceScanner::scan`].
-    pub resume_from: Option<SyncState>,
+    /// The default, and what a scheduled adapter wants: an import is
+    /// incremental without anybody saying so. A scan with no partition
+    /// ([`SourceScanner::partition`]) has nowhere to take up from, so
+    /// this reads and writes nothing for one — silently, because "this
+    /// source cannot be resumed" is the scanner's answer and not a
+    /// failure of the run.
+    #[default]
+    Stored,
+    /// Take up from this point, whatever the store holds.
+    ///
+    /// What a person typed beats what a machine wrote. The run still
+    /// stores the point it earns, so a hand-placed resumption leaves
+    /// the position where the operator moved it rather than where it
+    /// was.
+    From(SyncState),
+    /// Read the whole source, and leave the stored point alone.
+    ///
+    /// Neither read nor written. "Read it all again" is a common
+    /// request — a parser changed, a run is being checked — and
+    /// "forget where I was" is not the same one, so this does not make
+    /// it on the caller's behalf.
+    No,
 }
 
 impl ImportOptions {
@@ -60,7 +92,7 @@ impl ImportOptions {
             upload_concurrency: 1,
             dry_run: false,
             auto_organize_base_dir: None,
-            resume_from: None,
+            resume: Resume::default(),
         }
     }
 }
@@ -114,9 +146,10 @@ pub struct ImportSummary {
     /// having: a source that rate-limits halfway is exactly when a
     /// caller wants to take up rather than begin again.
     ///
-    /// Handed back rather than kept: where a resumption point is
-    /// stored is the transport's question and not this function's, and
-    /// answering it here would settle it for every caller.
+    /// Handed back whether or not it was also kept. Where a resumption
+    /// point is stored is the caller's question — [`run_import_with`]
+    /// writes it to a [`SyncStore`] when given one, and this field is
+    /// what a caller without one has.
     pub resume_from: Option<SyncState>,
 }
 
@@ -130,6 +163,32 @@ where
     S: SourceScanner + ?Sized,
     P: SourceParser + ?Sized,
 {
+    run_import_with(scanner, parser, mode, options, None).await
+}
+
+/// The same run, against a given place to keep the resumption point.
+///
+/// [`run_import`] is this with no store, which is the shape a caller
+/// that does not want a position kept asks for.
+///
+/// The store is reached twice and in one place each: once before the
+/// scan, to ask where to take up, and once after everything the run sent
+/// has been answered, to say where it got to. Nothing in the loop
+/// touches it. A point written mid-run would be a promise that the
+/// records in front of it had landed, made at a moment when that is not
+/// yet known — the same promise [`ImportSummary::resume_from`] refuses
+/// to make about a run that lost a record.
+pub async fn run_import_with<S, P>(
+    scanner: &S,
+    parser: &P,
+    mode: ScanMode,
+    options: ImportOptions,
+    store: Option<&dyn SyncStore>,
+) -> anyhow::Result<ImportSummary>
+where
+    S: SourceScanner + ?Sized,
+    P: SourceParser + ?Sized,
+{
     let client = Arc::new(ApiClient::new(options.server.clone()));
     if !options.dry_run {
         client
@@ -138,9 +197,34 @@ where
             .with_context(|| format!("cannot reach asterism-server at {}", options.server))?;
     }
 
+    // Where this run's position lives, or `None` when there is nowhere
+    // for one: a scan with no partition has no position, and a caller
+    // with no store has nowhere to put one.
+    let state_key = match (store, scanner.partition()) {
+        (Some(_), Some(partition)) => Some(StateKey::new(&options.persona_id, partition)),
+        _ => None,
+    };
+    // Whether this run may move the stored position. The match below
+    // answers the reading half; this answers the writing half, and each
+    // half has exactly one statement. `Resume::No` was guarded three
+    // times at first — the key withheld, the read skipped, the write
+    // skipped — and a guard that cannot be removed without some other
+    // guard covering for it is a guard no test can show is working.
+    // Two of these tests were passing on nothing at all.
+    let keeps_position = !matches!(options.resume, Resume::No);
+    let resume_from = match &options.resume {
+        // What a person typed, whatever is stored.
+        Resume::From(state) => Some(state.clone()),
+        Resume::No => None,
+        Resume::Stored => match (store, &state_key) {
+            (Some(store), Some(key)) => store.read(key).await?,
+            _ => None,
+        },
+    };
+
     let progress = Progress::new();
     let payload_is_whole_artefact = scanner.payload_is_whole_artefact();
-    let mut stream = scanner.scan(mode, options.resume_from.clone()).await?;
+    let mut stream = scanner.scan(mode, resume_from).await?;
     let mut buffer: Vec<AddAssetCommand> = Vec::new();
     // The failure that cost the run, if the scanner sent one. Carried
     // out on the summary rather than thrown instead of it.
@@ -283,11 +367,43 @@ where
     // record is known: batches are sent while the scan is still
     // running and answered out of order.
     let failed = progress.err_count();
+    let resume_from = if failed == 0 { last_checkpoint } else { None };
+
+    // Written after the counts are final, which is the first line at
+    // which what the server did with every record is known.
+    //
+    // Not the same as `summary.resume_from`, which says what the run
+    // *earned*: a dry run, a `Resume::No`, a caller with no store and a
+    // scan with no partition each leave it `Some` with nothing written.
+    // A caller that needs to know whether a point went anywhere reads
+    // the conditions below, which is what `asterism-import` does.
+    //
+    // A store that will not take it fails the run. The alternative —
+    // carrying on and reporting success — would leave a caller with an
+    // import that looks incremental and is not, and would do it once
+    // per run forever.
+    //
+    // Never under `dry_run`. A stored point says the records in front
+    // of it landed, and in a dry run nothing landed at all; writing one
+    // would make the next real run skip everything the rehearsal
+    // pretended to import.
+    //
+    // Reading is a separate question and not this function's: a dry run
+    // handed a store reads from it, and whether to hand it one is the
+    // caller's. `asterism-import` withholds it, because its `--dry-run`
+    // promises to contact nothing — see the flag.
+    if keeps_position
+        && !options.dry_run
+        && let (Some(store), Some(key), Some(state)) = (store, &state_key, &resume_from)
+    {
+        store.write(key, state).await?;
+    }
+
     Ok(ImportSummary {
         imported: progress.ok_count(),
         failed,
         ended_by,
-        resume_from: if failed == 0 { last_checkpoint } else { None },
+        resume_from,
     })
 }
 
@@ -677,6 +793,16 @@ mod tests {
     }
 
     impl SourceScanner for CheckpointingScanner {
+        /// The same partition its checkpoints carry.
+        ///
+        /// Not decoration: without one this fixture has no position, so
+        /// the runner never reaches the store for it — and every
+        /// assertion below about what the store does or does not hold
+        /// would pass by never being asked. Two of them did.
+        fn partition(&self) -> Option<String> {
+            Some("test".into())
+        }
+
         fn scan(&self, _mode: ScanMode, resume_from: Option<SyncState>) -> ScanFuture<'_> {
             *self.handed.lock().expect("the fixture's record") = resume_from;
             let items = self.items;
@@ -800,7 +926,7 @@ mod tests {
         let scanner = CheckpointingScanner::new(1);
         let asked = SyncState::new("test", serde_json::json!({ "after": 41 }));
         let mut options = dry("http://127.0.0.1:1");
-        options.resume_from = Some(asked.clone());
+        options.resume = Resume::From(asked.clone());
 
         run_import(&scanner, &NoteParser, ScanMode::Enumerate, options)
             .await
@@ -810,6 +936,240 @@ mod tests {
             Some(asked),
             "handed over whole, neither read nor rewritten"
         );
+    }
+
+    /// This loop's half of "a second run imports nothing": the point
+    /// the first run earned reaches the second and is acted on.
+    ///
+    /// Nobody types a resumption point here. Driven by the real
+    /// `FsScanner` over real files against a server that counts what it
+    /// receives, because every cheaper version asserts something other
+    /// than "the records did not come back" — but the store is an
+    /// in-memory one, so what this cannot answer is whether the halves
+    /// agree across HTTP and SQLite. `import_state_e2e` is where that
+    /// is asked.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_second_run_over_an_unchanged_source_imports_nothing() {
+        let received = Arc::new(std::sync::Mutex::new(Vec::<usize>::new()));
+        let port = spawn_counting_server(Arc::clone(&received)).await;
+        let store = crate::store::memory::MemorySyncStore::default();
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(tmp.path().join(name), name.as_bytes()).expect("write");
+        }
+        let scanner = crate::FsScanner::new(tmp.path());
+        let options = || {
+            let mut options = ImportOptions::new("persona-id");
+            options.server = format!("http://127.0.0.1:{port}");
+            options
+        };
+
+        let first = run_import_with(
+            &scanner,
+            &NoteParser,
+            ScanMode::Enumerate,
+            options(),
+            Some(&store),
+        )
+        .await
+        .expect("the first run");
+        assert_eq!(first.imported, 3);
+        assert!(
+            first.resume_from.is_some(),
+            "a clean run over a resumable source earns a point"
+        );
+
+        let second = run_import_with(
+            &scanner,
+            &NoteParser,
+            ScanMode::Enumerate,
+            options(),
+            Some(&store),
+        )
+        .await
+        .expect("the second run");
+        assert_eq!(
+            second.imported, 0,
+            "the three files were already handled and are not read again"
+        );
+        assert_eq!(
+            *received.lock().expect("the server's log"),
+            vec![3],
+            "and the server was sent one batch in total, by the first run"
+        );
+    }
+
+    /// A run that lost a record leaves the stored point where it was.
+    ///
+    /// `ImportSummary::resume_from` already withholds the point from
+    /// such a run; this is the assertion that the withholding reaches
+    /// the store rather than stopping at the struct. A position moved
+    /// past a record that never landed is a record nobody will look for
+    /// again.
+    #[tokio::test]
+    async fn a_run_that_lost_a_record_leaves_the_stored_point_alone() {
+        let store = crate::store::memory::MemorySyncStore::default();
+        let key = StateKey::new("persona-id", "test");
+        let held = SyncState::new("test", serde_json::json!({ "after": 7 }));
+        store.write(&key, &held).await.expect("seeding the store");
+
+        let scanner = CheckpointingScanner::new(1)
+            .then(SourceError::item("/tmp/bad.txt", "permission denied"));
+        let summary = run_import_with(
+            &scanner,
+            &NoteParser,
+            ScanMode::Enumerate,
+            dry("http://127.0.0.1:1"),
+            Some(&store),
+        )
+        .await
+        .expect("a lost record is not the end of the run");
+
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.resume_from, None);
+        assert_eq!(
+            store.stored(&key),
+            Some(held),
+            "and what was there before is still there"
+        );
+    }
+
+    /// A dry run reads a point and never writes one.
+    ///
+    /// Reads, because rehearsing the work the next real run would do is
+    /// what a dry run is for. Never writes, because a stored point says
+    /// the records in front of it landed and in a dry run nothing
+    /// landed — a rehearsal that moved the position would make the next
+    /// real run skip everything it only pretended to import.
+    #[tokio::test]
+    async fn a_dry_run_reads_a_point_and_stores_none() {
+        let store = crate::store::memory::MemorySyncStore::default();
+        let scanner = CheckpointingScanner::new(1);
+        let key = StateKey::new("persona-id", "test");
+
+        let summary = run_import_with(
+            &scanner,
+            &NoteParser,
+            ScanMode::Enumerate,
+            dry("http://127.0.0.1:1"),
+            Some(&store),
+        )
+        .await
+        .expect("a dry run");
+        assert_eq!(summary.imported, 1, "the rehearsal still walks the source");
+        assert!(
+            summary.resume_from.is_some(),
+            "and still says where it got to"
+        );
+        assert_eq!(
+            store.stored(&key),
+            None,
+            "but nothing landed, so nothing is recorded as having landed"
+        );
+    }
+
+    /// `Resume::No` reads the whole source and leaves the stored point
+    /// where it is.
+    ///
+    /// Two requests that look alike and are not: "read it all again"
+    /// is common — a parser changed, a run is being checked — and
+    /// "forget where I was" is not, so the first does not quietly make
+    /// the second.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_forced_full_read_neither_takes_up_nor_disturbs_the_store() {
+        let store = crate::store::memory::MemorySyncStore::default();
+        let key = StateKey::new("persona-id", "test");
+        let held = SyncState::new("test", serde_json::json!({ "after": 7 }));
+        store.write(&key, &held).await.expect("seeding the store");
+
+        // A real run rather than a dry one, because a dry run declines
+        // to write for a reason of its own: under `dry_run` the store
+        // is left alone whatever `resume` says, and this test would
+        // then be asserting that rule instead of its own.
+        let received = Arc::new(std::sync::Mutex::new(Vec::<usize>::new()));
+        let port = spawn_counting_server(Arc::clone(&received)).await;
+        let scanner = CheckpointingScanner::new(1);
+        let mut options = ImportOptions::new("persona-id");
+        options.server = format!("http://127.0.0.1:{port}");
+        options.resume = Resume::No;
+
+        run_import_with(
+            &scanner,
+            &NoteParser,
+            ScanMode::Enumerate,
+            options,
+            Some(&store),
+        )
+        .await
+        .expect("a full read");
+
+        assert_eq!(
+            *scanner.handed.lock().expect("the fixture's record"),
+            None,
+            "the scan was not told to take up anywhere"
+        );
+        assert_eq!(
+            store.stored(&key),
+            Some(held),
+            "and the point somebody may still want is untouched"
+        );
+    }
+
+    /// A scan with no partition keeps no position, and that is not a
+    /// failure.
+    ///
+    /// `SqliteScanner` over a query nobody has vouched for is the real
+    /// case: there is no order to take up inside, so there is nothing
+    /// to store and nothing to look up. The run is ordinary.
+    #[tokio::test]
+    async fn a_scan_with_no_partition_keeps_no_position() {
+        struct NoPartition;
+
+        impl SourceScanner for NoPartition {
+            fn scan(&self, _mode: ScanMode, resume_from: Option<SyncState>) -> ScanFuture<'_> {
+                assert_eq!(
+                    resume_from, None,
+                    "a scan with no partition is never handed a point, \
+                     and the store below holds one for it to be handed \
+                     wrongly"
+                );
+                Box::pin(async {
+                    Ok(Box::pin(stream::iter([Ok(ScanEvent::Item(RawItem {
+                        source_kind: "test".into(),
+                        locator: "/tmp/one.txt".into(),
+                        payload: b"hello".to_vec(),
+                        occurred_at: Some(Utc::now()),
+                        extra: serde_json::json!({}),
+                    }))])) as crate::scanner::ItemStream)
+                })
+            }
+        }
+
+        // Seeded under the key a scan that invented a partition would
+        // land on, so "no partition" is a fact the run acts on rather
+        // than an emptiness nothing tested.
+        let store = crate::store::memory::MemorySyncStore::default();
+        let stray = StateKey::new("persona-id", "test");
+        store
+            .write(
+                &stray,
+                &SyncState::new("test", serde_json::json!({ "after": 7 })),
+            )
+            .await
+            .expect("seeding the store");
+
+        let summary = run_import_with(
+            &NoPartition,
+            &NoteParser,
+            ScanMode::Enumerate,
+            dry("http://127.0.0.1:1"),
+            Some(&store),
+        )
+        .await
+        .expect("an unresumable source is an ordinary source");
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.resume_from, None, "nothing emitted a checkpoint");
     }
 
     /// A loopback server that answers the two calls an import makes and

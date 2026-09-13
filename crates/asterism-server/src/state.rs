@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use asterism_core::application::DispatchService;
 use asterism_core::application::{
-    AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
+    AppSettingService, AssetCommentService, AssetService, ImportStateService, MaterialLayerService,
     MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,
     SessionService, SnapshotService, ThreadService, ThumbService,
 };
@@ -48,6 +48,8 @@ pub struct ServerCtx {
     pub series_strategy_service: Arc<SeriesStrategyService>,
     /// Application settings (default → env var → stored row).
     pub app_setting_service: Arc<AppSettingService>,
+    /// Where an importer got to (`/asterism/import/state/*`).
+    pub import_state_service: Arc<ImportStateService>,
     /// Session 1st-class entity lifecycle. Backs the P2 HTTP
     /// CRUD (rename / metadata / delete) once those routes land; the
     /// SessionsView list path currently continues to flow through
@@ -140,6 +142,7 @@ impl ServerCtx {
             modality_service: core.modality_service.clone(),
             series_strategy_service: core.series_strategy_service.clone(),
             app_setting_service: core.app_setting_service.clone(),
+            import_state_service: core.import_state_service.clone(),
             session_service: core.session_service.clone(),
             asset_comment_service: core.asset_comment_service.clone(),
             material_mark_service: core.material_mark_service.clone(),

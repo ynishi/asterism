@@ -62,6 +62,7 @@ the private design notes.
 - [`application::forge::line_service`](application__forge__line_service.md): Line use cases — opening one, reading what is on it, and moving its
 - [`application::forge::pursuit_service`](application__forge__pursuit_service.md): Work use cases — opening a line of work, writing rounds, looking at
 - [`application::forge::thread_service`](application__forge__thread_service.md): Saying something about work, and correcting it.
+- [`application::import_state_service`](application__import_state_service.md): Reading and writing where an importer got to.
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
 - [`application::material_mark_service`](application__material_mark_service.md): `MaterialMarkService` — the marks placed into an Asset's material.
@@ -137,6 +138,7 @@ the private design notes.
 - [`domain::forge::threads`](domain__forge__threads.md): Keeping what was said about work.
 - [`domain::generator_params`](domain__generator_params.md): `generator_params` — what an extraction concluded about the
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
+- [`domain::import_state`](domain__import_state.md): Where an importer got to, kept so the next run does not start over.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
 - [`domain::job`](domain__job.md): `Job` — lifecycle model for asynchronous work.
 - [`domain::material`](domain__material.md): `Material` — the physical-original layer of an asset (asset-model v4).

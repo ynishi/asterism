@@ -1,12 +1,20 @@
 //! Thin HTTP client for the asterism-server API.
 //!
-//! Only wraps the two endpoints an importer actually needs:
-//! `POST /asterism/assets/add` (single) and
-//! `POST /asterism/assets/add-batch`.
+//! Wraps the endpoints an importer actually needs: the two that land
+//! records (`POST /asterism/assets/add` and `/add-batch`), and the two
+//! that keep its position between runs, behind
+//! [`HttpSyncStore`].
 
 use anyhow::{Context, anyhow};
-use asterism_contract::command::{AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand};
-use asterism_contract::dto::AssetDto;
+use asterism_contract::command::{
+    AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, ReadImportStateCommand,
+    WriteImportStateCommand,
+};
+use asterism_contract::dto::{AssetDto, ImportStateDto};
+use async_trait::async_trait;
+
+use crate::port::{SourceError, SyncState};
+use crate::store::{StateKey, SyncStore};
 
 /// HTTP client bound to a running `asterism-server`.
 #[derive(Debug, Clone)]
@@ -112,5 +120,119 @@ impl ApiClient {
         resp.json::<AddAssetBatchResult>()
             .await
             .context("add_asset_batch response decode failed")
+    }
+}
+
+/// The [`SyncStore`] an adapter that pushes over HTTP uses.
+///
+/// The whole of the transport decision, in one type. An adapter runs
+/// itself, posts its records to a server, and keeps its position in the
+/// same place over the same connection — so nothing has to start the
+/// adapter, and nothing has to read its output, for it to be
+/// incremental.
+///
+/// Wraps an [`ApiClient`] rather than building a second HTTP stack:
+/// the base URL, the client and the error shape are all already
+/// decided, and a second one would be a second thing to configure and a
+/// second thing to get wrong.
+pub struct HttpSyncStore {
+    client: ApiClient,
+}
+
+impl HttpSyncStore {
+    /// Binds a store to the same server the records go to.
+    pub fn new(client: ApiClient) -> Self {
+        Self { client }
+    }
+}
+
+/// Failures are classified the way the rest of an import classifies
+/// them, because the caller reading them is the same caller.
+///
+/// A request that did not complete is [`Transient`](SourceError::Transient):
+/// the server is not running yet, the socket went away, and the same
+/// call in a moment may well work. A request that completed and was
+/// refused is [`Config`](SourceError::Config): a body this build
+/// spelled wrong, a route this server does not have, and repeating it
+/// changes nothing until somebody does. An answer that arrived and
+/// could not be made sense of is [`Source`](SourceError::Source) —
+/// trouble at the far end rather than in the configuration.
+///
+/// Only the first is built here; the other two are raised where they
+/// are noticed, beside the calls that notice them.
+fn unreachable(what: &str, err: reqwest::Error) -> SourceError {
+    SourceError::Transient(format!("{what}: {err}"))
+}
+
+#[async_trait]
+impl SyncStore for HttpSyncStore {
+    async fn read(&self, key: &StateKey) -> Result<Option<SyncState>, SourceError> {
+        let command = ReadImportStateCommand {
+            persona_id: key.persona_id.clone(),
+            partition: key.partition.clone(),
+        };
+        let resp = self
+            .client
+            .inner
+            .post(self.client.url("/asterism/import/state/read"))
+            .json(&command)
+            .send()
+            .await
+            .map_err(|e| unreachable("reading the resumption point", e))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(SourceError::Config(format!(
+                "reading the resumption point: HTTP {status}: {body}"
+            )));
+        }
+        // `null` is the first-run answer and decodes to `None`, which is
+        // why this is one decode and not a status check.
+        let dto = resp
+            .json::<Option<ImportStateDto>>()
+            .await
+            .map_err(|e| SourceError::Source(format!("resumption point did not decode: {e}")))?;
+        let Some(dto) = dto else {
+            return Ok(None);
+        };
+        let offset = serde_json::from_str(&dto.offset_json).map_err(|e| {
+            SourceError::Source(format!(
+                "the stored resumption point is not JSON, which only this \
+                 importer could have written: {e}"
+            ))
+        })?;
+        Ok(Some(SyncState::new(dto.partition, offset)))
+    }
+
+    async fn write(&self, key: &StateKey, state: &SyncState) -> Result<(), SourceError> {
+        // Serialised here rather than passed as a value, so what is
+        // stored is the text this run produced — and what comes back is
+        // the same text, key order included. The workspace builds
+        // `serde_json` with `preserve_order`, which makes that a real
+        // property rather than an accident.
+        let offset_json = serde_json::to_string(&state.offset).map_err(|e| {
+            SourceError::Source(format!("this scanner's own offset did not serialise: {e}"))
+        })?;
+        let command = WriteImportStateCommand {
+            persona_id: key.persona_id.clone(),
+            partition: key.partition.clone(),
+            offset_json,
+        };
+        let resp = self
+            .client
+            .inner
+            .post(self.client.url("/asterism/import/state/write"))
+            .json(&command)
+            .send()
+            .await
+            .map_err(|e| unreachable("storing the resumption point", e))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(SourceError::Config(format!(
+                "storing the resumption point: HTTP {status}: {body}"
+            )));
+        }
+        Ok(())
     }
 }
