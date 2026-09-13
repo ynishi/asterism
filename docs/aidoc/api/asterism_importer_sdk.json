@@ -486,6 +486,26 @@
       "docs": "Filesystem scanner.\n\n- `root` — directory to walk.\n- `extensions` — file extensions (without the leading dot) to keep.\n  An empty vector means \"accept every file\".\n- `source_kind` — slug written to `RawItem.source_kind` (defaults to\n  `\"fs\"`)."
     },
     {
+      "path": "asterism_importer_sdk::scanner::http",
+      "kind": "module",
+      "docs": "`HttpScanner` — paginated HTTP source scanner.\n\nAsks a URL for a page of records, hands each one over, follows the\ncursor the response carried, and repeats. The caller supplies the\nrequest and says how to read the answer; this scanner knows nothing\nabout any particular service.\n\n**The inbound twin of [`SqliteScanner`](super::sqlite::SqliteScanner),\nand deliberately not an API client.** That one takes a `SELECT` and a\ncolumn map and has no opinion about anybody's schema; this takes a\nrequest and a few field names and has no opinion about anybody's API.\nA named service is configuration rather than code, which is the only\nversion of \"thirty or forty adapters\" that stays maintainable.\n\n# Why this one exists\n\nNot for the sources it reaches. The port's classification was written\nfor remote sources — [`Transient`](crate::SourceError::Transient),\n[`RateLimited`](crate::SourceError::RateLimited), the `retry_after` a\nrate limit carries — and until this scanner nothing in the workspace\nproduced one outside a test fixture. A directory cannot be rate\nlimited and a SQLite file is never briefly unreachable. An interface\nis only as good as the adapter shaped least like the ones it was\nwritten against, and this is that adapter.\n\nThree things it does differently, each of which the port had never\nbeen asked about:\n\n- **Its offset cannot be compared.** `FsScanner` compares paths and\n  `SqliteScanner` compares ids, so both can decide whether a record\n  falls before a resumption point. A cursor can only be handed back\n  to the source that issued it. The port's rule that an offset is\n  opaque and only its writer reads it is what makes that work.\n- **Its checkpoints are coarse.** The others emit one behind every\n  record. A page is the smallest thing this can take up after, so\n  fifty records share one checkpoint.\n- **Resuming costs nothing.** The others read from the beginning and\n  skip what is behind the point. This asks the source to start\n  there, so the records before it are never fetched, parsed or paid\n  for.\n\n# What it does not know how to do\n\nOne pagination dialect: a cursor at a path in the response body, sent\nback as a query parameter. `Link: rel=\"next\"` headers and page\nnumbers are the other two common ones and are not here — the shape to\nadd them is an enum in place of [`Cursor`], and adding it before a\nsecond dialect is actually needed would be guessing at what it needs\nto hold.\n\nIt also leaves\n[`payload_is_whole_artefact`](super::SourceScanner::payload_is_whole_artefact)\nat its `false` default, for the same reason `SqliteScanner` does: a\nrecord lifted out of a JSON array and addressed `<url>#<id>` has no\nbytes of its own at that address, so a digest declared from here\ncould never be checked."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::http::Cursor",
+      "kind": "struct",
+      "docs": "How the next page is asked for.\n\nOne dialect, named rather than assumed: the response carries a token\nat `path`, and the next request sends it as the query parameter\n`param`. A response with nothing at `path`, or `null` there, is the\nlast page."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::http::HttpScanner",
+      "kind": "struct",
+      "docs": "Paginated HTTP scanner."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::http::RecordMap",
+      "kind": "struct",
+      "docs": "Where the records are in the response, and what identifies one."
+    },
+    {
       "path": "asterism_importer_sdk::scanner::sqlite",
       "kind": "module",
       "docs": "`SqliteScanner` — SQLite source scanner.\n\nOpens an arbitrary SQLite database read-only, runs a user-supplied\n`SELECT` statement, and emits every row as a `RawItem`. Column\nmapping is spelled out by the caller so the same scanner can drive\nimporters over totally unrelated schemas (chat exports, message DBs,\nbespoke tools' scratch tables, and so on).\n\n**Resumable only on the caller's word.** The query is the caller's,\nso only the caller knows whether it has an order to take up inside;\n[`SqliteScanner::ordered_by_id`] is where they say so. Without it\nthis scanner emits no checkpoints and refuses to resume, rather than\nresuming inside an order nobody promised.\n\nAsync is faked at the edge: `rusqlite` is blocking, so the scan\nactually runs on a dedicated `spawn_blocking` task and pushes rows\ninto a bounded mpsc.\n\nThis scanner leaves\n[`payload_is_whole_artefact`](super::SourceScanner::payload_is_whole_artefact)\nat its `false` default, and the reason is worth stating rather than\ninheriting: a row's `body` column is a value out of a database, and\nthe `<db>#<id>` address it is given has no bytes of its own for\nanybody to read back. A digest declared from here could never be\nchecked, which is precisely what the server refuses."

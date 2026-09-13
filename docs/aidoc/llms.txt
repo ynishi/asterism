@@ -244,6 +244,7 @@
 - [asterism-importer-sdk::runner](asterism_importer_sdk/runner.md): Shared importer execution pipeline.
 - [asterism-importer-sdk::scanner](asterism_importer_sdk/scanner.md): `SourceScanner` trait and shared item type.
 - [asterism-importer-sdk::scanner::fs](asterism_importer_sdk/scanner__fs.md): `FsScanner` — filesystem source scanner.
+- [asterism-importer-sdk::scanner::http](asterism_importer_sdk/scanner__http.md): `HttpScanner` — paginated HTTP source scanner.
 - [asterism-importer-sdk::scanner::sqlite](asterism_importer_sdk/scanner__sqlite.md): `SqliteScanner` — SQLite source scanner.
 - [asterism-importer-sdk::store](asterism_importer_sdk/store.md): Where a resumption point is kept, as the importer sees it.
 

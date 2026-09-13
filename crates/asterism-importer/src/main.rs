@@ -19,11 +19,12 @@ use asterism_importer_image::ImageParser;
 use asterism_importer_persona_journal::PersonaJournalParser;
 use asterism_importer_sdk::card::CharaSourceParser;
 use asterism_importer_sdk::harvest::{HarvestSourceParser, schema_example_json};
+use asterism_importer_sdk::scanner::http::{Cursor, RecordMap};
 use asterism_importer_sdk::scanner::sqlite::ColumnMap;
 use asterism_importer_sdk::{
     ApiClient, ChatMessage, ChatRole, Doc, DocFormat, Footprint, FootprintSource, FsScanner,
-    HttpSyncStore, ImportOptions, Note, OccurredSource, ParseError, RawItem, Resume, ScanMode,
-    SourceParser, SqliteScanner, SyncState, resolve_occurrence, run_import_with,
+    HttpScanner, HttpSyncStore, ImportOptions, Note, OccurredSource, ParseError, RawItem, Resume,
+    ScanMode, SourceParser, SqliteScanner, SyncState, resolve_occurrence, run_import_with,
 };
 use asterism_importer_tape::TapeParser;
 use asterism_importer_text::TextParser;
@@ -91,6 +92,8 @@ enum Command {
     Harvest(HarvestArgs),
     /// Import rows from an arbitrary SQLite query.
     Sqlite(Box<SqliteArgs>),
+    /// Import records from a paginated JSON HTTP endpoint.
+    Http(Box<HttpArgs>),
     /// Import persona-journal EventLog entries.
     #[command(alias = "persona-journal")]
     Journal(JournalArgs),
@@ -244,6 +247,85 @@ struct HarvestArgs {
     /// `CommonArgs`.
     #[arg(long)]
     no_resume: bool,
+}
+
+/// The generic HTTP source: a URL, where the records are in the
+/// answer, and how the next page is asked for.
+///
+/// Every flag here is something only the person pointing it at a
+/// service can know. There is no per-service knowledge in the binary
+/// and no list of supported APIs — a service is a set of these values,
+/// which is what makes a thirtieth adapter cost a shell script rather
+/// than a release.
+#[derive(Debug, Args)]
+struct HttpArgs {
+    #[command(flatten)]
+    common: CommonArgs,
+    /// First request's URL, query string included.
+    ///
+    /// Whole, because parameters choose what comes back — a `since=` or
+    /// a `type=` makes it a different set of records, and the stored
+    /// position is filed under the URL for exactly that reason.
+    #[arg(long)]
+    url: String,
+    /// Header sent with every request, as `Name: value`. Repeatable.
+    ///
+    /// Where a credential goes. Nothing here knows an auth scheme, so
+    /// whatever the service wants is spelled out by whoever knows it.
+    #[arg(long = "header", value_parser = parse_header)]
+    headers: Vec<(String, String)>,
+    /// Dotted path to the array of records in the response
+    /// (`data.items`). Omit when the body is itself the array.
+    #[arg(long, default_value = "")]
+    items_path: String,
+    /// Field on each record holding its id.
+    ///
+    /// It becomes half of the locator, which is what the server reads
+    /// for idempotency — so it has to be stable for the life of the
+    /// record. A field the service calls `position` or `index` is not.
+    #[arg(long, default_value = "id")]
+    id_field: String,
+    /// Field holding the record's occurrence time: RFC 3339 text, or an
+    /// integer read as unix epoch milliseconds.
+    #[arg(long)]
+    ts_field: Option<String>,
+    /// Dotted path to the next-page token in the response
+    /// (`paging.next`).
+    #[arg(long)]
+    cursor_path: String,
+    /// Query parameter the next-page token is sent back as.
+    #[arg(long, default_value = "cursor")]
+    cursor_param: String,
+    /// Slug written to every footprint's source kind.
+    ///
+    /// Name the service here. It leads the stored position's partition
+    /// and every locator, so two HTTP imports in one persona stay apart
+    /// — and it has to stay the same across releases of this importer,
+    /// because the server's unique index reads it.
+    #[arg(long, default_value = "http")]
+    source_kind: String,
+}
+
+/// Splits `Name: value`, which is how a header is written everywhere
+/// else a person writes one.
+fn parse_header(raw: &str) -> Result<(String, String), String> {
+    match raw.split_once(':') {
+        Some((name, value)) if !name.trim().is_empty() => {
+            Ok((name.trim().to_string(), value.trim().to_string()))
+        }
+        _ => Err(format!("not a header: {raw:?}, expected `Name: value`")),
+    }
+}
+
+/// Splits a dotted path, treating the empty string as no path at all.
+///
+/// `""` is "the body is itself the thing", which is a real shape and
+/// not an omission — so it cannot be spelled as one empty segment.
+fn dotted(path: &str) -> Vec<String> {
+    if path.is_empty() {
+        return Vec::new();
+    }
+    path.split('.').map(str::to_string).collect()
 }
 
 #[derive(Debug, Args)]
@@ -525,6 +607,25 @@ async fn main() -> anyhow::Result<()> {
             };
             run("journal", &scanner, &parser, false, args.common.options()).await
         }
+        Command::Http(args) => {
+            let mut records = RecordMap::new(dotted(&args.items_path), &args.id_field);
+            if let Some(field) = &args.ts_field {
+                records = records.with_timestamp(field);
+            }
+            let mut scanner = HttpScanner::new(
+                &args.url,
+                records,
+                Cursor::new(dotted(&args.cursor_path), &args.cursor_param),
+            )
+            .with_source_kind(&args.source_kind);
+            for (name, value) in &args.headers {
+                scanner = scanner.with_header(name, value);
+            }
+            let parser = HttpRecordParser {
+                source_kind: args.source_kind.clone(),
+            };
+            run("http", &scanner, &parser, false, args.common.options()).await
+        }
         Command::Tape(args) => {
             let scanner = FsScanner::new(args.dir)
                 .with_extensions(["txt"])
@@ -712,6 +813,50 @@ async fn run_sqlite(args: SqliteArgs) -> anyhow::Result<()> {
     }
     let parser = SqliteRowParser { args: &args };
     run("sqlite", &scanner, &parser, false, args.common.options()).await
+}
+
+/// One note per record, carrying the record's own JSON as its body.
+///
+/// The least this importer can do and still be an importer: a generic
+/// HTTP source has no modality to infer and no field this binary could
+/// read as a title, so the record goes in whole and the reading of it
+/// belongs to whatever looks at it later. A service worth a typed
+/// parser gets one; this is what every other service gets for free.
+struct HttpRecordParser {
+    source_kind: String,
+}
+
+impl SourceParser for HttpRecordParser {
+    fn parse(&self, raw: RawItem) -> Result<Vec<Footprint>, ParseError> {
+        let body = String::from_utf8(raw.payload).map_err(|e| ParseError::Malformed {
+            locator: raw.locator.clone(),
+            message: format!("record is not UTF-8: {e}"),
+        })?;
+        // Rung 1, not rung 2: the stamp came out of a field of the
+        // record itself, the way `SqliteScanner`'s comes out of a
+        // column. `RawItem::occurred_at` being the scanner's doing does
+        // not make it the *container's* time — a JSON record's
+        // `created_at` is the record stating when it happened, and
+        // recording it as an mtime would put a rung it did not come
+        // from on the row.
+        let (occurred_at, occurred_source) =
+            resolve_occurrence(raw.occurred_at, OccurredSource::Record, None);
+        Ok(vec![Footprint::Note(Note {
+            source: FootprintSource {
+                kind: self.source_kind.clone(),
+                locator: raw.locator,
+                platform: None,
+                external_id: None,
+            },
+            occurred_at,
+            occurred_source,
+            body,
+            source_app: None,
+            labels: vec![],
+            bundle_id: None,
+            extra: raw.extra,
+        })])
+    }
 }
 
 fn home_dir() -> PathBuf {

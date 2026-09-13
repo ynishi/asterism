@@ -8,6 +8,7 @@
 //! instead of writing their own.
 
 pub mod fs;
+pub mod http;
 pub mod sqlite;
 
 use chrono::{DateTime, Utc};

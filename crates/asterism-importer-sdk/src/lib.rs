@@ -153,6 +153,7 @@ pub use port::{Disposition, SourceError, SyncState};
 pub use progress::Progress;
 pub use runner::{ImportOptions, ImportSummary, Resume, run_import, run_import_with};
 pub use scanner::{
-    RawItem, ScanEvent, ScanMode, SourceScanner, fs::FsScanner, sqlite::SqliteScanner,
+    RawItem, ScanEvent, ScanMode, SourceScanner, fs::FsScanner, http::HttpScanner,
+    sqlite::SqliteScanner,
 };
 pub use store::{StateKey, SyncStore};
