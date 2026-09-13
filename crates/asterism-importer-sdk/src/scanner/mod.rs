@@ -3,11 +3,11 @@
 //! Enumerates or watches an external source and produces
 //! [`ScanEvent`]s: the [`RawItem`]s themselves, and the points a later
 //! scan could take up from.
-//! Bundled implementations live in the sibling modules
-//! ([`fs`] and [`sqlite`]); importer authors typically reuse one
-//! instead of writing their own.
+//! Bundled implementations live in this module's siblings; importer
+//! authors typically reuse one instead of writing their own.
 
 pub mod fs;
+pub mod http;
 pub mod sqlite;
 
 use chrono::{DateTime, Utc};
@@ -224,12 +224,16 @@ pub trait SourceScanner: Send + Sync {
 mod tests {
     use super::*;
 
-    /// The two bundled scanners answer differently, and which way round
+    /// A scanner that hands over whole files and one that hands over
+    /// values out of a database answer differently, and which way round
     /// they answer is the whole content of the rule.
     ///
     /// Asserted as a pair rather than one at a time: a swap compiles,
     /// reads plausibly, and turns one scanner silent while making the
-    /// other assert digests over database columns.
+    /// other assert digests over database columns. `HttpScanner` is a
+    /// third source of the second kind and asserts its own answer where
+    /// it lives, beside the reason a record out of a JSON array has no
+    /// bytes at the address it is given.
     #[test]
     fn the_bundled_scanners_disagree_about_what_they_hand_over() {
         assert!(

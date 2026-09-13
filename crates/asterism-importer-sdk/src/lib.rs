@@ -20,8 +20,9 @@
 //!
 //! - [`SourceScanner`] enumerates or watches an external source and
 //!   emits [`ScanEvent`]s — the [`RawItem`]s themselves, and the points
-//!   a later scan could take up from. Implementations bundled here:
-//!   [`FsScanner`], [`SqliteScanner`].
+//!   a later scan could take up from. Implementations are bundled in
+//!   [`scanner`]'s sibling modules; an importer reaches for one of
+//!   those before writing its own.
 //! - [`SourceParser`] turns a `RawItem` into zero or more
 //!   [`Footprint`]s; it is the only source-specific piece an importer
 //!   author has to write.
@@ -153,6 +154,7 @@ pub use port::{Disposition, SourceError, SyncState};
 pub use progress::Progress;
 pub use runner::{ImportOptions, ImportSummary, Resume, run_import, run_import_with};
 pub use scanner::{
-    RawItem, ScanEvent, ScanMode, SourceScanner, fs::FsScanner, sqlite::SqliteScanner,
+    RawItem, ScanEvent, ScanMode, SourceScanner, fs::FsScanner, http::HttpScanner,
+    sqlite::SqliteScanner,
 };
 pub use store::{StateKey, SyncStore};

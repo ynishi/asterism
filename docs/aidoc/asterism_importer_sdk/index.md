@@ -22,8 +22,9 @@ Scanner  ─→ RawItem  ─→ Parser  ─→ Footprint  ─→ AssetSpec  ─�
 
 - [`SourceScanner`] enumerates or watches an external source and
   emits [`ScanEvent`]s — the [`RawItem`]s themselves, and the points
-  a later scan could take up from. Implementations bundled here:
-  [`FsScanner`], [`SqliteScanner`].
+  a later scan could take up from. Implementations are bundled in
+  [`scanner`]'s sibling modules; an importer reaches for one of
+  those before writing its own.
 - [`SourceParser`] turns a `RawItem` into zero or more
   [`Footprint`]s; it is the only source-specific piece an importer
   author has to write.
@@ -136,6 +137,7 @@ per-target split rules, locator patterns, and unverified fields.
 - [`runner`](runner.md): Shared importer execution pipeline.
 - [`scanner`](scanner.md): `SourceScanner` trait and shared item type.
 - [`scanner::fs`](scanner__fs.md): `FsScanner` — filesystem source scanner.
+- [`scanner::http`](scanner__http.md): `HttpScanner` — paginated HTTP source scanner.
 - [`scanner::sqlite`](scanner__sqlite.md): `SqliteScanner` — SQLite source scanner.
 - [`store`](store.md): Where a resumption point is kept, as the importer sees it.
 
