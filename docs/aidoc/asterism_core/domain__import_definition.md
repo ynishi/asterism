@@ -30,6 +30,13 @@ something went wrong, is the failure mode a record of runs exists to
 prevent — and "the binary is not there" is the most likely first
 thing to go wrong on a machine nobody has configured yet.
 
+**And a run is only ever a record.** It is not also the lock that
+stops a second run starting: that question is "is a child of mine
+still going", which is about one process and dies with it, and
+answering it from a table made a crash wedge a definition for good.
+[`RunOutcome::Abandoned`] is what a row inherits when the process
+that wrote it did not come back.
+
 ## Types
 
 - `ImportDefinition` — An import that can be run on demand.

@@ -1,9 +1,15 @@
 //! SQLite adapter for the `ImportDefinitionRepository` port.
 //!
-//! Two tables behind one port, for the reason the port states: the
-//! question that spans them — is a run of this definition still going —
-//! is the one that stops a second importer starting over a source the
-//! first is about to move.
+//! Two tables behind one port, for the reason the port states: a
+//! definition and its runs are read and written together, so splitting
+//! them would make one act reach through two ports.
+//!
+//! It does not answer whether a run is going. That question belongs to
+//! the process holding the children — see the service — and the only
+//! thing left of it here is [`abandon_running`], a sweep over rows a
+//! previous process left open.
+//!
+//! [`abandon_running`]: asterism_core::domain::repository::ImportDefinitionRepository::abandon_running
 //!
 //! `args_json` holds the argument vector as a JSON array. A column per
 //! argument is not a shape a command line has, and a single
@@ -43,10 +49,12 @@ struct DefinitionRow {
     subcommand: String,
     args_json: String,
     secret_ref: Option<String>,
+    secret_header: Option<String>,
 }
 
 impl DefinitionRow {
-    const COLUMNS: &'static str = "id, persona_id, name, subcommand, args_json, secret_ref";
+    const COLUMNS: &'static str =
+        "id, persona_id, name, subcommand, args_json, secret_ref, secret_header";
 
     fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
         Ok(Self {
@@ -56,6 +64,7 @@ impl DefinitionRow {
             subcommand: row.get(3)?,
             args_json: row.get(4)?,
             secret_ref: row.get(5)?,
+            secret_header: row.get(6)?,
         })
     }
 
@@ -79,6 +88,7 @@ impl DefinitionRow {
             subcommand: self.subcommand,
             args,
             secret_ref: self.secret_ref,
+            secret_header: self.secret_header,
         })
     }
 }
@@ -151,20 +161,32 @@ impl ImportDefinitionRepository for SqliteImportDefinitionRepository {
             DomainError::Infra(anyhow::anyhow!("arguments did not serialise: {err}"))
         })?;
         let secret_ref = definition.secret_ref.clone();
+        let secret_header = definition.secret_header.clone();
         let now = datetime_to_ms(&chrono::Utc::now());
         self.isle
             .call(move |conn| {
                 conn.execute(
                     "INSERT INTO import_definition
-                         (id, persona_id, name, subcommand, args_json, secret_ref, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                         (id, persona_id, name, subcommand, args_json, secret_ref,
+                          secret_header, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                      ON CONFLICT(id) DO UPDATE SET
-                         persona_id = excluded.persona_id,
-                         name       = excluded.name,
-                         subcommand = excluded.subcommand,
-                         args_json  = excluded.args_json,
-                         secret_ref = excluded.secret_ref",
-                    params![id, persona_id, name, subcommand, args_json, secret_ref, now],
+                         persona_id    = excluded.persona_id,
+                         name          = excluded.name,
+                         subcommand    = excluded.subcommand,
+                         args_json     = excluded.args_json,
+                         secret_ref    = excluded.secret_ref,
+                         secret_header = excluded.secret_header",
+                    params![
+                        id,
+                        persona_id,
+                        name,
+                        subcommand,
+                        args_json,
+                        secret_ref,
+                        secret_header,
+                        now
+                    ],
                 )?;
                 Ok(())
             })
@@ -214,30 +236,26 @@ impl ImportDefinitionRepository for SqliteImportDefinitionRepository {
         rows.into_iter().map(DefinitionRow::into_domain).collect()
     }
 
-    async fn running_for(&self, definition_id: &str) -> Result<Option<ImportRun>, DomainError> {
-        let definition_id = definition_id.to_string();
-        let row = self
+    async fn abandon_running(&self) -> Result<u64, DomainError> {
+        let now = datetime_to_ms(&chrono::Utc::now());
+        let swept = self
             .isle
             .call(move |conn| {
-                conn.query_row(
-                    &format!(
-                        "SELECT {} FROM import_run \
-                         WHERE definition_id = ?1 AND outcome = 'running' \
-                         ORDER BY started_at DESC LIMIT 1",
-                        RunRow::COLUMNS
-                    ),
-                    params![definition_id],
-                    RunRow::from_row,
-                )
-                .map(Some)
-                .or_else(|e| match e {
-                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                    other => Err(other),
-                })
+                // `ended_at` is set to now rather than left null: the
+                // run did end, at some unknown moment before this
+                // process started, and a row with an outcome and no end
+                // reads as still going to anything sorting by it.
+                let swept = conn.execute(
+                    "UPDATE import_run \
+                        SET outcome = 'abandoned', ended_at = COALESCE(ended_at, ?1) \
+                      WHERE outcome = 'running'",
+                    params![now],
+                )?;
+                Ok(swept)
             })
             .await
             .map_err(infra_err)?;
-        row.map(RunRow::into_domain).transpose()
+        Ok(swept as u64)
     }
 
     async fn record_run(&self, run: &ImportRun) -> Result<(), DomainError> {

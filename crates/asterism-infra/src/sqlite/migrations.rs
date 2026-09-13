@@ -8098,23 +8098,26 @@ CREATE TABLE import_state (
 /// What the rows mean is `asterism_core::domain::import_definition`.
 /// Three things about the shape are this file's to say.
 ///
-/// # `secret_ref` is a column for a *name*
+/// # `secret_ref` is a column for a *name*, `secret_header` for a
+/// destination
 ///
-/// The credential itself is never here, and there is no column it could
-/// be put in — which is the point. An operator who writes a token into
-/// `args_json` instead has put it in the database, and the schema
-/// cannot stop that; what it can do is give the other route a place to
-/// live, and it does.
+/// Neither holds a credential, and the pair is why there is a column
+/// for the destination at all: a name with nowhere to go is a
+/// credential resolved and spent on a request that went out without it.
+/// The schema cannot stop an operator pasting a token into either
+/// column or into `args_json` — nothing here validates text — so what
+/// it does instead is make the route that does not require that
+/// obvious and complete.
 ///
-/// # `import_run` outlives the process that wrote it
+/// # `outcome` admits a state no process is backing
 ///
-/// A run is inserted as `running` before the importer starts, so the
-/// check that stops a second one reads a table rather than some
-/// process's memory. A server restarted mid-run therefore comes back
-/// with a row still saying `running` and a definition nothing will
-/// start again — the cost of the direction that does not lose data,
-/// stated in the service and stated again here because the row is where
-/// somebody will find it.
+/// `running` is one of the four the `CHECK` allows, and a row can sit
+/// in it with nothing alive behind it: the process that wrote it is
+/// gone. That is why `abandoned` is the fourth — a startup sweep writes
+/// it over whatever a previous process left open. Which process is
+/// allowed to decide that, and why the row is not the lock that stops a
+/// second run, is `asterism_core::application::import_run_service`'s to
+/// say.
 ///
 /// # No foreign key from `import_run` to `import_definition`
 ///
@@ -8128,9 +8131,10 @@ CREATE TABLE import_definition (
     persona_id  TEXT NOT NULL,
     name        TEXT NOT NULL,
     subcommand  TEXT NOT NULL,
-    args_json   TEXT NOT NULL,
-    secret_ref  TEXT,
-    created_at  INTEGER NOT NULL
+    args_json     TEXT NOT NULL,
+    secret_ref    TEXT,
+    secret_header TEXT,
+    created_at    INTEGER NOT NULL
 ) STRICT;
 
 CREATE UNIQUE INDEX idx_import_definition_name ON import_definition(persona_id, name);
@@ -8141,7 +8145,7 @@ CREATE TABLE import_run (
     started_at        INTEGER NOT NULL,
     ended_at          INTEGER,
     outcome           TEXT NOT NULL
-        CHECK (outcome IN ('running', 'ok', 'failed', 'unstarted')),
+        CHECK (outcome IN ('running', 'ok', 'failed', 'unstarted', 'abandoned')),
     imported          INTEGER NOT NULL DEFAULT 0,
     failed            INTEGER NOT NULL DEFAULT 0,
     ended_by_class    TEXT,
@@ -12337,8 +12341,9 @@ mod tests {
         let define = |id: &str, persona: &str, name: &str| {
             conn.execute(
                 "INSERT INTO import_definition \
-                     (id, persona_id, name, subcommand, args_json, secret_ref, created_at) \
-                 VALUES (?1, ?2, ?3, 'text', '[]', NULL, 0)",
+                     (id, persona_id, name, subcommand, args_json, secret_ref, \
+                      secret_header, created_at) \
+                 VALUES (?1, ?2, ?3, 'text', '[]', NULL, NULL, 0)",
                 params![id, persona, name],
             )
         };
@@ -12375,6 +12380,30 @@ mod tests {
         assert_eq!(
             surviving, 1,
             "what an import did outlives the import, on purpose"
+        );
+
+        // `abandoned` is a state the CHECK admits, because a row can
+        // sit in `running` with nothing alive behind it and a startup
+        // sweep has to be able to close it.
+        conn.execute(
+            "INSERT INTO import_run (id, definition_id, started_at, outcome) \
+             VALUES ('r2', 'd2', 0, 'running')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE import_run SET outcome = 'abandoned' WHERE outcome = 'running'",
+            [],
+        )
+        .unwrap();
+        let refused = conn.execute(
+            "INSERT INTO import_run (id, definition_id, started_at, outcome) \
+             VALUES ('r3', 'd2', 0, 'no-such-state')",
+            [],
+        );
+        assert!(
+            refused.is_err(),
+            "and the CHECK admits those five and nothing else"
         );
     }
 

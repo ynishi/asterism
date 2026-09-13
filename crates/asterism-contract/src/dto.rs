@@ -2610,6 +2610,8 @@ pub struct ImportDefinitionDto {
     pub args: Vec<String>,
     /// Name of the environment variable holding the credential, if any.
     pub secret_ref: Option<String>,
+    /// Header the credential is sent as, when there is one.
+    pub secret_header: Option<String>,
 }
 
 /// What one run of an import did.
@@ -2627,21 +2629,21 @@ pub struct ImportRunDto {
     pub started_at: String,
     /// When it ended, RFC 3339. Absent while it is still going.
     pub ended_at: Option<String>,
-    /// How it ended: `running`, `ok`, `failed`, or `unstarted` for a run
-    /// whose importer could not be launched at all.
+    /// How it ended: `running` while it is going, then `ok`, `failed`,
+    /// `unstarted` for one whose importer could not be launched at all,
+    /// or `abandoned` for one the process that started it did not
+    /// outlive.
     pub outcome: String,
     /// Records the importer landed.
     pub imported: u64,
     /// Records that did not land.
     pub failed: u64,
-    /// What ended the run early, as the importer classified it —
-    /// `config`, `transient`, `rate_limited`, `source`, or absent for a
-    /// run that ended on the source's own terms.
+    /// What ended the run early, as the importer classified it. The
+    /// tokens are [`ReportedFailure::class`](crate::import_report::ReportedFailure)'s.
     ///
-    /// The class and not only the message, because the class is what a
-    /// caller acts on and three slices went into drawing it. A
-    /// supervisor keeping an exit code alone would throw it away at the
-    /// moment it becomes useful.
+    /// Absent when nothing ended it early — a run that read its source
+    /// to the end, and equally a run that never started, where nothing
+    /// classified anything because nothing ran.
     pub ended_by_class: Option<String>,
     /// What the failure said, for a person.
     pub ended_by_message: Option<String>,

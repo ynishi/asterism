@@ -1443,9 +1443,11 @@ rust-test-changed:
     # obvious pattern misses. Both mistakes point the expensive way — a
     # suite that never ran, reported green.
     #
-    #   asterism-importer  One `main.rs` of clap subcommands over the
-    #                      importer adapters, each of which carries its
-    #                      own tests. Zero test attributes.
+    # The list is empty. `asterism-importer` was on it — "one `main.rs`
+    # of clap subcommands, zero test attributes" — and came off in #299,
+    # which gave it `tests/import_run_e2e.rs`. That is the second time
+    # this has happened, and the sentence below is the reason it is
+    # caught at all.
     #
     # A member here that gains a test must come off this list. Nothing
     # local catches a stale entry — `main`'s workspace run is what does,
@@ -1463,7 +1465,7 @@ rust-test-changed:
     # links the Tauri stack regardless; that cost is the price of the
     # gate answering, and it is paid only on a branch that touched this
     # crate.
-    testless="asterism-importer"
+    testless=""
     run=""
     skipped=""
     for pkg in $packages; do

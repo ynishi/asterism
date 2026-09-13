@@ -1,21 +1,28 @@
 //! Starting `asterism-import`, and the two things that is really about.
 //!
-//! The [`ImportLauncher`] port's implementation: the one place in this
-//! workspace that spawns an importer. Everything above it is arranged so
-//! that this file is the only one holding a credential and the only one
-//! that knows a process exists.
+//! The [`ImportLauncher`] port's implementation, and the only place an
+//! importer is spawned. Everything above it is arranged so that this
+//! file is the only one on the import path that holds a credential or
+//! knows a process exists — the job handlers spawn `ffmpeg` on their
+//! own account, which is a different path with the same rule.
 //!
 //! # Where the binary is
 //!
-//! Three rungs, and the same three the ffmpeg sidecar uses, in the same
-//! order: an explicit `$ASTERISM_IMPORT`, then a sibling of the running
-//! executable, then `PATH`. The middle rung is the one worth naming —
-//! the comment beside `thumb_ffmpeg`'s ladder records what skipping it
-//! cost there, "it reported `ffmpeg is required` on exactly the machines
-//! the sidecar exists for", and a bundled importer beside a bundled
-//! server is the identical shape. A failure names every rung it tried,
-//! because "not found" without the list is a message an operator cannot
-//! act on.
+//! Three rungs: an explicit `$ASTERISM_IMPORT`, then a sibling of the
+//! running executable, then `PATH`. The first three of the ffmpeg
+//! sidecar's four — it also probes fixed install prefixes, which is
+//! right for a thing people install with a package manager and wrong
+//! for one shipped beside the server. They differ at the first rung
+//! too: ffmpeg's override is terminal, and this one falls through, so
+//! an override pointing at nothing is still a run that finds the
+//! binary.
+//!
+//! The middle rung is the one worth naming — the comment beside
+//! `thumb_ffmpeg`'s ladder records what skipping it cost there, "it
+//! reported `ffmpeg is required` on exactly the machines the sidecar
+//! exists for", and a bundled importer beside a bundled server is the
+//! identical shape. A failure names every rung it tried, because "not
+//! found" without the list is a message an operator cannot act on.
 //!
 //! # Where the credential is, and where it is not
 //!
@@ -37,10 +44,28 @@
 //! reason the outbound side gives: an adapter that went looking for
 //! dotenv files itself would make "which file did this credential come
 //! from" invisible to the definition that named it.
+//!
+//! # Where the records go, and why nothing here says
+//!
+//! Nothing passes `--server`. The child resolves it the way the
+//! operator's shell does — the active profile's port — and it inherits
+//! `$ASTERISM_PROFILE` from this process, so it resolves the same
+//! profile this one is serving. A server on a port of its own puts
+//! `--server` in the definition's arguments, which is what a person
+//! running the importer by hand does already.
+//!
+//! The first shape told the child instead, which meant this file had to
+//! be given an address, which meant something had to hand it one after
+//! binding a listener — an `Arc<OnceLock<String>>` filled by whoever
+//! served. Nothing filled it. Every shipped binary called `axum::serve`
+//! directly, the cell stayed empty, and every run in the product would
+//! have answered "this server has not finished starting" forever. The
+//! end-to-end test passed because the *test* filled it. A wiring step
+//! that can be forgotten is one that will be, and the way to not forget
+//! it turned out to be not having one.
 
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Arc, OnceLock};
 
 use asterism_contract::import_report::ImportReport;
 use asterism_core::application::{ImportLauncher, LaunchOutcome, LaunchSpec};
@@ -70,28 +95,13 @@ pub const CHILD_SECRET_VAR: &str = "ASTERISM_IMPORT_SECRET";
 const STDERR_TAIL: usize = 4 * 1024;
 
 /// Spawns `asterism-import` and waits for it.
-pub struct SubprocessImportLauncher {
-    /// Where the importer should post its records, filled in once the
-    /// server knows.
-    server: Arc<OnceLock<String>>,
-}
+#[derive(Default)]
+pub struct SubprocessImportLauncher;
 
 impl SubprocessImportLauncher {
-    /// Binds a launcher to the cell the serving address will appear in.
-    ///
-    /// A cell rather than a string because the address is not known
-    /// when the core is assembled: the port is chosen when something
-    /// binds a listener, which happens afterwards and, for a test,
-    /// is whatever the OS handed out. The same shape `core_init` uses
-    /// for the bound tag head, and for the same reason — a value one
-    /// part of the startup learns and another needs.
-    ///
-    /// A launch before it is set fails as the machine's rather than the
-    /// source's, and says which, because an importer pointed at a
-    /// server that does not exist would otherwise report a connection
-    /// refused and send somebody looking at the wrong thing.
-    pub fn new(server: Arc<OnceLock<String>>) -> Self {
-        Self { server }
+    /// A launcher. There is nothing to configure.
+    pub fn new() -> Self {
+        Self
     }
 }
 
@@ -136,16 +146,6 @@ fn find_binary() -> Result<PathBuf, Vec<String>> {
 #[async_trait]
 impl ImportLauncher for SubprocessImportLauncher {
     async fn launch(&self, spec: LaunchSpec) -> Result<LaunchOutcome, DomainError> {
-        let Some(server) = self.server.get() else {
-            return Ok(LaunchOutcome {
-                report: None,
-                detail: "this server has not finished starting: nothing has told the \
-                         launcher which address to point an importer at"
-                    .into(),
-                started: false,
-            });
-        };
-
         let binary = match find_binary() {
             Ok(path) => path,
             Err(tried) => {
@@ -157,10 +157,12 @@ impl ImportLauncher for SubprocessImportLauncher {
             }
         };
 
-        // The report is a file rather than the child's stdout so that
-        // the two are not competing for one stream: an importer is free
-        // to print whatever it likes for a person, and what this reads
-        // is a contract between two binaries.
+        // A file rather than a stream, because it has to survive the
+        // child: a process killed after it wrote the report still has
+        // one to read, where anything buffered on a pipe is gone with
+        // it. It also keeps the two audiences apart — the importer
+        // prints for a person on stderr, and writes this for whatever
+        // started it.
         let report_dir = tempfile::tempdir().map_err(|err| {
             DomainError::Infra(anyhow::anyhow!(
                 "no directory to receive the run's report: {err}"
@@ -173,11 +175,12 @@ impl ImportLauncher for SubprocessImportLauncher {
             .arg(&spec.subcommand)
             .arg("--persona-id")
             .arg(&spec.persona_id)
-            .arg("--server")
-            .arg(server)
             .arg("--report")
             .arg(&report_path)
             .args(&spec.args)
+            // `--header-secret` is appended below, after the
+            // definition's arguments, so that a definition cannot
+            // supply one of its own and have it win.
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
@@ -198,6 +201,13 @@ impl ImportLauncher for SubprocessImportLauncher {
                 });
             };
             command.env(CHILD_SECRET_VAR, value);
+            // The definition says *where* the credential goes; which
+            // argument carries that to this particular binary is this
+            // file's business, which is why the flag is written here
+            // and not stored.
+            if let Some(header) = &spec.secret_header {
+                command.arg("--header-secret").arg(header);
+            }
         }
 
         let mut child = match command.spawn() {

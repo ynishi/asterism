@@ -548,13 +548,6 @@ pub struct CoreCtx {
     /// Imports somebody stored so that nothing has to type them again,
     /// and the record of running one.
     pub import_run_service: Arc<ImportRunService>,
-    /// Where a spawned importer should post what it reads.
-    ///
-    /// Empty until whatever binds the listener fills it in, because
-    /// that is the moment the address exists — the port may be chosen
-    /// by a flag, or by the OS for a test. Until then a run is refused
-    /// as the machine's problem rather than started against a guess.
-    pub import_api_base: Arc<OnceLock<String>>,
     /// Session 1st-class entity lifecycle — SessionsView
     /// list source in P1b, HTTP CRUD backend in P2, importer
     /// find-or-create in P3.
@@ -735,13 +728,31 @@ pub async fn init_core_with(
         isle.clone(),
     ));
     // The launcher points the importer back at this process's own HTTP
-    // API, which is the whole of transport (iii): the child runs itself
-    // and pushes, and this end only decides when it starts.
-    let import_api_base: Arc<OnceLock<String>> = Arc::new(OnceLock::new());
-    let import_launcher = Arc::new(
-        asterism_infra::import_launcher::SubprocessImportLauncher::new(import_api_base.clone()),
-    );
+    // and pushes, and this end only decides when it starts. It is not
+    // told where to push: the child resolves the same profile this
+    // process is serving, which is why nothing here has an address to
+    // forget to hand over.
+    let import_launcher =
+        Arc::new(asterism_infra::import_launcher::SubprocessImportLauncher::new());
     let import_run_service = Arc::new(ImportRunService::new(import_definitions, import_launcher));
+    // A run is a child of the process that spawned it, so a row still
+    // saying `running` when this process starts belongs to one that is
+    // gone. Swept here rather than read as a lock later: the table is
+    // history, and history with an open end reads as a run in progress
+    // that is not.
+    match import_run_service.abandon_orphans().await {
+        Ok(0) => {}
+        Ok(swept) => tracing::info!(
+            event = "diag.import_run.abandoned",
+            runs = swept,
+            "closed import runs a previous process did not outlive"
+        ),
+        Err(err) => tracing::warn!(
+            event = "diag.import_run.abandon_failed",
+            error = %err,
+            "could not close import runs a previous process left open"
+        ),
+    }
     let asset_bodies = sqlite::repo::SqliteAssetBodyRepository::new(isle.clone());
     let snapshots = Arc::new(sqlite::repo::SqliteSnapshotRepository::new(isle.clone()));
     let telemetry = asterism_infra::telemetry::Telemetry::new(isle.clone());
@@ -1514,7 +1525,6 @@ pub async fn init_core_with(
         app_setting_service,
         import_state_service,
         import_run_service,
-        import_api_base,
         session_service,
         asset_comment_service: Arc::new(AssetCommentService::new(
             asset_comments,

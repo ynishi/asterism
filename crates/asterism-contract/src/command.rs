@@ -2325,7 +2325,29 @@ pub struct DefineImportCommand {
     /// this would render into an argument vector every other process on
     /// the machine can read. The importer is handed the value through
     /// its environment instead.
+    ///
+    /// Meaningless without [`secret_header`](Self::secret_header), and
+    /// refused without it: a credential named with nowhere to go is
+    /// resolved, handed to a child that reads it nowhere, and spent on
+    /// a request that goes out unauthenticated. The two are a pair.
     pub secret_ref: Option<String>,
+    /// Header the credential is sent as — `Authorization`, `X-Api-Key`.
+    ///
+    /// Here rather than written into [`args`](Self::args) as
+    /// `--header-secret Authorization`, which is what the importer
+    /// actually receives. Two reasons, and the second is the one that
+    /// made this a field.
+    ///
+    /// A pair that can only be half-filled is a pair somebody
+    /// half-fills. When the destination lived in the arguments, this
+    /// end could only check for it by looking for a flag string — which
+    /// is guessing at another binary's command line, and would go quiet
+    /// the day that flag was renamed.
+    ///
+    /// And the flag is the launcher's business. What a definition
+    /// states is *where the credential goes*; which argument carries
+    /// that to `asterism-import` is a detail of how it is started.
+    pub secret_header: Option<String>,
 }
 
 /// Runs a stored import now (`POST /asterism/import/definitions/run`).

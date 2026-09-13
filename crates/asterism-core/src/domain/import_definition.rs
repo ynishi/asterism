@@ -27,6 +27,13 @@
 //! something went wrong, is the failure mode a record of runs exists to
 //! prevent — and "the binary is not there" is the most likely first
 //! thing to go wrong on a machine nobody has configured yet.
+//!
+//! **And a run is only ever a record.** It is not also the lock that
+//! stops a second run starting: that question is "is a child of mine
+//! still going", which is about one process and dies with it, and
+//! answering it from a table made a crash wedge a definition for good.
+//! [`RunOutcome::Abandoned`] is what a row inherits when the process
+//! that wrote it did not come back.
 
 use chrono::{DateTime, Utc};
 
@@ -48,7 +55,18 @@ pub struct ImportDefinition {
     pub args: Vec<String>,
     /// Name of the environment variable holding this import's
     /// credential, never the credential.
+    ///
+    /// Always accompanied by [`secret_header`](Self::secret_header):
+    /// a credential named with nowhere to go is one that is resolved,
+    /// handed over, and spent on a request that went out without it.
     pub secret_ref: Option<String>,
+    /// Header the credential is sent as.
+    ///
+    /// The destination belongs here and not in [`args`](Self::args),
+    /// where the only way to check it was present was to look for
+    /// another binary's flag by name. A pair the type keeps together
+    /// cannot be half-filled.
+    pub secret_header: Option<String>,
 }
 
 /// How a run ended.
@@ -56,24 +74,41 @@ pub struct ImportDefinition {
 pub enum RunOutcome {
     /// Started and has not been recorded as finished.
     ///
-    /// The state a row is written in *before* the importer is
-    /// launched, which is what makes the overlap check possible at all:
-    /// a second run asks whether one is `Running` and finds the answer
-    /// already on the table rather than in the memory of whichever
-    /// process happens to be holding it.
+    /// Written before the importer is launched so that a caller asking
+    /// what is happening is told, and so that a run which never reaches
+    /// an ending is still visible as having been asked for. It is a
+    /// statement about the past, not a claim on the future — see
+    /// [`Abandoned`](Self::Abandoned) for what happens to one whose
+    /// process is gone.
     Running,
     /// The importer ran and reported no failure that cost the run.
     Ok,
     /// The importer ran and something cost it — the class is on the
     /// run, because that is what a caller acts on.
     Failed,
-    /// The importer never ran: no binary, or it could not be spawned.
+    /// The importer never ran: no binary, it could not be spawned, or
+    /// the credential it named was not set.
     ///
     /// Kept apart from [`Failed`](Self::Failed) because they ask
     /// different things of whoever reads the record. One means the
     /// source or the configuration; this one means the machine, and no
     /// amount of looking at the source will explain it.
     Unstarted,
+    /// The process that started it did not outlive it.
+    ///
+    /// Written at startup over every row still saying
+    /// [`Running`](Self::Running), because a run is a child of the
+    /// process that spawned it: if that process is gone, so is the
+    /// child, and nothing is ever going to finish the row.
+    ///
+    /// This is the whole of the sweeping that the first shape of this
+    /// needed a verb for. That shape read `running` rows to decide
+    /// whether to start another — making the row a lock as well as a
+    /// record — so a crash wedged a definition permanently and the only
+    /// recovery was editing SQLite by hand. Whether a run is going is
+    /// now the supervisor's own question about its own children, and
+    /// the row went back to being history.
+    Abandoned,
 }
 
 impl RunOutcome {
@@ -84,6 +119,7 @@ impl RunOutcome {
             Self::Ok => "ok",
             Self::Failed => "failed",
             Self::Unstarted => "unstarted",
+            Self::Abandoned => "abandoned",
         }
     }
 
@@ -97,6 +133,7 @@ impl RunOutcome {
             "ok" => Some(Self::Ok),
             "failed" => Some(Self::Failed),
             "unstarted" => Some(Self::Unstarted),
+            "abandoned" => Some(Self::Abandoned),
             _ => None,
         }
     }

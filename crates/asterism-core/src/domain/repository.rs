@@ -4334,10 +4334,16 @@ pub trait ImportStateRepository: Send + Sync {
 /// Persistence port for stored imports and the record of running them
 /// (`import_definition` / `import_run` tables).
 ///
-/// One port for two tables because one question spans them and is the
-/// reason both exist: [`running_for`](Self::running_for) is what stops
-/// a second run of a definition whose first has not finished. Splitting
-/// them would put that question on neither.
+/// One port for two tables because a definition and its runs are read
+/// and written together, and splitting them would make the common case
+/// — run this, record what it did — reach through two ports for one
+/// act.
+///
+/// It does **not** answer "is a run of this going". That is a question
+/// about one process's own children, it dies with that process, and
+/// asking a table made a crash wedge a definition until somebody edited
+/// SQLite. [`abandon_running`](Self::abandon_running) is what is left
+/// of it: a sweep at startup, over rows nothing is coming back for.
 #[async_trait]
 pub trait ImportDefinitionRepository: Send + Sync {
     /// Inserts or replaces a definition.
@@ -4349,20 +4355,14 @@ pub trait ImportDefinitionRepository: Send + Sync {
     /// Every definition, oldest first.
     async fn list(&self) -> Result<Vec<ImportDefinition>, DomainError>;
 
-    /// The run of `definition_id` that has started and not been
-    /// recorded as finished, if there is one.
+    /// Marks every run still saying `running` as abandoned, and answers
+    /// how many there were.
     ///
-    /// Read from the table rather than from any process's memory,
-    /// because the answer has to survive the process that wrote it: a
-    /// server restarted mid-run comes back with the row still saying
-    /// `running`, and a caller that trusted an in-memory set would
-    /// happily start a second importer over the same source.
-    ///
-    /// That also means a crashed run leaves a row nothing will ever
-    /// finish, and a definition that can then never be started again.
-    /// Sweeping those is not built and is not pretended to be — see the
-    /// service.
-    async fn running_for(&self, definition_id: &str) -> Result<Option<ImportRun>, DomainError>;
+    /// Called once at startup. A run is a child of the process that
+    /// spawned it, so a row still open when a process starts belongs to
+    /// one that is gone — nothing is going to finish it, and leaving it
+    /// says a run is in progress that is not.
+    async fn abandon_running(&self) -> Result<u64, DomainError>;
 
     /// Records a run, inserting it or replacing what it said before.
     ///

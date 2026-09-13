@@ -10,9 +10,38 @@
 //! this and calls it, and every hard question — where the binary is,
 //! how a credential reaches it, what happens when a run is already
 //! going, what is left behind when nothing worked — is answerable
-//! without a clock. The timer is also where
-//! [`Disposition::FailedRetryable`](crate::domain::import_definition)'s
-//! stated wait finally gets a consumer; this slice only records it.
+//! without a clock. The timer is also where the wait a rate limit
+//! states — carried here as `ImportRun::retry_after_secs` — finally
+//! gets a consumer; this slice records it and reads it nowhere.
+//!
+//! ## Starting is not waiting
+//!
+//! [`ImportRunService::run`] answers as soon as the importer is on its
+//! way, with the run it just opened, and the outcome arrives on that
+//! row. The first shape held the answer until the child exited, which
+//! read well — the answer *is* the outcome — and was wrong twice over:
+//! an import of any size outlives an HTTP client's patience, and the
+//! caller this exists for is a scheduler, which wants to start things
+//! and not to sit with them.
+//!
+//! ## The lock is this process's, not the table's
+//!
+//! Two runs of one definition would each take up from a position the
+//! other is about to move, so one has to be refused. The question is
+//! "is a child of **mine** still going", and that is about one process:
+//! it is true only while this process lives, and a process that died
+//! took its children with it.
+//!
+//! The first shape asked the table instead — a run row said `running`
+//! and a second run read it — which made the row a lock as well as a
+//! record. A crash then left a row nothing would ever close and a
+//! definition nothing could ever start, recoverable only by editing
+//! SQLite. It also raced: two callers could both read "nothing running"
+//! before either wrote.
+//!
+//! So the answer lives in a set held here, and
+//! [`ImportDefinitionRepository::abandon_running`] closes at startup
+//! whatever a previous process left open.
 //!
 //! ## Spawning is not this layer's
 //!
@@ -24,7 +53,8 @@
 //! the value never enters a type anything here holds, logs, or could
 //! accidentally persist.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use asterism_contract::command::{DefineImportCommand, RunImportDefinitionCommand};
 use asterism_contract::dto::{ImportDefinitionDto, ImportRunDto};
@@ -51,6 +81,13 @@ pub struct LaunchSpec {
     /// Name of the environment variable holding the credential, if the
     /// definition named one.
     pub secret_ref: Option<String>,
+    /// Header the credential is sent as, paired with `secret_ref`.
+    ///
+    /// The launcher turns the pair into whatever argument the importer
+    /// reads it by. Which argument that is belongs to the launcher: a
+    /// definition states where a credential goes, not how a particular
+    /// binary is told.
+    pub secret_header: Option<String>,
 }
 
 /// What starting one produced.
@@ -60,8 +97,12 @@ pub struct LaunchOutcome {
     /// one. `None` means it did not — it failed to start, or it died
     /// before finishing, and either way there is nothing to count.
     pub report: Option<ImportReport>,
-    /// What the child's exit said, for a person reading a run that has
-    /// no report. Empty when the child never started.
+    /// What happened, for a person reading a run that has no report.
+    ///
+    /// The child's exit and the tail of what it said when one ran; why
+    /// none could be started when one did not. Always set on the
+    /// second, because a run recorded as `unstarted` with nothing said
+    /// is a run nobody can act on.
     pub detail: String,
     /// Whether the importer ran at all.
     ///
@@ -90,6 +131,35 @@ pub trait ImportLauncher: Send + Sync {
 pub struct ImportRunService {
     repo: Arc<dyn ImportDefinitionRepository>,
     launcher: Arc<dyn ImportLauncher>,
+    /// Definitions this process currently has a child running for.
+    ///
+    /// The lock, and the reason it is here rather than in the table is
+    /// the module doc's. A `std::sync::Mutex` and not a `tokio` one on
+    /// purpose: nothing is awaited while it is held, so a guard cannot
+    /// cross a suspension point and the async flavour would only buy a
+    /// way to hold it across one.
+    running: Mutex<HashSet<String>>,
+}
+
+/// Releases a definition's slot however the run leaves it.
+///
+/// A guard rather than a call at the end, because the end is reached
+/// four ways — the launcher answered, the launcher failed, the
+/// recording failed, the task was dropped — and a slot left held is a
+/// definition nothing can start again until the process restarts.
+struct RunSlot {
+    service: Arc<ImportRunService>,
+    definition_id: String,
+}
+
+impl Drop for RunSlot {
+    fn drop(&mut self) {
+        self.service
+            .running
+            .lock()
+            .expect("the running set")
+            .remove(&self.definition_id);
+    }
 }
 
 impl ImportRunService {
@@ -98,7 +168,22 @@ impl ImportRunService {
         repo: Arc<dyn ImportDefinitionRepository>,
         launcher: Arc<dyn ImportLauncher>,
     ) -> Self {
-        Self { repo, launcher }
+        Self {
+            repo,
+            launcher,
+            running: Mutex::new(HashSet::new()),
+        }
+    }
+
+    /// Closes every run a previous process left open, and answers how
+    /// many there were.
+    ///
+    /// Called once at startup. A run is a child of the process that
+    /// spawned it, so a row still saying `running` when a process
+    /// starts belongs to one that is gone: nothing will finish it, and
+    /// leaving it says a run is in progress that is not.
+    pub async fn abandon_orphans(&self) -> Result<u64, DomainError> {
+        self.repo.abandon_running().await
     }
 
     /// Stores an import.
@@ -119,6 +204,36 @@ impl ImportRunService {
                 "an import needs a subcommand to run".into(),
             ));
         }
+        // A named credential with nowhere to go is the quiet failure
+        // this check exists for: the launcher would resolve the
+        // variable, hand the value to a child that sends it nowhere,
+        // and the run would reach the source unauthenticated and report
+        // whatever that looks like. Which is a true report of the wrong
+        // thing.
+        //
+        // Asked of the pair rather than of the arguments. The first
+        // shape looked for `--header-secret` in `args` — guessing at
+        // another binary's command line, and quiet the day that flag
+        // was renamed.
+        if command.secret_ref.is_some() != command.secret_header.is_some() {
+            return Err(DomainError::Validation(
+                "a credential needs both halves: `secret_ref` names the variable \
+                 holding it and `secret_header` says which header it is sent as, \
+                 and one without the other is a credential that goes nowhere"
+                    .into(),
+            ));
+        }
+        // A watch never ends, so it can never be a run that finishes —
+        // it would hold the row that stops a second run open for as
+        // long as the process lived, and the request that started it
+        // with it.
+        if command.args.iter().any(|arg| arg == "--watch") {
+            return Err(DomainError::Validation(
+                "a stored import cannot watch: a watch never ends, and a run that \
+                 never ends holds the position of the one that would follow it"
+                    .into(),
+            ));
+        }
         let definition = ImportDefinition {
             id: Uuid::now_v7().to_string(),
             persona_id: command.persona_id,
@@ -126,6 +241,7 @@ impl ImportRunService {
             subcommand: command.subcommand,
             args: command.args,
             secret_ref: command.secret_ref,
+            secret_header: command.secret_header,
         };
         self.repo.upsert(&definition).await?;
         Ok(to_definition_dto(definition))
@@ -142,25 +258,20 @@ impl ImportRunService {
             .collect())
     }
 
-    /// Runs one now, and records what happened.
+    /// Starts one now, and answers with the run it opened.
     ///
-    /// # The row is written before the importer starts
+    /// Does **not** wait for the importer. The outcome lands on the row
+    /// this returns, which [`runs`](Self::runs) reads — see the module
+    /// doc for why holding the answer until the child exited was the
+    /// wrong shape twice over.
     ///
-    /// A run is recorded as `running` first, then launched, then
-    /// recorded again with what it did. Written in that order because
-    /// the record is what the overlap check reads: a run that only
-    /// appeared on the table once it had finished would be invisible
-    /// for exactly the window the check exists to cover.
-    ///
-    /// The cost is a crashed process leaving a row that says `running`
-    /// forever, and a definition that can then never be started again.
-    /// Nothing sweeps those yet. That is worse than the alternative in
-    /// one direction and better in the other, and the direction it is
-    /// better in is the one that loses data: two importers over one
-    /// source each take up from a position the other is about to move,
-    /// and neither notices.
+    /// Refused while a run of the same definition is going, because two
+    /// importers over one source would each take up from a position the
+    /// other is about to move. The refusal is decided against this
+    /// process's own set, under one lock, so two callers arriving
+    /// together cannot both win.
     pub async fn run(
-        &self,
+        self: &Arc<Self>,
         command: RunImportDefinitionCommand,
         _by: &AttributionContext,
     ) -> Result<ImportRunDto, DomainError> {
@@ -170,22 +281,33 @@ impl ImportRunService {
             .await?
             .ok_or_else(|| DomainError::not_found("import definition", &command.id))?;
 
-        if let Some(running) = self.repo.running_for(&definition.id).await? {
-            // `Blocked`: the same request works once the running one
-            // finishes, which is what that kind is for and what the
-            // message is required to say.
-            return Err(DomainError::conflict(
-                ConflictKind::Blocked,
-                format!(
-                    "{} is already running (started {}), and two importers over one \
-                     source would each take up from a position the other is about to \
-                     move",
-                    definition.name, running.started_at
-                ),
-            ));
-        }
+        // Taken before anything else can fail, and released by the
+        // guard however this run ends. `insert` answering `false` is
+        // the refusal: the set already held it, under this same lock,
+        // so there is no window between asking and taking.
+        let slot = {
+            let mut running = self.running.lock().expect("the running set");
+            if !running.insert(definition.id.clone()) {
+                // `Blocked`: the same request works once the running
+                // one finishes, which is what that kind is for and what
+                // the message is required to say.
+                return Err(DomainError::conflict(
+                    ConflictKind::Blocked,
+                    format!(
+                        "{} is already running, and two importers over one source \
+                         would each take up from a position the other is about to \
+                         move",
+                        definition.name
+                    ),
+                ));
+            }
+            RunSlot {
+                service: Arc::clone(self),
+                definition_id: definition.id.clone(),
+            }
+        };
 
-        let mut run = ImportRun {
+        let run = ImportRun {
             id: Uuid::now_v7().to_string(),
             definition_id: definition.id.clone(),
             started_at: Utc::now(),
@@ -199,29 +321,49 @@ impl ImportRunService {
         };
         self.repo.record_run(&run).await?;
 
-        let outcome = self
-            .launcher
-            .launch(LaunchSpec {
-                subcommand: definition.subcommand.clone(),
-                args: definition.args.clone(),
-                persona_id: definition.persona_id.clone(),
-                secret_ref: definition.secret_ref.clone(),
-            })
-            .await;
+        let service = Arc::clone(self);
+        let mut finishing = run.clone();
+        tokio::spawn(async move {
+            // The guard moves in here, so the slot is held for exactly
+            // as long as the child is and is released even if this task
+            // is dropped.
+            let _slot = slot;
+            let outcome = service
+                .launcher
+                .launch(LaunchSpec {
+                    subcommand: definition.subcommand,
+                    args: definition.args,
+                    persona_id: definition.persona_id,
+                    secret_ref: definition.secret_ref,
+                    secret_header: definition.secret_header,
+                })
+                .await;
 
-        run.ended_at = Some(Utc::now());
-        match outcome {
-            Ok(outcome) => apply(&mut run, outcome),
-            // The port itself failed, which is still a run that was
-            // asked for and did not happen. Recorded as such rather
-            // than thrown, for the reason `launch` states.
-            Err(err) => {
-                run.outcome = RunOutcome::Unstarted;
-                run.ended_by_class = Some("source".into());
-                run.ended_by_message = Some(err.to_string());
+            finishing.ended_at = Some(Utc::now());
+            match outcome {
+                Ok(outcome) => apply(&mut finishing, outcome),
+                // The port itself failed, which is still a run that was
+                // asked for and did not happen. No class: nothing ran,
+                // so nothing classified anything.
+                Err(err) => {
+                    finishing.outcome = RunOutcome::Unstarted;
+                    finishing.ended_by_message = Some(err.to_string());
+                }
             }
-        }
-        self.repo.record_run(&run).await?;
+            if let Err(err) = service.repo.record_run(&finishing).await {
+                // Nowhere left to report it to: the caller was answered
+                // when the run opened. The row keeps saying `running`
+                // until a restart sweeps it, which is the same state a
+                // killed process leaves and is read the same way.
+                tracing::error!(
+                    event = "diag.import_run.record_failed",
+                    run = %finishing.id,
+                    error = %err,
+                    "could not record how an import run ended"
+                );
+            }
+        });
+
         Ok(to_run_dto(run))
     }
 
@@ -244,6 +386,8 @@ impl ImportRunService {
 /// Folds what the launcher saw onto the run being recorded.
 fn apply(run: &mut ImportRun, outcome: LaunchOutcome) {
     if !outcome.started {
+        // As above: no class. Nothing classified anything, because
+        // nothing ran.
         run.outcome = RunOutcome::Unstarted;
         run.ended_by_message = Some(outcome.detail);
         return;
@@ -281,6 +425,7 @@ fn to_definition_dto(definition: ImportDefinition) -> ImportDefinitionDto {
         subcommand: definition.subcommand,
         args: definition.args,
         secret_ref: definition.secret_ref,
+        secret_header: definition.secret_header,
     }
 }
 

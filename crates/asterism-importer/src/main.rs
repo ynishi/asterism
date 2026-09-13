@@ -161,17 +161,6 @@ struct CommonArgs {
     /// break silently, reporting zero.
     #[arg(long)]
     report: Option<PathBuf>,
-    /// Send this header with the credential in `$ASTERISM_IMPORT_SECRET`.
-    ///
-    /// `--header-secret Authorization` sends `Authorization: <value of
-    /// that variable>`. For a supervisor that resolved the credential
-    /// and must not put it on a command line: an argument vector is
-    /// readable by every other process on the machine, and this way
-    /// what they can read is the name of a header.
-    ///
-    /// A person running this by hand wants `--header` instead.
-    #[arg(long)]
-    header_secret: Option<String>,
 }
 
 impl CommonArgs {
@@ -364,6 +353,22 @@ struct HttpArgs {
     /// Query parameter the next-page token is sent back as.
     #[arg(long, default_value = "cursor")]
     cursor_param: String,
+    /// Send this header with the credential in `$ASTERISM_IMPORT_SECRET`.
+    ///
+    /// `--header-secret Authorization` sends `Authorization: <value of
+    /// that variable>`. For a supervisor that resolved the credential
+    /// and must not put it on a command line: an argument vector is
+    /// readable by every other process on the machine, and this way
+    /// what they can read is the name of a header.
+    ///
+    /// On this subcommand alone, because this is the only one that
+    /// speaks to something that could want a header — it began on the
+    /// shared arguments, where nine other subcommands accepted it and
+    /// silently did nothing with it.
+    ///
+    /// A person running this by hand wants `--header` instead.
+    #[arg(long)]
+    header_secret: Option<String>,
     /// Slug written to every footprint's source kind.
     ///
     /// Name the service here. It leads the stored position's partition,
@@ -703,7 +708,7 @@ async fn main() -> anyhow::Result<()> {
             // The supervisor's route for a credential: it resolved the
             // variable the definition named and put the value here,
             // where an argument vector cannot leak it.
-            if let Some(header) = &args.common.header_secret {
+            if let Some(header) = &args.header_secret {
                 let value = std::env::var(SECRET_VAR).with_context(|| {
                     format!(
                         "--header-secret {header} needs the credential in ${SECRET_VAR}, \
