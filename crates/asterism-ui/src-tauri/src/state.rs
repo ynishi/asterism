@@ -19,7 +19,7 @@ use asterism_core::application::{
 use asterism_core::domain::repository::ProgressEmitter;
 use asterism_core::domain::value::Progress;
 use asterism_infra::dispatch::ExporterRegistry;
-use asterism_server::core_init::{CoreMode, init_core};
+use asterism_server::core_init::{JobWorker, init_core};
 use asterism_server::state::ServerCtx;
 use async_trait::async_trait;
 use tauri::{AppHandle, Emitter};
@@ -261,7 +261,7 @@ pub async fn init(app: AppHandle) -> anyhow::Result<(AppState, Arc<ServerCtx>)> 
     // standalone server resolve to the same file on disk.
     let db_path = asterism_infra::paths::default_db_path()?;
     let emitter: Arc<dyn ProgressEmitter> = Arc::new(TauriEmitter { app });
-    let core = init_core(&db_path, emitter, CoreMode::Full).await?;
+    let core = init_core(&db_path, emitter, JobWorker::Spawn).await?;
 
     // HTTP context — a subset of the same core, wired into `axum` state
     // by `asterism_server::http::router`. Selected by `ServerCtx` itself

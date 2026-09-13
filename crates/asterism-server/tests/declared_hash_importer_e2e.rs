@@ -45,7 +45,7 @@ use asterism_importer_sdk::{
     Footprint, FootprintSource, FsScanner, ImportOptions, ImportSummary, Note, ParseError, RawItem,
     ScanMode, SourceParser, SqliteScanner, run_import,
 };
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
 
 /// The attribution these fixtures write with: a caller that states
@@ -73,7 +73,7 @@ const PNG_1X1: &[u8] = &[
 /// Boots a core plus the real router on an ephemeral loopback port.
 /// Bind happens before the spawn so the importer's first request cannot
 /// arrive at a closed port.
-async fn boot(tmp: &std::path::Path, mode: CoreMode) -> (CoreCtx, u16) {
+async fn boot(tmp: &std::path::Path, mode: JobWorker) -> (CoreCtx, u16) {
     let core = init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
@@ -285,7 +285,7 @@ async fn the_digest_the_importer_declares_is_the_one_the_hash_job_computes() {
     let plate = corpus.join("plate.png");
     std::fs::write(&plate, PNG_1X1).expect("write plate");
 
-    let (core, port) = boot(tmp.path(), CoreMode::Full).await;
+    let (core, port) = boot(tmp.path(), JobWorker::Spawn).await;
     let persona = register(&core, "e2e-declared-importer-agreement").await;
 
     let summary = import_png_dir(&corpus, &persona, port).await;
@@ -372,7 +372,7 @@ async fn an_exact_copy_is_proposed_at_ingest_without_the_server_reading_it() {
     std::fs::write(&copy, PNG_1X1).expect("write copy");
 
     let db_path = tmp.path().join("asterism.db");
-    let (core, port) = boot(tmp.path(), CoreMode::ReadOnly).await;
+    let (core, port) = boot(tmp.path(), JobWorker::None).await;
     let persona = register(&core, "e2e-declared-importer-proposal").await;
 
     // Leg 1: the incumbent arrives through the real importer.
@@ -478,7 +478,7 @@ async fn a_declared_digest_never_folds_even_when_the_lane_asked_for_one() {
     std::fs::write(&copy, PNG_1X1).expect("write copy");
 
     let db_path = tmp.path().join("asterism.db");
-    let (core, _port) = boot(tmp.path(), CoreMode::ReadOnly).await;
+    let (core, _port) = boot(tmp.path(), JobWorker::None).await;
     let persona = register(&core, "e2e-declared-importer-fold-guard").await;
 
     let digest = asterism_contract::digest::of_bytes(PNG_1X1);
@@ -597,7 +597,7 @@ async fn a_source_with_no_payload_declares_nothing_and_ingests_anyway() {
         .expect("insert entry");
     }
 
-    let (core, port) = boot(tmp.path(), CoreMode::ReadOnly).await;
+    let (core, port) = boot(tmp.path(), JobWorker::None).await;
     let persona = register(&core, "e2e-declared-importer-no-payload").await;
 
     // Positive control first: the pipeline demonstrably can declare.

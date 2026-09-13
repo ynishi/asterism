@@ -14,7 +14,7 @@ use std::sync::Arc;
 use asterism_contract::command::{
     AddAssetCommand, CreateDispatchCommand, CreateSnapshotCommand, RegisterPersonaCommand,
 };
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the provenance claim,
@@ -75,7 +75,7 @@ async fn an_export_that_has_produced_nothing_yet_is_recorded_not_guessed() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -192,7 +192,7 @@ async fn a_pending_claim_resolves_itself_once_the_export_lands() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

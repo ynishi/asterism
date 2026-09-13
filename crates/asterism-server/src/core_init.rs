@@ -5,7 +5,7 @@
 //! differences are (1) the progress emitter (`TauriEmitter` in the UI, the
 //! stderr [`LogEmitter`] in the server), (2) whether the Tantivy index is
 //! opened read-write or read-only, and (3) whether a job-worker `Monitor`
-//! is spawned. Those three axes are captured by [`CoreMode`]; everything
+//! is spawned. Those three axes are captured by [`JobWorker`]; everything
 //! else lives here so the ~160 lines of DI wiring are written once.
 //!
 //! Callers wrap the returned [`CoreCtx`] into their own context struct
@@ -50,17 +50,32 @@ use asterism_infra::source_text::FsSourceTextReader;
 use asterism_infra::sqlite;
 use async_trait::async_trait;
 
-/// Selects how the shared core is opened for the calling process.
-pub enum CoreMode {
-    /// Full read-write process: opens the Tantivy index read-write
-    /// (acquiring the exclusive writer lock) and spawns the job-worker
-    /// `Monitor`. Used by the Tauri UI, the single writer.
-    Full,
-    /// Read-only / enqueue-only process: opens the Tantivy index without
-    /// the writer lock and opens the job queue without spawning a worker.
-    /// Used by the standalone server, which shares the DB with a `Full`
-    /// UI process that drains the queue and holds the writer lock.
-    ReadOnly,
+/// Whether this process runs the job worker.
+///
+/// The one thing about opening a core that anybody has ever wanted to
+/// choose. It replaced `JobWorker`, which bundled four unrelated
+/// decisions — the Tantivy writer lock, this, the startup sweeps, the
+/// startup query-group refresh — into two combinations, "all of them"
+/// and "none of them".
+///
+/// Three of those four stopped being questions when `asterism-server
+/// serve` went (#300): one process opens a core now, it opens the index
+/// to write, and its startup work is startup's. The fourth is this one,
+/// and it is a question only a **test** ever asked — fifteen of them,
+/// each wanting the queue left undrained so that an enqueue is a
+/// recorded push rather than a race with something draining it.
+///
+/// Asked as an argument rather than answered by a mode, because that is
+/// what it is: a collaborator this process either runs or does not. A
+/// test that wants none says so in the call, in the one place a reader
+/// looks for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobWorker {
+    /// Run it. What `asterism-ui` does, windowed or headless.
+    Spawn,
+    /// Do not. The queue is still opened — things can be enqueued and
+    /// read back — and nothing takes anything off it.
+    None,
 }
 
 /// Default [`ProgressEmitter`] for processes without a UI event bus (the
@@ -626,17 +641,17 @@ pub struct CoreCtx {
 ///
 /// `db_path` is the SQLite file shared by the UI and the server; `emitter`
 /// is the process-specific progress sink; `mode` selects the read-write
-/// ([`CoreMode::Full`]) versus read-only / enqueue-only
-/// ([`CoreMode::ReadOnly`]) shape. The startup drift check (rebuild the
+/// ([`JobWorker::Spawn`]) versus read-only / enqueue-only
+/// ([`JobWorker::None`]) shape. The startup drift check (rebuild the
 /// Session snapshot when stale) runs at the end in both modes — in
 /// `ReadOnly` the resulting `SessionRebuild` no-op still enqueues
 /// but the `Full` worker consumes it.
 pub async fn init_core(
     db_path: &Path,
     emitter: Arc<dyn ProgressEmitter>,
-    mode: CoreMode,
+    worker: JobWorker,
 ) -> anyhow::Result<CoreCtx> {
-    init_core_with(db_path, emitter, mode, None).await
+    init_core_with(db_path, emitter, worker, None).await
 }
 
 /// [`init_core`] with an explicit override for the Tantivy index dir.
@@ -655,7 +670,7 @@ pub async fn init_core(
 pub async fn init_core_with(
     db_path: &Path,
     emitter: Arc<dyn ProgressEmitter>,
-    mode: CoreMode,
+    worker: JobWorker,
     tantivy_index_dir: Option<&Path>,
 ) -> anyhow::Result<CoreCtx> {
     if let Some(parent) = db_path.parent() {
@@ -740,6 +755,14 @@ pub async fn init_core_with(
     // gone. Swept here rather than read as a lock later: the table is
     // history, and history with an open end reads as a run in progress
     // that is not.
+    //
+    // Unconditional, and it is worth saying why there is nothing to
+    // condition it on. Supervising imports has nothing to do with
+    // running the job worker — gating it on `JobWorker` would rebuild,
+    // in one step, the bundling #300 took apart, and would leave the
+    // end-to-end test that runs with no worker unable to run an import
+    // at all. What makes a process-local supervisor sound is that the
+    // Tantivy writer lock admits one core per index, not a flag.
     match import_run_service.abandon_orphans().await {
         Ok(0) => {}
         Ok(swept) => tracing::info!(
@@ -800,12 +823,11 @@ pub async fn init_core_with(
         }
         None => asterism_infra::paths::tantivy_index_dir()?,
     };
+    // Always for writing. The read-only open existed for a second
+    // process that shared this index without the lock, and there is no
+    // second process (#300).
     let search_index = Arc::new(
-        match mode {
-            CoreMode::Full => TantivyIndex::open(tantivy_dir),
-            CoreMode::ReadOnly => TantivyIndex::open_read_only(tantivy_dir),
-        }
-        .map_err(|e| anyhow::anyhow!("open tantivy index: {e}"))?,
+        TantivyIndex::open(tantivy_dir).map_err(|e| anyhow::anyhow!("open tantivy index: {e}"))?,
     );
     // An asset's body feeds two indexes with two different jobs: the
     // SQL trigram index answers the Query-side `text_match` predicate
@@ -896,8 +918,8 @@ pub async fn init_core_with(
     // one is how a test / preview harness says "no sweep".
     let retention_cell: Arc<OnceLock<Arc<RetentionService>>> = Arc::new(OnceLock::new());
     let _ = retention_cell.set(retention_service.clone());
-    let job_queue = match mode {
-        CoreMode::Full => {
+    let job_queue = match worker {
+        JobWorker::Spawn => {
             // Worker parallelism comes from the `jobs.concurrency`
             // setting, resolved as `default → env → stored`:
             // `ASTERISM_JOB_CONCURRENCY` applies while nothing is
@@ -968,7 +990,7 @@ pub async fn init_core_with(
             )
             .await?
         }
-        CoreMode::ReadOnly => jobs::open_queue(pool).await?,
+        JobWorker::None => jobs::open_queue(pool).await?,
     };
     let job_queue_arc = Arc::new(job_queue);
 
@@ -1067,7 +1089,7 @@ pub async fn init_core_with(
     // reason: both expire rows on a clock the application does not
     // otherwise consult, and startup is the one moment a desktop app
     // reliably reaches.
-    if matches!(mode, CoreMode::Full) {
+    {
         use asterism_core::domain::job::JobKind;
         use asterism_core::domain::repository::JobQueue as _;
         for kind in [JobKind::TrashPurge, JobKind::ObservationSweep] {
@@ -1475,7 +1497,7 @@ pub async fn init_core_with(
     // wave — the refresh leaves no window open. `Full` mode only: the
     // read-only process must not write memberships. Failures are loud
     // but non-fatal: one corrupt rule does not block the app.
-    if matches!(mode, CoreMode::Full) {
+    {
         let outcome = query_group_refresh.refresh_all().await;
         for (bucket, err) in &outcome.failures {
             tracing::error!(

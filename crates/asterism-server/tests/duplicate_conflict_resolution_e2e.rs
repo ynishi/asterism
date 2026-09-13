@@ -20,7 +20,7 @@ use asterism_contract::command::{
     RestoreAssetCommand, TrashAssetCommand,
 };
 use asterism_contract::dto::{DuplicateAxis, DuplicateConflictDto};
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
 use axum::Router;
 use axum::body::Body;
@@ -105,7 +105,7 @@ impl Fixture {
         let core = init_core_with(
             &tmp.path().join("asterism.db"),
             Arc::new(LogEmitter),
-            CoreMode::Full,
+            JobWorker::Spawn,
             Some(&tmp.path().join("tantivy")),
         )
         .await

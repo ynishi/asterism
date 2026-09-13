@@ -12,7 +12,6 @@ bus in this process.
 ## Functions
 
 - `default_db_path` — Default DB path: active local data profile (override via
-- `init` — Initialises the backend in read-only mode and returns the shared
 
 ## Types
 

@@ -30,11 +30,19 @@
 
 #![warn(missing_docs)]
 
-use asterism_server::{http, state};
+use asterism_server::state;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-/// Asterism local API server (HTTP + MCP dual transport).
+/// Asterism's command-line side: the MCP bridge, and the database.
+///
+/// **It does not serve the HTTP API.** `asterism-ui` does — windowed or
+/// `--headless`, the same binary either way, holding the writer lock
+/// and running the job worker. This one had a `serve` subcommand that
+/// opened a second port from a process which held no lock and drained
+/// no queue, so anything it enqueued waited for the desktop to run it;
+/// it was useful only alongside the process that was already serving
+/// the same router. Nothing invoked it, and #300 removed it.
 #[derive(Parser)]
 #[command(name = "asterism-server", version, about)]
 struct Cli {
@@ -44,17 +52,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Serves the HTTP API on loopback for agent-block scripts, personas,
-    /// bridge receivers, and other local clients.
-    Serve {
-        /// SQLite database path (default: active profile;
-        /// override with `$ASTERISM_HOME`).
-        #[arg(long)]
-        db: Option<PathBuf>,
-        /// Listen port (bind address is fixed to `127.0.0.1`).
-        #[arg(long)]
-        port: Option<u16>,
-    },
     /// Creates the database (if missing) and applies every pending
     /// migration up to the latest schema version. Idempotent — safe to
     /// re-run.
@@ -164,19 +161,6 @@ async fn main() -> anyhow::Result<()> {
     // what reaches stderr in the meantime.
     asterism_infra::observe::install();
     match Cli::parse().command {
-        Command::Serve { db, port } => {
-            let db_path = resolve_db_path(db)?;
-            let ctx = state::init(&db_path).await?;
-            let port = port.unwrap_or(asterism_infra::paths::active_profile()?.default_http_port());
-            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-            let listener = tokio::net::TcpListener::bind(addr).await?;
-            eprintln!(
-                "asterism-server: http://{addr}/asterism/health (db: {})",
-                db_path.display()
-            );
-            axum::serve(listener, http::router(ctx)).await?;
-            Ok(())
-        }
         Command::Init { db } | Command::Migrate { db } => {
             let db_path = resolve_db_path(db)?;
             if let Some(parent) = db_path.parent() {

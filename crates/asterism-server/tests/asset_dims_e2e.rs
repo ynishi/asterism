@@ -21,7 +21,7 @@ use std::sync::Arc;
 use asterism_contract::command::{AddAssetCommand, RegisterPersonaCommand};
 use asterism_contract::query::GetAssetDetailQuery;
 use asterism_core::error::DomainError;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the two columns, not
@@ -76,7 +76,7 @@ async fn one_persona(tag: &str) -> (tempfile::TempDir, CoreCtx, String, std::pat
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

@@ -7,7 +7,7 @@
 //! Progress updates go to stderr via `LogEmitter` — there is no UI event
 //! bus in this process.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use asterism_core::application::DispatchService;
@@ -17,8 +17,6 @@ use asterism_core::application::{
     SeriesStrategyService, SessionService, SnapshotService, ThreadService, ThumbService,
 };
 use asterism_infra::dispatch::ExporterRegistry;
-
-use crate::core_init::{CoreMode, LogEmitter, init_core};
 
 /// Bundle of services that HTTP handlers share via `axum` state.
 ///
@@ -163,12 +161,4 @@ impl ServerCtx {
             observations: core.observations.clone(),
         })
     }
-}
-
-/// Initialises the backend in read-only mode and returns the shared
-/// context. The tantivy writer lock and the job worker stay with the
-/// Tauri UI process; the server only enqueues jobs and serves reads.
-pub async fn init(db_path: &Path) -> anyhow::Result<Arc<ServerCtx>> {
-    let core = init_core(db_path, Arc::new(LogEmitter), CoreMode::ReadOnly).await?;
-    Ok(ServerCtx::from_core(&core))
 }

@@ -30,7 +30,7 @@ use asterism_contract::command::{
     AddAssetCommand, MergeAssetsCommand, RegisterPersonaCommand, TrashAssetCommand,
 };
 use asterism_contract::dto::MergeAssetsDto;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the merge, not about
@@ -114,7 +114,7 @@ impl Fixture {
         let core = init_core_with(
             &tmp.path().join("asterism.db"),
             Arc::new(LogEmitter),
-            CoreMode::Full,
+            JobWorker::Spawn,
             Some(&tmp.path().join("tantivy")),
         )
         .await

@@ -148,13 +148,16 @@ Every crate has `publish = false`; nothing is distributed via crates.io.
   `cover_gen` (modality-specific heuristic), `auto_tag` (keywords → channel
   tags), and finally `edge_rebuild` (windowed incremental) once the keywords are
   committed.
-- **API** (`asterism-server`) — `asterism-server serve` binds
-  `http://127.0.0.1:8989/asterism/*`. Route conventions mirror the Tauri command
-  surface. The same router serves MCP (streamable-http) at `/mcp` — a curated
-  tool set (search / list / get / add / lineage / comments / catalog / dispatch)
-  over the same application services, with input schemas generated from
-  `asterism-contract`. `asterism-server mcp` serves the identical tools over
-  stdio.
+- **API** (`asterism-server`, as a library) — `asterism-ui` binds
+  `http://127.0.0.1:8989/asterism/*` in its own process, windowed or
+  `--headless`, and serves the router this crate builds. Route conventions
+  mirror the Tauri command surface. The same router serves MCP
+  (streamable-http) at `/mcp` — a curated tool set (search / list / get / add /
+  lineage / comments / catalog / dispatch) over the same application services,
+  with input schemas generated from `asterism-contract`. The
+  `asterism-server` **binary** does not serve: it bridges MCP over stdio
+  (`asterism-server mcp`, which launches the app when nothing is listening) and
+  creates or migrates the database.
 - **UI** (`asterism-ui`) — Svelte 5 on top of Tauri v2: persona sidebar,
   modality tabs, a dense grid, and a hover-burst side panel. TypeScript bindings
   are regenerated from `asterism-contract` at build time via `schema-bridge`.

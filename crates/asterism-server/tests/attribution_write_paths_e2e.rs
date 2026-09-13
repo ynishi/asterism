@@ -44,7 +44,7 @@ use asterism_contract::command::{
 };
 use asterism_contract::dto::DerivedDto;
 use asterism_core::domain::attribution::{AttributionContext, OperatorRef};
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
 use axum::Router;
 use axum::body::Body;
@@ -95,7 +95,7 @@ async fn core_and_router(tmp: &std::path::Path, pack: &str) -> (CoreCtx, Router,
     let core = init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.join("tantivy")),
     )
     .await

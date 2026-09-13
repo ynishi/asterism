@@ -43,6 +43,15 @@
 //! [`ImportDefinitionRepository::abandon_running`] closes at startup
 //! whatever a previous process left open.
 //!
+//! **A process-local answer is only sound while one process opens a
+//! core, and that is now enforced rather than assumed.** The Tantivy
+//! index is opened for writing unconditionally (#300), which takes an
+//! exclusive writer lock, so a second core over the same index does not
+//! start. A review round was spent asking which process should host
+//! this supervisor; the answer is that there is one, and nothing here
+//! is conditioned on a mode. That question existed because `CoreMode`
+//! did.
+//!
 //! ## Spawning is not this layer's
 //!
 //! [`ImportLauncher`] is the port, and the reason it exists rather than

@@ -18,14 +18,14 @@
 //! # The two modes, and why each test needs the one it uses
 //!
 //! `both_fold_entry_points_leave_the_same_work_behind` runs
-//! `CoreMode::ReadOnly`: no worker, so an enqueue stays on the queue to
+//! `JobWorker::None`: no worker, so an enqueue stays on the queue to
 //! be counted instead of racing something that drains it. The conflict
 //! the automatic path answers is raised through the repository rather
 //! than by fingerprinting a file, because the fingerprint is a *job* and
 //! there is nothing here to run it.
 //!
 //! `a_manual_merge_takes_the_headstone_out_of_search` runs
-//! `CoreMode::Full` for the opposite reason: the claim is that the
+//! `JobWorker::Spawn` for the opposite reason: the claim is that the
 //! enqueued job runs and cleans up, so the worker is the thing under
 //! test. Its assets are real text files — an image produces a document
 //! with no body to retrieve on, and this test has to see a document
@@ -45,7 +45,7 @@ use asterism_core::domain::repository::{
 };
 use asterism_core::domain::value::{AssetId, PersonaId};
 use asterism_infra::jobs::jobs_snapshot;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about what a fold leaves
@@ -194,7 +194,7 @@ async fn both_fold_entry_points_leave_the_same_work_behind() {
         // No worker: an enqueue stays on the queue where it can be
         // counted, and the fold this test is about is the one the two
         // service calls ask for rather than one a worker performed.
-        CoreMode::ReadOnly,
+        JobWorker::None,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -365,7 +365,7 @@ async fn a_manual_merge_takes_the_headstone_out_of_search() {
         Arc::new(LogEmitter),
         // The worker is the thing under test: the merge enqueues, and
         // the claim is that what it enqueued does the cleaning.
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tantivy),
     )
     .await

@@ -15,7 +15,7 @@
     {
       "path": "asterism_server::core_init",
       "kind": "module",
-      "docs": "Shared backend initialisation for both the Tauri UI and the standalone\nserver.\n\nThe two processes assemble the exact same service graph. The only\ndifferences are (1) the progress emitter (`TauriEmitter` in the UI, the\nstderr [`LogEmitter`] in the server), (2) whether the Tantivy index is\nopened read-write or read-only, and (3) whether a job-worker `Monitor`\nis spawned. Those three axes are captured by [`CoreMode`]; everything\nelse lives here so the ~160 lines of DI wiring are written once.\n\nCallers wrap the returned [`CoreCtx`] into their own context struct\n(`ServerCtx` / `AppState`) and add nothing to it. A service assembled\nin one wrapper instead of here would be reachable from that\ntransport alone, which is how the Asset comment thread ended up with\nfour Tauri commands and no HTTP route."
+      "docs": "Shared backend initialisation for both the Tauri UI and the standalone\nserver.\n\nThe two processes assemble the exact same service graph. The only\ndifferences are (1) the progress emitter (`TauriEmitter` in the UI, the\nstderr [`LogEmitter`] in the server), (2) whether the Tantivy index is\nopened read-write or read-only, and (3) whether a job-worker `Monitor`\nis spawned. Those three axes are captured by [`JobWorker`]; everything\nelse lives here so the ~160 lines of DI wiring are written once.\n\nCallers wrap the returned [`CoreCtx`] into their own context struct\n(`ServerCtx` / `AppState`) and add nothing to it. A service assembled\nin one wrapper instead of here would be reachable from that\ntransport alone, which is how the Asset comment thread ended up with\nfour Tauri commands and no HTTP route."
     },
     {
       "path": "asterism_server::core_init::CoreCtx",
@@ -23,9 +23,9 @@
       "docs": "Shared service graph assembled by [`init_core`].\n\nBoth the Tauri UI (`AppState`) and the standalone server (`ServerCtx`)\nwrap this bundle. Every service is assembled here rather than in\neither wrapper: a service built on one side only is reachable from\none transport only, which is how the comment thread ended up with\nfour Tauri commands and no HTTP route."
     },
     {
-      "path": "asterism_server::core_init::CoreMode",
+      "path": "asterism_server::core_init::JobWorker",
       "kind": "enum",
-      "docs": "Selects how the shared core is opened for the calling process."
+      "docs": "Whether this process runs the job worker.\n\nThe one thing about opening a core that anybody has ever wanted to\nchoose. It replaced `JobWorker`, which bundled four unrelated\ndecisions — the Tantivy writer lock, this, the startup sweeps, the\nstartup query-group refresh — into two combinations, \"all of them\"\nand \"none of them\".\n\nThree of those four stopped being questions when `asterism-server\nserve` went (#300): one process opens a core now, it opens the index\nto write, and its startup work is startup's. The fourth is this one,\nand it is a question only a **test** ever asked — fifteen of them,\neach wanting the queue left undrained so that an enqueue is a\nrecorded push rather than a race with something draining it.\n\nAsked as an argument rather than answered by a mode, because that is\nwhat it is: a collaborator this process either runs or does not. A\ntest that wants none says so in the call, in the one place a reader\nlooks for it."
     },
     {
       "path": "asterism_server::core_init::LogEmitter",
@@ -35,7 +35,7 @@
     {
       "path": "asterism_server::core_init::init_core",
       "kind": "function",
-      "docs": "Initialises the shared backend and returns the assembled [`CoreCtx`].\n\n`db_path` is the SQLite file shared by the UI and the server; `emitter`\nis the process-specific progress sink; `mode` selects the read-write\n([`CoreMode::Full`]) versus read-only / enqueue-only\n([`CoreMode::ReadOnly`]) shape. The startup drift check (rebuild the\nSession snapshot when stale) runs at the end in both modes — in\n`ReadOnly` the resulting `SessionRebuild` no-op still enqueues\nbut the `Full` worker consumes it."
+      "docs": "Initialises the shared backend and returns the assembled [`CoreCtx`].\n\n`db_path` is the SQLite file shared by the UI and the server; `emitter`\nis the process-specific progress sink; `mode` selects the read-write\n([`JobWorker::Spawn`]) versus read-only / enqueue-only\n([`JobWorker::None`]) shape. The startup drift check (rebuild the\nSession snapshot when stale) runs at the end in both modes — in\n`ReadOnly` the resulting `SessionRebuild` no-op still enqueues\nbut the `Full` worker consumes it."
     },
     {
       "path": "asterism_server::core_init::init_core_with",
@@ -171,11 +171,6 @@
       "path": "asterism_server::state::default_db_path",
       "kind": "function",
       "docs": "Default DB path: active local data profile (override via\n`$ASTERISM_HOME`). Shared with `asterism-ui` through\n`asterism_infra::paths`."
-    },
-    {
-      "path": "asterism_server::state::init",
-      "kind": "function",
-      "docs": "Initialises the backend in read-only mode and returns the shared\ncontext. The tantivy writer lock and the job worker stay with the\nTauri UI process; the server only enqueues jobs and serves reads."
     },
     {
       "path": "asterism_server::transfer_profiles",

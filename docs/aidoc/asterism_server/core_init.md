@@ -7,7 +7,7 @@ The two processes assemble the exact same service graph. The only
 differences are (1) the progress emitter (`TauriEmitter` in the UI, the
 stderr [`LogEmitter`] in the server), (2) whether the Tantivy index is
 opened read-write or read-only, and (3) whether a job-worker `Monitor`
-is spawned. Those three axes are captured by [`CoreMode`]; everything
+is spawned. Those three axes are captured by [`JobWorker`]; everything
 else lives here so the ~160 lines of DI wiring are written once.
 
 Callers wrap the returned [`CoreCtx`] into their own context struct
@@ -24,6 +24,6 @@ four Tauri commands and no HTTP route.
 ## Types
 
 - `CoreCtx` — Shared service graph assembled by [`init_core`].
-- `CoreMode` — Selects how the shared core is opened for the calling process.
+- `JobWorker` — Whether this process runs the job worker.
 - `LogEmitter` — Default [`ProgressEmitter`] for processes without a UI event bus (the
 

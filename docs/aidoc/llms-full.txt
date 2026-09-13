@@ -1401,6 +1401,15 @@ So the answer lives in a set held here, and
 [`ImportDefinitionRepository::abandon_running`] closes at startup
 whatever a previous process left open.
 
+**A process-local answer is only sound while one process opens a
+core, and that is now enforced rather than assumed.** The Tantivy
+index is opened for writing unconditionally (#300), which takes an
+exclusive writer lock, so a second core over the same index does not
+start. A review round was spent asking which process should host
+this supervisor; the answer is that there is one, and nothing here
+is conditioned on a mode. That question existed because `CoreMode`
+did.
+
 ## Spawning is not this layer's
 
 [`ImportLauncher`] is the port, and the reason it exists rather than
@@ -15248,7 +15257,7 @@ The two processes assemble the exact same service graph. The only
 differences are (1) the progress emitter (`TauriEmitter` in the UI, the
 stderr [`LogEmitter`] in the server), (2) whether the Tantivy index is
 opened read-write or read-only, and (3) whether a job-worker `Monitor`
-is spawned. Those three axes are captured by [`CoreMode`]; everything
+is spawned. Those three axes are captured by [`JobWorker`]; everything
 else lives here so the ~160 lines of DI wiring are written once.
 
 Callers wrap the returned [`CoreCtx`] into their own context struct
@@ -15265,7 +15274,7 @@ four Tauri commands and no HTTP route.
 ## Types
 
 - `CoreCtx` — Shared service graph assembled by [`init_core`].
-- `CoreMode` — Selects how the shared core is opened for the calling process.
+- `JobWorker` — Whether this process runs the job worker.
 - `LogEmitter` — Default [`ProgressEmitter`] for processes without a UI event bus (the
 
 
@@ -15537,7 +15546,6 @@ bus in this process.
 ## Functions
 
 - `default_db_path` — Default DB path: active local data profile (override via
-- `init` — Initialises the backend in read-only mode and returns the shared
 
 ## Types
 

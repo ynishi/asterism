@@ -21,7 +21,7 @@ use asterism_contract::command::{
     RestoreAssetCommand, TrashAssetCommand, TrashGroupCommand,
 };
 use asterism_contract::dto::AssetCommentDto;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. The comment author is decided by
@@ -80,7 +80,7 @@ async fn a_gesture_remark_lands_as_a_pinned_comment_and_silence_lands_as_nothing
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

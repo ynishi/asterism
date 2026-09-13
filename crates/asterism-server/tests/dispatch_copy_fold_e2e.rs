@@ -20,7 +20,7 @@
 //! the SQLite repositories, and `detect_duplicate` — the same function
 //! the `material_hash` handler calls.
 //!
-//! Standing in: the job worker. `CoreMode::ReadOnly` opens the queue
+//! Standing in: the job worker. `JobWorker::None` opens the queue
 //! without a `Monitor`, which is what makes the enqueue observable (a
 //! recorded push rather than a race with something draining it) and
 //! leaves the test to do what the handler would have done next — write
@@ -50,7 +50,7 @@ use asterism_core::error::DomainError;
 use asterism_exporter_file::FileExporter;
 use asterism_infra::dispatch::{DispatchRunEnv, ExporterRegistry, ReEnqueue, run_dispatch_run};
 use asterism_infra::sqlite;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 
 /// A 1×1 RGBA PNG, 67 bytes — the same minimal fixture the round-trip
 /// binary uses. Nothing decodes it here; what matters is that the
@@ -138,7 +138,7 @@ async fn boot(tmp: &std::path::Path) -> CoreCtx {
         Arc::new(LogEmitter),
         // No worker: the enqueue stays observable and nothing drains
         // the dispatch out from under the test.
-        CoreMode::ReadOnly,
+        JobWorker::None,
         Some(&tmp.join("tantivy")),
     )
     .await

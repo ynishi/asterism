@@ -21,7 +21,7 @@ use asterism_contract::command::{
 };
 use asterism_contract::dto::DerivedDto;
 use asterism_contract::sidecar::{SIDECAR_IDENTITY_KEY, SIDECAR_SCHEMA, SIDECAR_SUFFIX};
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the sidecar claim, not
@@ -80,7 +80,7 @@ async fn a_sidecar_links_the_return_through_the_export_it_names() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

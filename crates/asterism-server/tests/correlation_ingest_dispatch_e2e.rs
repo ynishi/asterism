@@ -18,7 +18,7 @@ use asterism_contract::command::{
     AddAssetCommand, CreateDispatchCommand, CreateSnapshotCommand, RegisterPersonaCommand,
 };
 use asterism_contract::dto::DerivedDto;
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the dispatch claim,
@@ -81,7 +81,7 @@ async fn naming_the_export_links_the_return_to_every_artefact_it_produced() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

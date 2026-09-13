@@ -18,7 +18,7 @@
 //! export is driven through the real `DispatchRun` state machine with
 //! the real `FileExporter` behind it.
 //!
-//! **Why `CoreMode::ReadOnly`.** Its rustdoc is written for the
+//! **Why `JobWorker::None`.** Its rustdoc is written for the
 //! standalone server sharing a database with a running UI, which reads
 //! like a mismatch here. What this test needs from it is the other
 //! half of the same property: `ReadOnly` opens the job queue without
@@ -47,7 +47,7 @@ use asterism_importer_image::ImageParser;
 use asterism_importer_sdk::{FsScanner, ImportOptions, ImportSummary, ScanMode, run_import};
 use asterism_infra::dispatch::{DispatchRunEnv, ExporterRegistry, ReEnqueue, run_dispatch_run};
 use asterism_infra::sqlite;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 
 /// The attribution this fixture writes with: a caller that states
 /// nothing, which records nothing.
@@ -126,7 +126,7 @@ async fn boot(tmp: &std::path::Path) -> (CoreCtx, u16) {
     let core = init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::ReadOnly,
+        JobWorker::None,
         Some(&tmp.join("tantivy")),
     )
     .await

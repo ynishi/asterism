@@ -28,7 +28,7 @@ use asterism_importer_sdk::{
     OccurredSource, ParseError, RawItem, ScanMode, SourceParser, SourceScanner, StateKey,
     SyncStore, resolve_occurrence, run_import_with,
 };
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
 
 /// A caller that states nothing, which records nothing.
@@ -41,7 +41,7 @@ async fn boot(tmp: &std::path::Path) -> (CoreCtx, u16) {
     let core = init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::ReadOnly,
+        JobWorker::None,
         Some(&tmp.join("tantivy")),
     )
     .await

@@ -24,7 +24,7 @@
 //! that script is what makes the tick count, the re-enqueue log, and
 //! the reified assets facts rather than guesses.
 //!
-//! **Why `CoreMode::ReadOnly`.** Stronger here than in the sibling
+//! **Why `JobWorker::None`.** Stronger here than in the sibling
 //! file. `ReadOnly` opens the job queue without spawning a worker
 //! `Monitor`, so the `DispatchRun` job that `DispatchService::create`
 //! enqueues sits there and the test is the only thing advancing the
@@ -57,7 +57,7 @@ use asterism_exporter_comfy::ComfyHttpExporter;
 use asterism_exporter_http::HttpExporter;
 use asterism_infra::dispatch::{DispatchRunEnv, ExporterRegistry, ReEnqueue, run_dispatch_run};
 use asterism_infra::sqlite;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 use serde_json::json;
 
 use fake_backend::{FakeBackend, Outcome};
@@ -174,7 +174,7 @@ async fn boot(tmp: &Path) -> CoreCtx {
     init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::ReadOnly,
+        JobWorker::None,
         Some(&tmp.join("tantivy")),
     )
     .await

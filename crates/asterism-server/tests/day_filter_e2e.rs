@@ -34,7 +34,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use asterism_contract::command::{AddAssetCommand, OccurredSource, RegisterPersonaCommand};
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
 use axum::Router;
 use axum::body::Body;
@@ -57,7 +57,7 @@ async fn harness(tmp: &std::path::Path) -> (CoreCtx, Router) {
     let core = init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.join("tantivy")),
     )
     .await

@@ -4362,6 +4362,12 @@ pub trait ImportDefinitionRepository: Send + Sync {
     /// spawned it, so a row still open when a process starts belongs to
     /// one that is gone — nothing is going to finish it, and leaving it
     /// says a run is in progress that is not.
+    ///
+    /// Unscoped, which is only correct because one process opens a core
+    /// at a time: the Tantivy writer lock is taken unconditionally, so
+    /// a second core over the same index does not start. Before #300 a
+    /// second one could, and this sweep would have rewritten a live
+    /// run's row.
     async fn abandon_running(&self) -> Result<u64, DomainError>;
 
     /// Records a run, inserting it or replacing what it said before.

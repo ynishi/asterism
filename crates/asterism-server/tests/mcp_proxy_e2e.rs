@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use asterism_contract::command::RegisterPersonaCommand;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 use asterism_server::mcp_proxy::{AppLaunch, McpProxy};
 use asterism_server::state::ServerCtx;
 use rmcp::ServiceExt;
@@ -36,7 +36,7 @@ async fn spawn_backend(tmp: &std::path::Path) -> (CoreCtx, u16) {
     let core = init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.join("tantivy")),
     )
     .await

@@ -13,7 +13,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use asterism_contract::command::{AddAssetCommand, RegisterPersonaCommand};
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
@@ -105,7 +105,7 @@ async fn a_vp9_webm_gains_a_playable_rendition_and_an_mp4_never_pays() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -225,7 +225,7 @@ async fn a_restricted_assets_preview_status_is_absent_for_an_outside_viewer() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

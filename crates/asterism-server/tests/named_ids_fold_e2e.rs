@@ -19,7 +19,7 @@
 //! yields zero members and redirecting yields one. Without that case
 //! the tests could not choose between the two implementations.
 //!
-//! `CoreMode::ReadOnly` throughout: `merge_into` folds inside its own
+//! `JobWorker::None` throughout: `merge_into` folds inside its own
 //! transaction, so no worker is needed to reach the state under test,
 //! and none running means the constellation sees the edges this fixture
 //! wrote rather than a rebuild's.
@@ -35,7 +35,7 @@ use asterism_dispatch_sdk::{
 };
 use asterism_infra::dispatch::{DispatchRunEnv, ExporterRegistry, ReEnqueue, run_dispatch_run};
 use asterism_infra::sqlite;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
 use axum::Router;
 use axum::body::Body;
@@ -107,7 +107,7 @@ impl Fixture {
         let core = init_core_with(
             &tmp.path().join("asterism.db"),
             Arc::new(LogEmitter),
-            CoreMode::ReadOnly,
+            JobWorker::None,
             Some(&tmp.path().join("tantivy")),
         )
         .await

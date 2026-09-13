@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use asterism_contract::command::{AddAssetCommand, RegisterPersonaCommand};
 use asterism_contract::sidecar::SIDECAR_SUFFIX;
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the sidecar claim, not
@@ -76,7 +76,7 @@ async fn a_sidecar_without_an_identity_block_falls_back_and_a_missing_one_is_rep
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

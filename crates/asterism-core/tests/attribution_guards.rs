@@ -363,6 +363,12 @@ fn public_fns(root: &Path, path: &Path) -> Vec<PublicFn> {
 /// without saying whose write it is.
 const CONTEXT_EXEMPT: &[(&str, &str)] = &[
     (
+        "import_run_service::abandon_orphans",
+        "sweeps — closes runs a previous process did not outlive. Nobody asked \
+         for it and nobody could be recorded as having: it happens at startup, \
+         over rows whose author is gone",
+    ),
+    (
         "import_run_service::list",
         "read — every stored import, for whatever is about to run one",
     ),

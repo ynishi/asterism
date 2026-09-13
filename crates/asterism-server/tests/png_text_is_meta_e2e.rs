@@ -31,7 +31,7 @@ use asterism_core::domain::repository::AssetRepository;
 use asterism_core::domain::source_locator::SourceLocator;
 use asterism_core::domain::value::AssetId;
 use asterism_infra::sqlite;
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. This is about what the bytes carry,
@@ -138,7 +138,7 @@ async fn a_pngs_text_chunks_land_on_the_image_row_as_its_meta_axis() {
     let core = init_core_with(
         &db_path,
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

@@ -31,7 +31,7 @@ use asterism_contract::query::GetAssetDetailQuery;
 use asterism_core::application::AssetService;
 use asterism_core::domain::attribution::AttributionContext;
 use asterism_core::domain::content_hash;
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the declared digest,
@@ -133,7 +133,7 @@ async fn a_declared_digest_the_bytes_disagree_with_is_recorded_and_costs_the_ass
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -232,7 +232,7 @@ async fn a_declared_digest_the_bytes_agree_with_is_recorded_as_agreement() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -308,7 +308,7 @@ async fn an_undeclared_registration_is_hashed_exactly_as_before() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -376,7 +376,7 @@ async fn a_declared_digest_nothing_can_ever_check_is_refused_before_anything_is_
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

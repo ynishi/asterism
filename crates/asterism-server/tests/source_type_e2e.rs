@@ -24,7 +24,7 @@ use std::sync::Arc;
 use asterism_contract::command::{
     AddAssetCommand, DeclareSourceTypeCommand, RegisterPersonaCommand,
 };
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 fn unattributed() -> asterism_core::domain::attribution::AttributionContext {
     asterism_core::domain::attribution::AttributionContext::asserted(None, None)
@@ -78,7 +78,7 @@ async fn fixture() -> Fixture {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::ReadOnly,
+        JobWorker::None,
         Some(&tmp.path().join("tantivy")),
     )
     .await

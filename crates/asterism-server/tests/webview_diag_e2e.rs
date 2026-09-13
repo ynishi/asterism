@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
@@ -80,7 +80,7 @@ async fn a_webview_diagnostic_round_trips_into_diag_log() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

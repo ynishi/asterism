@@ -20,7 +20,7 @@
 //! answered in `asterism-infra`'s own tests, beside the certificate
 //! fixture that can produce one.
 //!
-//! **Why `CoreMode::ReadOnly`.** One test here asserts an absence.
+//! **Why `JobWorker::None`.** One test here asserts an absence.
 //! `a_member_that_cannot_be_stamped_is_recorded_rather_than_skipped`
 //! lands two members and fingerprints one of them, and what it is
 //! about is the row the release writes for the member that has none.
@@ -49,7 +49,7 @@ use asterism_core::domain::repository::MaterialFingerprint;
 use asterism_core::domain::value::{AssetId, DispatchId};
 use asterism_infra::dispatch::{DispatchRunEnv, ExporterRegistry, ReEnqueue};
 use asterism_infra::sqlite;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
 use axum::Router;
 use axum::body::Body;
@@ -63,7 +63,7 @@ async fn harness(tmp: &std::path::Path) -> (CoreCtx, Router) {
     let core = init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::ReadOnly,
+        JobWorker::None,
         Some(&tmp.join("tantivy")),
     )
     .await
@@ -665,7 +665,7 @@ async fn a_member_that_cannot_be_stamped_is_recorded_rather_than_skipped() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let (core, router) = harness(tmp.path()).await;
     // Two members, one of them still waiting on the hash job — and the
-    // one the module doc's `CoreMode::ReadOnly` is for. A harness that
+    // one the module doc's `JobWorker::None` is for. A harness that
     // drained the queue would hash it out from under this assertion.
     let (line, point, assets, _) = a_landed_line(&router, tmp.path(), 2, 1).await;
     let out = tmp.path().join("outbound");
