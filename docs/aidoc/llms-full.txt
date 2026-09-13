@@ -187,6 +187,7 @@ convert them into domain types and surface any validation failures as
 - `PurgeAssetCommand` — Permanently deletes an **already-trashed** asset. Irreversible:
 - `PurgeGroupCommand` — Permanently deletes an **already-trashed** Group and every
 - `PurgePersonaCommand` — Permanently deletes an **already-trashed** persona. Irreversible, and
+- `ReadImportStateCommand` — Looks up an importer's resumption point
 - `RebuildEdgesCommand` — Enqueues an incremental constellation-edge rebuild for the asset.
 - `RecordDiagCommand` — Appends one webview-origin diagnostic to `diag_log`
 - `RecordEventCommand` — Appends one telemetry event to the local `event_log` (dogfooding
@@ -220,6 +221,7 @@ convert them into domain types and surface any validation failures as
 - `UpdateModalityCommand` — Partially updates a Modality master row
 - `UpdateQueryGroupQueryCommand` — Rewrites a Query Group's rule ("Update query"): validate,
 - `UpdateSeriesStrategyCommand` — Partially updates a series Strategy
+- `WriteImportStateCommand` — Stores an importer's resumption point
 
 
 <!-- asterism_contract/digest.md -->
@@ -323,6 +325,7 @@ the domain types.
 - `GroupLinkDto` — One Group-in-Group connection (Are.na channel-in-channel). The
 - `GroupSummaryDto` — A group paired with the number of distinct assets attached, used
 - `HeadStatusDto` — Which trained head scores tags, and what stands between the
+- `ImportStateDto` — An importer's stored resumption point.
 - `JobDto` — Job status payload.
 - `JobKindSnapshotDto` — Per-kind slice of the background-jobs table (wire form of the
 - `JobLogDto` — One job run (`GET /asterism/jobs/log`).
@@ -702,6 +705,7 @@ the private design notes.
 - [`application::forge::line_service`](application__forge__line_service.md): Line use cases — opening one, reading what is on it, and moving its
 - [`application::forge::pursuit_service`](application__forge__pursuit_service.md): Work use cases — opening a line of work, writing rounds, looking at
 - [`application::forge::thread_service`](application__forge__thread_service.md): Saying something about work, and correcting it.
+- [`application::import_state_service`](application__import_state_service.md): Reading and writing where an importer got to.
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
 - [`application::material_mark_service`](application__material_mark_service.md): `MaterialMarkService` — the marks placed into an Asset's material.
@@ -777,6 +781,7 @@ the private design notes.
 - [`domain::forge::threads`](domain__forge__threads.md): Keeping what was said about work.
 - [`domain::generator_params`](domain__generator_params.md): `generator_params` — what an extraction concluded about the
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
+- [`domain::import_state`](domain__import_state.md): Where an importer got to, kept so the next run does not start over.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
 - [`domain::job`](domain__job.md): `Job` — lifecycle model for asynchronous work.
 - [`domain::material`](domain__material.md): `Material` — the physical-original layer of an asset (asset-model v4).
@@ -1316,6 +1321,33 @@ came out.
 
 - `Anchored` — What a caller says a thread hangs off, in ids.
 - `ThreadService` — Conversation use-case service.
+
+
+<!-- asterism_core/application__import_state_service.md -->
+# asterism-core::application::import_state_service
+
+Reading and writing where an importer got to.
+
+Thin on purpose, and the thinness is the design. Every judgement
+about a resumption point — whether a scan has one at all, whether a
+run earned the right to move it, what the offset means — is made in
+the importer, which is the only place that can make it. This service
+is the other end of the wire: it stores what it is given and hands
+back what it stored.
+
+Two things it deliberately does not do. It does not validate the
+offset, because the offset belongs to the adapter that wrote it and
+a validator here would be this side inventing an opinion about a
+shape it cannot know — see [`import_state`](crate::domain::import_state)
+for the rule and why this is where it would break first. And it does
+not check whether the persona exists: an import that reaches this
+point has been posting assets to that persona all along, and a
+second existence check here would answer a question the write path
+already answered, in a place with nothing to do about the answer.
+
+## Types
+
+- `ImportStateService` — Where an importer got to, read and written.
 
 
 <!-- asterism_core/application__mapping.md -->
@@ -6202,6 +6234,43 @@ use the `Group` label — only the DB layer sees `bucket`.
 - `GroupSummary` — A group paired with the number of assets currently linked to it,
 
 
+<!-- asterism_core/domain__import_state.md -->
+# asterism-core::domain::import_state
+
+Where an importer got to, kept so the next run does not start over.
+
+An importer scans a source and hands records to the server. #293 gave
+it a way to say where it stopped — a checkpoint on the scan's own
+stream, carried out of a run that earned one — and no way to keep
+that anywhere. This is the place it is kept, and the whole of what
+this layer does with it is store it and hand it back.
+
+## The one rule
+
+**The offset is opaque here.** It belongs to the adapter that wrote
+it, and nothing on this side parses, validates, migrates or compares
+it. That rule is stated in the inbound port's own vocabulary
+(`asterism-importer-sdk`'s `SyncState`), and this is the layer where
+breaking it would be easiest and least visible: a column tempting
+somebody to index, a service tempted to "fix up" a shape it
+recognises. It is carried as text for that reason as much as for the
+bindings — text has nothing to be clever about.
+
+The **key** is not opaque, because a store that could not compare
+keys could not find anything. It is a persona and a partition, and
+both halves are load-bearing. The persona, because the same source
+imported into two personas has two independent positions and one
+being ahead says nothing about the other. The partition, because it
+is the adapter's own statement of what it is scanning — and the
+adapter names it fully, its own kind included, so two adapters cannot
+collide inside one persona by both calling something `root=/photos`.
+
+## Types
+
+- `ImportState` — A resumption point as this side holds it.
+- `ImportStateKey` — What a stored position is a position *in*.
+
+
 <!-- asterism_core/domain__instance.md -->
 # asterism-core::domain::instance
 
@@ -7203,6 +7272,7 @@ projection instead of full `Asset` entities.
 - `DispatchRepository` — Persistence port for [`DispatchJob`].
 - `EdgeRepository` — Persistence port for [`ConstellationEdge`].
 - `GroupRepository` — Persistence port for [`Group`] and its many-to-many link with
+- `ImportStateRepository` — Persistence port for an importer's resumption point
 - `InstanceRepository` — Persistence port for the instance identity record (`instance`
 - `JobQueue` — Port for enqueueing background jobs. The adapter wraps `apalis`
 - `MaterialLayerRepository` — Persistence port for [`MaterialLayer`] — the bands of marks over an
@@ -10125,6 +10195,7 @@ per-target split rules, locator patterns, and unverified fields.
 - [`scanner`](scanner.md): `SourceScanner` trait and shared item type.
 - [`scanner::fs`](scanner__fs.md): `FsScanner` — filesystem source scanner.
 - [`scanner::sqlite`](scanner__sqlite.md): `SqliteScanner` — SQLite source scanner.
+- [`store`](store.md): Where a resumption point is kept, as the importer sees it.
 
 
 <!-- asterism_importer_sdk/bundle.md -->
@@ -11100,13 +11171,15 @@ reference the user wants to preserve alongside the footprint.
 
 Thin HTTP client for the asterism-server API.
 
-Only wraps the two endpoints an importer actually needs:
-`POST /asterism/assets/add` (single) and
-`POST /asterism/assets/add-batch`.
+Wraps the endpoints an importer actually needs: the two that land
+records (`POST /asterism/assets/add` and `/add-batch`), and the two
+that keep its position between runs, behind
+[`HttpSyncStore`].
 
 ## Types
 
 - `ApiClient` — HTTP client bound to a running `asterism-server`.
+- `HttpSyncStore` — The [`SyncStore`] an adapter that pushes over HTTP uses.
 
 
 <!-- asterism_importer_sdk/footprint.md -->
@@ -11519,11 +11592,13 @@ messages addressed `<file>#<uuid>`, and one PNG yields itself.
 ## Functions
 
 - `run_import` — (no documentation)
+- `run_import_with` — The same run, against a given place to keep the resumption point.
 
 ## Types
 
 - `ImportOptions` — (no documentation)
 - `ImportSummary` — What one run did.
+- `Resume` — Where a run takes up, and what it does about the point it earns.
 
 
 <!-- asterism_importer_sdk/scanner.md -->
@@ -11561,8 +11636,9 @@ set, and emits every matching file as a `RawItem`.
 
 The walk is sorted and resumable: a checkpoint behind each file
 carries the path it stopped at, and a later scan handed one takes up
-after it. The partition is the root *and* the extension filter,
-because both decide what the walk yields. In `Watch` mode
+after it. The partition is this scanner's kind, its root *and* its
+extension filter, because all three decide what the walk yields. In
+`Watch` mode
 the scanner also stays live and streams filesystem-change events via
 `notify` — new / modified files are re-emitted, deletions are
 ignored (deletions on the source do not automatically delete the
@@ -11606,6 +11682,40 @@ checked, which is precisely what the server refuses.
 
 - `ColumnMap` — Column-to-`RawItem` mapping supplied by the importer.
 - `SqliteScanner` — SQLite scanner.
+
+
+<!-- asterism_importer_sdk/store.md -->
+# asterism-importer-sdk::store
+
+Where a resumption point is kept, as the importer sees it.
+
+#293 gave a scan a position and a run the right to hand one back, and
+left it homeless: the point was printed and an operator carried it to
+the next run by hand. This is the port that ends that, and the only
+thing it says about *where* a point is kept is that somewhere is not
+here.
+
+## Why a port rather than a call
+
+The obvious shape is for the runner to POST to the server directly,
+and it is the wrong one for the same reason the rest of this crate is
+written against traits. An importer under test would then need a
+server; and the transport is the question that is still open — an
+adapter that runs itself and pushes is the shape taken today, and one
+Asterism starts and reads is the one that was not. A port is what
+lets the second arrive without the runner learning about it.
+
+[`HttpSyncStore`](crate::client::HttpSyncStore) is the implementation
+that exists, and it is thirty lines over the same `ApiClient` every
+record already travels through.
+
+## Types
+
+- `StateKey` — What a stored position is filed under.
+
+## Traits
+
+- `SyncStore` — Somewhere to keep a resumption point between runs.
 
 
 <!-- asterism_importer_tape/index.md -->
@@ -11808,6 +11918,7 @@ this crate.
 - [`sqlite::repo::forge`](sqlite__repo__forge.md): SQLite adapter for the forge's ports.
 - [`sqlite::repo::forge_boundary`](sqlite__repo__forge_boundary.md): What the forge asks of everything outside it, answered by SQLite.
 - [`sqlite::repo::group`](sqlite__repo__group.md): SQLite adapter for `GroupRepository`.
+- [`sqlite::repo::import_state`](sqlite__repo__import_state.md): SQLite adapter for the `ImportStateRepository` port.
 - [`sqlite::repo::instance`](sqlite__repo__instance.md): SQLite adapter for the `InstanceRepository` port.
 - [`sqlite::repo::material_layer`](sqlite__repo__material_layer.md): SQLite adapter for the `MaterialLayerRepository` port.
 - [`sqlite::repo::material_mark`](sqlite__repo__material_mark.md): SQLite adapter for the `MaterialMarkRepository` port.
@@ -14188,6 +14299,38 @@ Every SQL string in this module hard-codes `bucket` /
 ## Types
 
 - `SqliteGroupRepository` — SQLite adapter (writer isle).
+
+
+<!-- asterism_infra/sqlite__repo__import_state.md -->
+# asterism-infra::sqlite::repo::import_state
+
+SQLite adapter for the `ImportStateRepository` port.
+
+Two statements over one table, and the interest is in what is absent
+from them. Nothing reads inside `offset_json` — no `json_extract`, no
+comparison, no ordering by anything in it — because the offset
+belongs to the adapter that wrote it and this is the layer with the
+tools to break that rule most convincingly. The column goes in as
+text and comes out as text.
+
+The one row a key can have is the primary key's doing, so `upsert`
+is an `ON CONFLICT` over the whole key rather than a read followed by
+a write: two runs of the same importer finishing at once would
+otherwise both read "nothing", both insert, and one would lose to a
+constraint the other had not seen.
+
+A timestamp this build cannot represent is *not* treated the way
+`app_setting` treats one. There, an uninterpretable row reads as
+"not overridden" and the settings screen still renders; here the
+equivalent would be a resumption point silently reading as absent,
+and an importer told a source it has read is a source it has not
+would re-import the whole thing. So the read fails and says so —
+`updated_at` is a stamp for a person, and losing a position over one
+is the trade that runs the wrong way.
+
+## Types
+
+- `SqliteImportStateRepository` — SQLite adapter for `ImportStateRepository` (uses a writer isle).
 
 
 <!-- asterism_infra/sqlite__repo__instance.md -->

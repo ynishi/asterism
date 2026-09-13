@@ -27,9 +27,11 @@ messages addressed `<file>#<uuid>`, and one PNG yields itself.
 ## Functions
 
 - `run_import` — (no documentation)
+- `run_import_with` — The same run, against a given place to keep the resumption point.
 
 ## Types
 
 - `ImportOptions` — (no documentation)
 - `ImportSummary` — What one run did.
+- `Resume` — Where a run takes up, and what it does about the point it earns.
 

@@ -132,4 +132,5 @@ per-target split rules, locator patterns, and unverified fields.
 - [`scanner`](scanner.md): `SourceScanner` trait and shared item type.
 - [`scanner::fs`](scanner__fs.md): `FsScanner` — filesystem source scanner.
 - [`scanner::sqlite`](scanner__sqlite.md): `SqliteScanner` — SQLite source scanner.
+- [`store`](store.md): Where a resumption point is kept, as the importer sees it.
 

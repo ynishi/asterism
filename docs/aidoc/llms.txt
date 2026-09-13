@@ -33,6 +33,7 @@
 - [asterism-core::application::forge::line_service](asterism_core/application__forge__line_service.md): Line use cases — opening one, reading what is on it, and moving its
 - [asterism-core::application::forge::pursuit_service](asterism_core/application__forge__pursuit_service.md): Work use cases — opening a line of work, writing rounds, looking at
 - [asterism-core::application::forge::thread_service](asterism_core/application__forge__thread_service.md): Saying something about work, and correcting it.
+- [asterism-core::application::import_state_service](asterism_core/application__import_state_service.md): Reading and writing where an importer got to.
 - [asterism-core::application::mapping](asterism_core/application__mapping.md): Conversion between domain types and contract DTOs.
 - [asterism-core::application::material_layer_service](asterism_core/application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
 - [asterism-core::application::material_mark_service](asterism_core/application__material_mark_service.md): `MaterialMarkService` — the marks placed into an Asset's material.
@@ -108,6 +109,7 @@
 - [asterism-core::domain::forge::threads](asterism_core/domain__forge__threads.md): Keeping what was said about work.
 - [asterism-core::domain::generator_params](asterism_core/domain__generator_params.md): `generator_params` — what an extraction concluded about the
 - [asterism-core::domain::group](asterism_core/domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
+- [asterism-core::domain::import_state](asterism_core/domain__import_state.md): Where an importer got to, kept so the next run does not start over.
 - [asterism-core::domain::instance](asterism_core/domain__instance.md): Instance identity — the referent behind
 - [asterism-core::domain::job](asterism_core/domain__job.md): `Job` — lifecycle model for asynchronous work.
 - [asterism-core::domain::material](asterism_core/domain__material.md): `Material` — the physical-original layer of an asset (asset-model v4).
@@ -243,6 +245,7 @@
 - [asterism-importer-sdk::scanner](asterism_importer_sdk/scanner.md): `SourceScanner` trait and shared item type.
 - [asterism-importer-sdk::scanner::fs](asterism_importer_sdk/scanner__fs.md): `FsScanner` — filesystem source scanner.
 - [asterism-importer-sdk::scanner::sqlite](asterism_importer_sdk/scanner__sqlite.md): `SqliteScanner` — SQLite source scanner.
+- [asterism-importer-sdk::store](asterism_importer_sdk/store.md): Where a resumption point is kept, as the importer sees it.
 
 ## asterism-importer-tape 0.1.1
 
@@ -309,6 +312,7 @@
 - [asterism-infra::sqlite::repo::forge](asterism_infra/sqlite__repo__forge.md): SQLite adapter for the forge's ports.
 - [asterism-infra::sqlite::repo::forge_boundary](asterism_infra/sqlite__repo__forge_boundary.md): What the forge asks of everything outside it, answered by SQLite.
 - [asterism-infra::sqlite::repo::group](asterism_infra/sqlite__repo__group.md): SQLite adapter for `GroupRepository`.
+- [asterism-infra::sqlite::repo::import_state](asterism_infra/sqlite__repo__import_state.md): SQLite adapter for the `ImportStateRepository` port.
 - [asterism-infra::sqlite::repo::instance](asterism_infra/sqlite__repo__instance.md): SQLite adapter for the `InstanceRepository` port.
 - [asterism-infra::sqlite::repo::material_layer](asterism_infra/sqlite__repo__material_layer.md): SQLite adapter for the `MaterialLayerRepository` port.
 - [asterism-infra::sqlite::repo::material_mark](asterism_infra/sqlite__repo__material_mark.md): SQLite adapter for the `MaterialMarkRepository` port.

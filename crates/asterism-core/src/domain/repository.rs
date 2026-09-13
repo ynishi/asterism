@@ -35,6 +35,7 @@ use crate::domain::dispatch::DispatchJob;
 use crate::domain::duplicate_conflict::{ConflictResolution, DuplicateAxis, DuplicateConflict};
 use crate::domain::edge::{ConstellationEdge, EdgeKind, IncidentEdge};
 use crate::domain::group::{Group, GroupLink, GroupSummary};
+use crate::domain::import_state::{ImportState, ImportStateKey};
 use crate::domain::instance::InstanceIdentity;
 use crate::domain::job::JobKind;
 use crate::domain::material_layer::{LayerRole, MaterialLayer};
@@ -4299,4 +4300,34 @@ pub trait AssetLinkRepository: Send + Sync {
     /// Removes the named rows, and nothing else. Answers how many
     /// existed to be removed.
     async fn reap(&self, keys: &[AssetLinkKey]) -> Result<u64, DomainError>;
+}
+
+/// Persistence port for an importer's resumption point
+/// (`import_state` table).
+///
+/// Two verbs and no third. There is no list, because nothing asks "what
+/// is every importer's position" — a run knows its own key and asks for
+/// that one. There is no delete, because a partition that changes
+/// simply leaves a row nothing will ask for again; forgetting a
+/// position is a request nobody has made, and a delete nobody calls is
+/// a delete nobody has tested.
+#[async_trait]
+pub trait ImportStateRepository: Send + Sync {
+    /// The position stored under `key`, or `None` for a source nothing
+    /// has imported yet.
+    ///
+    /// Absence is an answer and not a failure: a first run is the
+    /// ordinary case, and a caller that had to distinguish "no row"
+    /// from "the store is broken" by reading an error message would get
+    /// it wrong on the day it mattered.
+    async fn find(&self, key: &ImportStateKey) -> Result<Option<ImportState>, DomainError>;
+
+    /// Inserts or replaces the position for `state.key`.
+    ///
+    /// Replaces unconditionally. Whether this run had earned the right
+    /// to move the position is decided before the call — in the
+    /// importer, which is the only place that knows what happened to
+    /// the records in front of the checkpoint — and a store that second
+    /// guessed it would be a second opinion on the same question.
+    async fn upsert(&self, state: &ImportState) -> Result<(), DomainError>;
 }

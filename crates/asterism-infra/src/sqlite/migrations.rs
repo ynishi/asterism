@@ -8063,6 +8063,39 @@ ALTER TABLE asset ADD COLUMN time_zone TEXT;
 ALTER TABLE asset ADD COLUMN occurred_local_date TEXT;
 "#;
 
+/// V111 — where an importer got to, so the next run does not start over.
+///
+/// What the row means is
+/// `asterism_core::domain::import_state`; this is the shape it takes on
+/// disk, and the shape says two things that matter.
+///
+/// # The key is the whole primary key
+///
+/// A persona and a partition, together, and nothing else identifies a
+/// row. The same source imported into two personas holds two
+/// independent positions, and two adapters inside one persona are kept
+/// apart by the partition, which each adapter names fully — its own
+/// kind included. A surrogate id would let the same key exist twice,
+/// and a second row under one key is a position nobody can read.
+///
+/// # `offset_json` is text, and nothing here looks inside it
+///
+/// The offset belongs to the adapter that wrote it. There is no index
+/// on it, no CHECK, no generated column reading a field out of it —
+/// every one of which would be this side forming an opinion about a
+/// shape it cannot know, and the schema is where such an opinion would
+/// look most like a fact. `TEXT` is a deliberate floor: it has nothing
+/// to be clever about.
+const V111_IMPORT_STATE: &str = r#"
+CREATE TABLE import_state (
+    persona_id   TEXT NOT NULL,
+    partition    TEXT NOT NULL,
+    offset_json  TEXT NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    PRIMARY KEY (persona_id, partition)
+) STRICT;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -8176,6 +8209,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V108_FORGE_RELEASE),
     Step::Sql(V109_FORGE_SEND),
     Step::Sql(V110_ASSET_ZONE),
+    Step::Sql(V111_IMPORT_STATE),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -12144,6 +12178,77 @@ mod tests {
             .unwrap();
         assert_eq!(source, "unknown");
         assert_eq!((zone, local_date), (None, None));
+    }
+
+    /// V111 gives an importer somewhere to keep its position, keyed by
+    /// the persona and the partition together.
+    ///
+    /// The composite primary key is the assertion worth making: a second
+    /// row under one key would be a position nobody can read, and the
+    /// two halves being one key is what lets two personas and two
+    /// partitions each hold their own.
+    #[test]
+    fn v111_keeps_one_position_per_persona_and_partition() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 110).unwrap();
+        let table = |conn: &Connection| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type = 'table' AND name = 'import_state'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(table(&conn), 0, "nothing before the step that adds it");
+
+        migrate(&mut conn).unwrap();
+        assert_eq!(table(&conn), 1);
+
+        let put = |persona: &str, partition: &str, offset: &str| {
+            conn.execute(
+                "INSERT INTO import_state \
+                     (persona_id, partition, offset_json, updated_at) \
+                 VALUES (?1, ?2, ?3, 0)",
+                params![persona, partition, offset],
+            )
+        };
+
+        // One persona, two partitions; one partition, two personas.
+        put("p1", "root=/photos|ext=png", "1").unwrap();
+        put("p1", "root=/photos|ext=mp4", "1").unwrap();
+        put("p2", "root=/photos|ext=png", "1").unwrap();
+
+        let err = put("p1", "root=/photos|ext=png", "2")
+            .expect_err("the same key twice is not two positions");
+        assert!(
+            matches!(
+                err,
+                rusqlite::Error::SqliteFailure(e, _)
+                    if e.code == rusqlite::ErrorCode::ConstraintViolation
+            ),
+            "{err}"
+        );
+
+        // And the offset is stored as written — the column has no
+        // opinion about what is inside it.
+        conn.execute(
+            "INSERT INTO import_state \
+                 (persona_id, partition, offset_json, updated_at) \
+             VALUES ('p3', 'db=/x.sqlite|query=SELECT 1', ?1, 0) \
+             ON CONFLICT(persona_id, partition) DO UPDATE SET \
+                 offset_json = excluded.offset_json",
+            params![r#"{"after_id":9,"zz":"a"}"#],
+        )
+        .unwrap();
+        let stored: String = conn
+            .query_row(
+                "SELECT offset_json FROM import_state WHERE persona_id = 'p3'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, r#"{"after_id":9,"zz":"a"}"#);
     }
 
     /// The marker a pre-probe import left on the content axis of a JPEG,

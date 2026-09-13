@@ -116,27 +116,27 @@ use asterism_contract::command::{
     PostAssetCommentCommand, PostChapterMarkCommand, PostMaterialMarkCommand,
     PromoteSnapshotToGroupCommand, PromoteSnapshotToGroupResult, PromoteTagToGroupCommand,
     PromoteTagToGroupResult, PromoteVolatileSelectionCommand, PurgeAssetCommand, PurgeGroupCommand,
-    PurgePersonaCommand, RecordDiagCommand, RecordEventCommand, RedispatchCommand,
-    RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand, RenameGroupCommand,
-    RenameSessionCommand, RenameTagCommand, ReorderGroupAssetsCommand, ReorderGroupChildrenCommand,
-    ReorderPersonasCommand, ResetSettingCommand, ResolveDuplicateConflictCommand,
-    RestoreAssetCommand, RestoreGroupCommand, RestorePersonaCommand,
-    SetDefaultMaterialLayerCommand, SetPersonaProfileCommand, SetPersonaThemeCommand,
-    SetSettingCommand, TrashAssetCommand, TrashGroupCommand, TrashPersonaCommand,
-    UnlinkGroupCommand, UpdateAssetMetaBatchCommand, UpdateAssetMetaBatchResult,
-    UpdateAssetMetaCommand, UpdateModalityCommand, UpdateQueryGroupQueryCommand,
-    UpdateSeriesStrategyCommand,
+    PurgePersonaCommand, ReadImportStateCommand, RecordDiagCommand, RecordEventCommand,
+    RedispatchCommand, RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand,
+    RenameGroupCommand, RenameSessionCommand, RenameTagCommand, ReorderGroupAssetsCommand,
+    ReorderGroupChildrenCommand, ReorderPersonasCommand, ResetSettingCommand,
+    ResolveDuplicateConflictCommand, RestoreAssetCommand, RestoreGroupCommand,
+    RestorePersonaCommand, SetDefaultMaterialLayerCommand, SetPersonaProfileCommand,
+    SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand, TrashGroupCommand,
+    TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
+    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
+    UpdateQueryGroupQueryCommand, UpdateSeriesStrategyCommand, WriteImportStateCommand,
 };
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetIndexPageDto,
     AssetPageDto, AssetSourceTypeDto, AssetTextDto, ChapterMarkDto, ConstellationItemDto, DiagDto,
     DirDto, DispatchDto, DuplicateConflictDto, DuplicateReportDto, DuplicateResolutionDto, EdgeDto,
-    EventDto, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto, JobLogDto, LineageViewDto,
-    MaterialLayerDto, MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto,
-    ModalityDefDto, ObservationDto, PerfDto, PersonaDto, PersonaProfileDto, PersonaThemeDto,
-    ProvenanceViewDto, RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SeriesStrategyDto,
-    SessionDto, SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, TagSuggestionDto,
-    ThreadDto, VideoPreviewDto, VisualModelStatusDto,
+    EventDto, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto, ImportStateDto, JobLogDto,
+    LineageViewDto, MaterialLayerDto, MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto,
+    MessageDto, ModalityDefDto, ObservationDto, PerfDto, PersonaDto, PersonaProfileDto,
+    PersonaThemeDto, ProvenanceViewDto, RetrievedIdsDto, RetrievedPageDto, SampledPageDto,
+    SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto,
+    TagSuggestionDto, ThreadDto, VideoPreviewDto, VisualModelStatusDto,
 };
 use asterism_contract::forge::{
     AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto,
@@ -285,6 +285,8 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
             "/asterism/settings/{key}",
             get(get_setting).put(set_setting).delete(reset_setting),
         )
+        .route("/asterism/import/state/read", post(read_import_state))
+        .route("/asterism/import/state/write", post(write_import_state))
         .route("/asterism/personas/register", post(register_persona))
         .route("/asterism/personas/reorder", post(reorder_personas))
         .route("/asterism/personas/archive", post(archive_persona))
@@ -1898,6 +1900,47 @@ async fn delete_series_strategy(
         )
         .await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+/// `POST /asterism/import/state/read` — where an importer got to, or
+/// `null` for a source nothing has imported yet.
+///
+/// A read behind a POST, and the partition is why: it is a string the
+/// adapter chose, holding a filesystem path, a whole SQL query, a `|`
+/// between the two. That does not go in a path segment or a query
+/// parameter, and this router already answers questions with bodies
+/// where the question is not a name — `search_assets` is the same shape
+/// for the same reason.
+///
+/// `null` rather than `404`, because a first run is the ordinary case
+/// and not a miss. A caller that had to read a status code to tell
+/// "nobody has imported this yet" from "the store is broken" would get
+/// it wrong on the day it mattered, and getting it wrong means
+/// re-importing the source.
+async fn read_import_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<ReadImportStateCommand>,
+) -> ApiResult<Option<ImportStateDto>> {
+    Ok(Json(ctx.import_state_service.read(command).await?))
+}
+
+/// `POST /asterism/import/state/write` — stores where an importer got
+/// to, replacing whatever that key held.
+///
+/// Whether this run had earned the right to move the position is
+/// decided before the request is made — in the importer, which is the
+/// only place that knows what happened to the records in front of the
+/// checkpoint. This end does not second-guess it, and the offset goes
+/// to disk unread.
+async fn write_import_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<WriteImportStateCommand>,
+) -> ApiResult<ImportStateDto> {
+    Ok(Json(
+        ctx.import_state_service
+            .write(command, &asserted(None, None, None)?)
+            .await?,
+    ))
 }
 
 /// `GET /asterism/settings` — every known setting, resolved through

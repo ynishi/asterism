@@ -2575,3 +2575,19 @@ pub struct SettingDto {
     /// One-line description for the settings UI.
     pub summary: String,
 }
+
+/// An importer's stored resumption point.
+///
+/// The read route answers `null` for a key nothing has stored, which is
+/// what a first run over a source looks like.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportStateDto {
+    /// Persona the import lands in.
+    pub persona_id: String,
+    /// The adapter's own name for what it is scanning.
+    pub partition: String,
+    /// The position, as the adapter wrote it, as JSON text.
+    pub offset_json: String,
+    /// When this point was last written, RFC 3339.
+    pub updated_at: String,
+}

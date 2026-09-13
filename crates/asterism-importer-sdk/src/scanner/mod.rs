@@ -154,6 +154,39 @@ pub trait SourceScanner: Send + Sync {
     /// it is about to receive.
     fn scan(&self, mode: ScanMode, resume_from: Option<SyncState>) -> ScanFuture<'_>;
 
+    /// The resumable unit this scanner is scanning, or `None` when it
+    /// has no position to take up from.
+    ///
+    /// The question a caller has to be able to ask before a scan
+    /// starts. A resumption point is kept under the partition it
+    /// belongs to, so a caller that could not name the partition could
+    /// not look one up — it would be holding a key it cannot spell.
+    ///
+    /// **This is the single source.** The partition a scanner
+    /// checkpoints under is this one; the two cannot be written
+    /// separately, because a scan that emitted points under a string
+    /// nobody could ask for would fill a store with rows nothing
+    /// retrieves.
+    ///
+    /// A partition names **everything that decides what this scan
+    /// yields**, its own kind included. Not only the source: two
+    /// scanners over one directory with different extension filters
+    /// hand over different sets of files, and a position in one is not
+    /// a position in the other. A scanner whose unit is compound
+    /// encodes it into the one string and owns that encoding — the same
+    /// bargain [`SyncState::offset`](crate::SyncState) has, one level
+    /// up.
+    ///
+    /// `None` is the honest answer for a scan with nowhere to take up
+    /// from, and it is the default: a scanner that has not thought
+    /// about resumption is not resumable, which is the safe direction.
+    /// `SqliteScanner` answers `None` until its caller vouches for the
+    /// query's order, because until then there is no order to resume
+    /// inside.
+    fn partition(&self) -> Option<String> {
+        None
+    }
+
     /// Whether [`RawItem::payload`] is the **complete byte content of
     /// what [`RawItem::locator`] addresses** — a whole file, a whole
     /// response body — rather than something lifted out of a container.

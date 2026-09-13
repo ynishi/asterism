@@ -86,6 +86,7 @@ this crate.
 - [`sqlite::repo::forge`](sqlite__repo__forge.md): SQLite adapter for the forge's ports.
 - [`sqlite::repo::forge_boundary`](sqlite__repo__forge_boundary.md): What the forge asks of everything outside it, answered by SQLite.
 - [`sqlite::repo::group`](sqlite__repo__group.md): SQLite adapter for `GroupRepository`.
+- [`sqlite::repo::import_state`](sqlite__repo__import_state.md): SQLite adapter for the `ImportStateRepository` port.
 - [`sqlite::repo::instance`](sqlite__repo__instance.md): SQLite adapter for the `InstanceRepository` port.
 - [`sqlite::repo::material_layer`](sqlite__repo__material_layer.md): SQLite adapter for the `MaterialLayerRepository` port.
 - [`sqlite::repo::material_mark`](sqlite__repo__material_mark.md): SQLite adapter for the `MaterialMarkRepository` port.

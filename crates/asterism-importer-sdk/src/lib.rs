@@ -115,6 +115,7 @@ pub mod port;
 pub mod progress;
 pub mod runner;
 pub mod scanner;
+pub mod store;
 
 /// Where a footprint's `occurred_at` came from, re-exported for the
 /// reason the sidecar vocabulary is: a parser names the rung it took
@@ -136,7 +137,7 @@ pub use asterism_contract::digest;
 /// contract crate (importers depend on this SDK and nothing else of
 /// Asterism's).
 pub use asterism_contract::sidecar::{SIDECAR_IDENTITY_KEY, SIDECAR_SCHEMA, SIDECAR_SUFFIX};
-pub use client::ApiClient;
+pub use client::{ApiClient, HttpSyncStore};
 pub use footprint::{
     Audio, COVER_MAX_CHARS, ChatMessage, ChatRole, Doc, DocFormat, Footprint, FootprintSource,
     Image, JournalEntry, JournalKind, Note, REGISTER_MAX_CHARS, Tape, Video,
@@ -145,7 +146,8 @@ pub use mapper::{AssetSpec, spec_to_command};
 pub use parser::{ParseError, RecordAddresses, SourceParser, resolve_occurrence};
 pub use port::{Disposition, SourceError, SyncState};
 pub use progress::Progress;
-pub use runner::{ImportOptions, ImportSummary, run_import};
+pub use runner::{ImportOptions, ImportSummary, Resume, run_import, run_import_with};
 pub use scanner::{
     RawItem, ScanEvent, ScanMode, SourceScanner, fs::FsScanner, sqlite::SqliteScanner,
 };
+pub use store::{StateKey, SyncStore};

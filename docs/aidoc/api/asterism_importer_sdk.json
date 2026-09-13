@@ -195,12 +195,17 @@
     {
       "path": "asterism_importer_sdk::client",
       "kind": "module",
-      "docs": "Thin HTTP client for the asterism-server API.\n\nOnly wraps the two endpoints an importer actually needs:\n`POST /asterism/assets/add` (single) and\n`POST /asterism/assets/add-batch`."
+      "docs": "Thin HTTP client for the asterism-server API.\n\nWraps the endpoints an importer actually needs: the two that land\nrecords (`POST /asterism/assets/add` and `/add-batch`), and the two\nthat keep its position between runs, behind\n[`HttpSyncStore`]."
     },
     {
       "path": "asterism_importer_sdk::client::ApiClient",
       "kind": "struct",
       "docs": "HTTP client bound to a running `asterism-server`."
+    },
+    {
+      "path": "asterism_importer_sdk::client::HttpSyncStore",
+      "kind": "struct",
+      "docs": "The [`SyncStore`] an adapter that pushes over HTTP uses.\n\nThe whole of the transport decision, in one type. An adapter runs\nitself, posts its records to a server, and keeps its position in the\nsame place over the same connection — so nothing has to start the\nadapter, and nothing has to read its output, for it to be\nincremental.\n\nWraps an [`ApiClient`] rather than building a second HTTP stack:\nthe base URL, the client and the error shape are all already\ndecided, and a second one would be a second thing to configure and a\nsecond thing to get wrong."
     },
     {
       "path": "asterism_importer_sdk::footprint",
@@ -422,8 +427,18 @@
       "docs": "What one run did.\n\nReturned for every run that *started*, including one a failure cut\nshort: the counts are what the run achieved and\n[`ended_by`](Self::ended_by) is why it is not a success, so a caller\nreads both from one place. Returning the failure *instead* would\nthrow the counts away at the moment somebody wants them.\n\n[`run_import`] still returns `Err` for a run that could not start,\nwhere there is nothing to count."
     },
     {
+      "path": "asterism_importer_sdk::runner::Resume",
+      "kind": "enum",
+      "docs": "Where a run takes up, and what it does about the point it earns.\n\nThree answers rather than an `Option`, because \"start at the\nbeginning\" and \"start at the beginning **this once**\" are different\nrequests and only one of them should disturb what is stored. An\noperator re-reading a source to repair something is making the\nsecond, and a run that quietly forgot their position as the price\nwould be a surprise paid for later."
+    },
+    {
       "path": "asterism_importer_sdk::runner::run_import",
       "kind": "function"
+    },
+    {
+      "path": "asterism_importer_sdk::runner::run_import_with",
+      "kind": "function",
+      "docs": "The same run, against a given place to keep the resumption point.\n\n[`run_import`] is this with no store, which is the shape a caller\nthat does not want a position kept asks for — and the shape every\ntest that is not about resumption keeps using.\n\nThe store is reached twice and in one place each: once before the\nscan, to ask where to take up, and once after everything the run sent\nhas been answered, to say where it got to. Nothing in the loop\ntouches it. A point written mid-run would be a promise that the\nrecords in front of it had landed, made at a moment when that is not\nyet known — the same promise [`ImportSummary::resume_from`] refuses\nto make about a run that lost a record."
     },
     {
       "path": "asterism_importer_sdk::scanner",
@@ -463,7 +478,7 @@
     {
       "path": "asterism_importer_sdk::scanner::fs",
       "kind": "module",
-      "docs": "`FsScanner` — filesystem source scanner.\n\nWalks a directory tree, optionally filtered by glob-ish extension\nset, and emits every matching file as a `RawItem`.\n\nThe walk is sorted and resumable: a checkpoint behind each file\ncarries the path it stopped at, and a later scan handed one takes up\nafter it. The partition is the root *and* the extension filter,\nbecause both decide what the walk yields. In `Watch` mode\nthe scanner also stays live and streams filesystem-change events via\n`notify` — new / modified files are re-emitted, deletions are\nignored (deletions on the source do not automatically delete the\ncorresponding asset; that is a policy decision left to the caller)."
+      "docs": "`FsScanner` — filesystem source scanner.\n\nWalks a directory tree, optionally filtered by glob-ish extension\nset, and emits every matching file as a `RawItem`.\n\nThe walk is sorted and resumable: a checkpoint behind each file\ncarries the path it stopped at, and a later scan handed one takes up\nafter it. The partition is this scanner's kind, its root *and* its\nextension filter, because all three decide what the walk yields. In\n`Watch` mode\nthe scanner also stays live and streams filesystem-change events via\n`notify` — new / modified files are re-emitted, deletions are\nignored (deletions on the source do not automatically delete the\ncorresponding asset; that is a policy decision left to the caller)."
     },
     {
       "path": "asterism_importer_sdk::scanner::fs::FsScanner",
@@ -484,6 +499,21 @@
       "path": "asterism_importer_sdk::scanner::sqlite::SqliteScanner",
       "kind": "struct",
       "docs": "SQLite scanner.\n\n- `db_path`     — path to the SQLite file (opened read-only).\n- `query`       — SELECT statement that yields the rows to import.\n- `columns`     — how to map the returned columns onto `RawItem`.\n- `source_kind` — slug written to `RawItem.source_kind`\n  (defaults to `\"sqlite\"`)."
+    },
+    {
+      "path": "asterism_importer_sdk::store",
+      "kind": "module",
+      "docs": "Where a resumption point is kept, as the importer sees it.\n\n#293 gave a scan a position and a run the right to hand one back, and\nleft it homeless: the point was printed and an operator carried it to\nthe next run by hand. This is the port that ends that, and the only\nthing it says about *where* a point is kept is that somewhere is not\nhere.\n\n## Why a port rather than a call\n\nThe obvious shape is for the runner to POST to the server directly,\nand it is the wrong one for the same reason the rest of this crate is\nwritten against traits. An importer under test would then need a\nserver; and the transport is the question that is still open — an\nadapter that runs itself and pushes is the shape taken today, and one\nAsterism starts and reads is the one that was not. A port is what\nlets the second arrive without the runner learning about it.\n\n[`HttpSyncStore`](crate::client::HttpSyncStore) is the implementation\nthat exists, and it is thirty lines over the same `ApiClient` every\nrecord already travels through."
+    },
+    {
+      "path": "asterism_importer_sdk::store::StateKey",
+      "kind": "struct",
+      "docs": "What a stored position is filed under.\n\nThe persona because the same source imported into two personas has\ntwo independent positions, and one being ahead says nothing about the\nother. The partition because it is the scan's own statement of what\nit is scanning — [`SourceScanner::partition`](crate::SourceScanner::partition)\nis where it comes from, and a caller must not compose one itself: a\nkey spelled by hand is a key that stops matching the day the scanner\nchanges what it scans, silently, by finding nothing."
+    },
+    {
+      "path": "asterism_importer_sdk::store::SyncStore",
+      "kind": "trait",
+      "docs": "Somewhere to keep a resumption point between runs.\n\nTwo verbs, and the absence of a third is deliberate: nothing lists,\nbecause a run knows its own key and asks for that one, and nothing\ndeletes, because forgetting a position is a request nobody has made.\n\nFailures come back as [`SourceError`] rather than a type of this\nmodule's own, so that a caller has one classification to act on. A\nstore that cannot be reached is [`Transient`](SourceError::Transient)\nand a store that refuses what it is given is\n[`Config`](SourceError::Config) — the same cuts the rest of an import\nalready reads."
     }
   ]
 }
