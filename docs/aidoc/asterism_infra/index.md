@@ -47,6 +47,7 @@ this crate.
 - [`forge::rows`](forge__rows.md): The shapes a store keeps, and the two translations either side of
 - [`generator_params`](generator_params.md): Reading generator parameters out of stored metadata rows — the
 - [`heads`](heads.md): Trained-head storage (#132 phase 2): the artifact a training run
+- [`import_launcher`](import_launcher.md): Starting `asterism-import`, and the two things that is really about.
 - [`jobs`](jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
 - [`jobs::chapter_ffmetadata`](jobs__chapter_ffmetadata.md): Reading a container's declared chapter list through an external
 - [`jobs::handlers`](jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.
@@ -86,6 +87,7 @@ this crate.
 - [`sqlite::repo::forge`](sqlite__repo__forge.md): SQLite adapter for the forge's ports.
 - [`sqlite::repo::forge_boundary`](sqlite__repo__forge_boundary.md): What the forge asks of everything outside it, answered by SQLite.
 - [`sqlite::repo::group`](sqlite__repo__group.md): SQLite adapter for `GroupRepository`.
+- [`sqlite::repo::import_definition`](sqlite__repo__import_definition.md): SQLite adapter for the `ImportDefinitionRepository` port.
 - [`sqlite::repo::import_state`](sqlite__repo__import_state.md): SQLite adapter for the `ImportStateRepository` port.
 - [`sqlite::repo::instance`](sqlite__repo__instance.md): SQLite adapter for the `InstanceRepository` port.
 - [`sqlite::repo::material_layer`](sqlite__repo__material_layer.md): SQLite adapter for the `MaterialLayerRepository` port.

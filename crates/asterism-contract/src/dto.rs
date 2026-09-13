@@ -2591,3 +2591,64 @@ pub struct ImportStateDto {
     /// When this point was last written, RFC 3339.
     pub updated_at: String,
 }
+
+/// A stored import, as it is read back.
+///
+/// Carries the credential's *variable name* and never its value, which
+/// is the whole of what `secret_ref` is for.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportDefinitionDto {
+    /// Stable id.
+    pub id: String,
+    /// Persona the records land in.
+    pub persona_id: String,
+    /// What this import is called.
+    pub name: String,
+    /// Importer subcommand.
+    pub subcommand: String,
+    /// Arguments as the importer receives them.
+    pub args: Vec<String>,
+    /// Name of the environment variable holding the credential, if any.
+    pub secret_ref: Option<String>,
+}
+
+/// What one run of an import did.
+///
+/// Written whatever happened, including for a run whose child never
+/// started: a definition that looks as though it was never run is the
+/// one thing a record of runs must not produce.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportRunDto {
+    /// Stable id.
+    pub id: String,
+    /// Definition this was a run of.
+    pub definition_id: String,
+    /// When it started, RFC 3339.
+    pub started_at: String,
+    /// When it ended, RFC 3339. Absent while it is still going.
+    pub ended_at: Option<String>,
+    /// How it ended: `running`, `ok`, `failed`, or `unstarted` for a run
+    /// whose importer could not be launched at all.
+    pub outcome: String,
+    /// Records the importer landed.
+    pub imported: u64,
+    /// Records that did not land.
+    pub failed: u64,
+    /// What ended the run early, as the importer classified it —
+    /// `config`, `transient`, `rate_limited`, `source`, or absent for a
+    /// run that ended on the source's own terms.
+    ///
+    /// The class and not only the message, because the class is what a
+    /// caller acts on and three slices went into drawing it. A
+    /// supervisor keeping an exit code alone would throw it away at the
+    /// moment it becomes useful.
+    pub ended_by_class: Option<String>,
+    /// What the failure said, for a person.
+    pub ended_by_message: Option<String>,
+    /// How long the source asked us to wait, in seconds, when it said.
+    ///
+    /// Nothing reads it yet. It is recorded because the run that
+    /// produced it is the only moment it exists, and the scheduler that
+    /// will wait it out is the next slice.
+    pub retry_after_secs: Option<u64>,
+}

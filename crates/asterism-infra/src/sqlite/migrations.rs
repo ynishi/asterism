@@ -8092,6 +8092,66 @@ CREATE TABLE import_state (
 ) STRICT;
 "#;
 
+/// V112 — an import somebody can run without typing it, and the record
+/// of having run one.
+///
+/// What the rows mean is `asterism_core::domain::import_definition`.
+/// Three things about the shape are this file's to say.
+///
+/// # `secret_ref` is a column for a *name*
+///
+/// The credential itself is never here, and there is no column it could
+/// be put in — which is the point. An operator who writes a token into
+/// `args_json` instead has put it in the database, and the schema
+/// cannot stop that; what it can do is give the other route a place to
+/// live, and it does.
+///
+/// # `import_run` outlives the process that wrote it
+///
+/// A run is inserted as `running` before the importer starts, so the
+/// check that stops a second one reads a table rather than some
+/// process's memory. A server restarted mid-run therefore comes back
+/// with a row still saying `running` and a definition nothing will
+/// start again — the cost of the direction that does not lose data,
+/// stated in the service and stated again here because the row is where
+/// somebody will find it.
+///
+/// # No foreign key from `import_run` to `import_definition`
+///
+/// Deliberate, and the opposite of the usual call: the record of what
+/// an import did is worth keeping after somebody deletes the import.
+/// "This ran for a month and then the definition went away" is a real
+/// question, and a cascade would answer it with silence.
+const V112_IMPORT_DEFINITION: &str = r#"
+CREATE TABLE import_definition (
+    id          TEXT PRIMARY KEY,
+    persona_id  TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    subcommand  TEXT NOT NULL,
+    args_json   TEXT NOT NULL,
+    secret_ref  TEXT,
+    created_at  INTEGER NOT NULL
+) STRICT;
+
+CREATE UNIQUE INDEX idx_import_definition_name ON import_definition(persona_id, name);
+
+CREATE TABLE import_run (
+    id                TEXT PRIMARY KEY,
+    definition_id     TEXT NOT NULL,
+    started_at        INTEGER NOT NULL,
+    ended_at          INTEGER,
+    outcome           TEXT NOT NULL
+        CHECK (outcome IN ('running', 'ok', 'failed', 'unstarted')),
+    imported          INTEGER NOT NULL DEFAULT 0,
+    failed            INTEGER NOT NULL DEFAULT 0,
+    ended_by_class    TEXT,
+    ended_by_message  TEXT,
+    retry_after_secs  INTEGER
+) STRICT;
+
+CREATE INDEX idx_import_run_definition ON import_run(definition_id, started_at DESC);
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -8206,6 +8266,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V109_FORGE_SEND),
     Step::Sql(V110_ASSET_ZONE),
     Step::Sql(V111_IMPORT_STATE),
+    Step::Sql(V112_IMPORT_DEFINITION),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -12245,6 +12306,76 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored, r#"{"after_id":9,"zz":"a"}"#);
+    }
+
+    /// V112 gives an import a definition and a record of running one.
+    ///
+    /// Two shapes worth pinning. A definition's name is unique inside a
+    /// persona, so a run can be asked for by something a person chose.
+    /// And a run survives the definition being deleted — no foreign
+    /// key, which is the opposite of the usual call and deliberate:
+    /// "this ran for a month and then the import went away" is a real
+    /// question, and a cascade answers it with silence.
+    #[test]
+    fn v112_keeps_a_definition_and_the_runs_of_it() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 111).unwrap();
+        let table = |conn: &Connection, name: &str| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                params![name],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(table(&conn, "import_definition"), 0);
+
+        migrate(&mut conn).unwrap();
+        assert_eq!(table(&conn, "import_definition"), 1);
+        assert_eq!(table(&conn, "import_run"), 1);
+
+        let define = |id: &str, persona: &str, name: &str| {
+            conn.execute(
+                "INSERT INTO import_definition \
+                     (id, persona_id, name, subcommand, args_json, secret_ref, created_at) \
+                 VALUES (?1, ?2, ?3, 'text', '[]', NULL, 0)",
+                params![id, persona, name],
+            )
+        };
+        define("d1", "p1", "notes").unwrap();
+        // The same name in another persona is another import.
+        define("d2", "p2", "notes").unwrap();
+        let err = define("d3", "p1", "notes")
+            .expect_err("one persona cannot hold two imports called the same thing");
+        assert!(
+            matches!(
+                err,
+                rusqlite::Error::SqliteFailure(e, _)
+                    if e.code == rusqlite::ErrorCode::ConstraintViolation
+            ),
+            "{err}"
+        );
+
+        conn.execute(
+            "INSERT INTO import_run \
+                 (id, definition_id, started_at, ended_at, outcome, imported, failed) \
+             VALUES ('r1', 'd1', 0, 1, 'ok', 3, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM import_definition WHERE id = 'd1'", [])
+            .unwrap();
+        let surviving: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM import_run WHERE definition_id = 'd1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            surviving, 1,
+            "what an import did outlives the import, on purpose"
+        );
     }
 
     /// The marker a pre-probe import left on the content axis of a JPEG,

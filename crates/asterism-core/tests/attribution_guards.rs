@@ -363,6 +363,16 @@ fn public_fns(root: &Path, path: &Path) -> Vec<PublicFn> {
 /// without saying whose write it is.
 const CONTEXT_EXEMPT: &[(&str, &str)] = &[
     (
+        "import_run_service::list",
+        "read — every stored import, for whatever is about to run one",
+    ),
+    (
+        "import_run_service::runs",
+        "read — what recent runs of one import did. Its sibling `run` does \
+         take a context; neither persists one, because the row has room for \
+         what happened and not for who asked",
+    ),
+    (
         "import_state_service::read",
         "read — where an importer got to, fetched by the importer about \
          to take up from it. Its sibling `write` does take a context, \

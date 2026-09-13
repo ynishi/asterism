@@ -23,8 +23,9 @@ use asterism_importer_sdk::scanner::http::{Cursor, RecordMap};
 use asterism_importer_sdk::scanner::sqlite::ColumnMap;
 use asterism_importer_sdk::{
     ApiClient, ChatMessage, ChatRole, Doc, DocFormat, Footprint, FootprintSource, FsScanner,
-    HttpScanner, HttpSyncStore, ImportOptions, Note, OccurredSource, ParseError, RawItem, Resume,
-    ScanMode, SourceParser, SqliteScanner, SyncState, resolve_occurrence, run_import_with,
+    HttpScanner, HttpSyncStore, ImportOptions, ImportReport, ImportSummary, Note, OccurredSource,
+    ParseError, RawItem, ReportedFailure, Resume, ScanMode, SourceError, SourceParser,
+    SqliteScanner, SyncState, resolve_occurrence, run_import_with,
 };
 use asterism_importer_tape::TapeParser;
 use asterism_importer_text::TextParser;
@@ -151,6 +152,26 @@ struct CommonArgs {
     /// next ordinary run takes up from the same place it would have.
     #[arg(long)]
     no_resume: bool,
+    /// Write this run's outcome to a file, as JSON.
+    ///
+    /// For whatever started this process. The progress lines above are
+    /// for a person and are free to change wording; this is a contract
+    /// between two binaries, and a supervisor scraping "done — ok=3
+    /// err=0" would break the day somebody improved that sentence — and
+    /// break silently, reporting zero.
+    #[arg(long)]
+    report: Option<PathBuf>,
+    /// Send this header with the credential in `$ASTERISM_IMPORT_SECRET`.
+    ///
+    /// `--header-secret Authorization` sends `Authorization: <value of
+    /// that variable>`. For a supervisor that resolved the credential
+    /// and must not put it on a command line: an argument vector is
+    /// readable by every other process on the machine, and this way
+    /// what they can read is the name of a header.
+    ///
+    /// A person running this by hand wants `--header` instead.
+    #[arg(long)]
+    header_secret: Option<String>,
 }
 
 impl CommonArgs {
@@ -178,6 +199,45 @@ fn resume_policy(resume_from: Option<SyncState>, no_resume: bool) -> Resume {
         (Some(state), false) => Resume::From(state),
         (None, false) => Resume::Stored,
     }
+}
+
+/// The variable a supervisor puts this run's credential in.
+///
+/// Named to match `asterism_infra::import_launcher::CHILD_SECRET_VAR`,
+/// which is the only thing that sets it. A person running this by hand
+/// uses `--header` and never sees it.
+const SECRET_VAR: &str = "ASTERISM_IMPORT_SECRET";
+
+/// Writes what the run did, for whatever started it.
+///
+/// Carries the **class** of the failure that ended a run and not only
+/// its message: the class is what a caller acts on, and it is the part
+/// a scheduler needs in order to know whether running again is worth
+/// anything. A supervisor given a message alone would have to parse
+/// English to find out it had been rate limited.
+fn write_report(path: &std::path::Path, summary: &ImportSummary) -> anyhow::Result<()> {
+    let ended_by = summary.ended_by.as_ref().map(|err| ReportedFailure {
+        class: match err {
+            SourceError::Config(_) => "config",
+            SourceError::Transient(_) => "transient",
+            SourceError::RateLimited { .. } => "rate_limited",
+            SourceError::Source(_) => "source",
+            SourceError::Item { .. } => "item",
+        }
+        .into(),
+        message: err.to_string(),
+        retry_after_secs: match err {
+            SourceError::RateLimited { retry_after, .. } => retry_after.map(|wait| wait.as_secs()),
+            _ => None,
+        },
+    });
+    let report = ImportReport {
+        imported: summary.imported,
+        failed: summary.failed,
+        ended_by,
+    };
+    std::fs::write(path, serde_json::to_vec_pretty(&report)?)?;
+    Ok(())
 }
 
 /// Reads a resumption point typed on the command line.
@@ -247,6 +307,9 @@ struct HarvestArgs {
     /// `CommonArgs`.
     #[arg(long)]
     no_resume: bool,
+    /// Write this run's outcome to a file, as JSON. See `CommonArgs`.
+    #[arg(long)]
+    report: Option<PathBuf>,
 }
 
 /// The generic HTTP source: a URL, where the records are in the
@@ -571,6 +634,7 @@ async fn main() -> anyhow::Result<()> {
                 &CcSessionParser,
                 args.watch,
                 args.common.options(),
+                args.common.report.clone(),
             )
             .await
         }
@@ -588,6 +652,7 @@ async fn main() -> anyhow::Result<()> {
                 &parser,
                 args.watch,
                 args.common.options(),
+                args.common.report.clone(),
             )
             .await
         }
@@ -611,7 +676,15 @@ async fn main() -> anyhow::Result<()> {
             let parser = PersonaJournalParser {
                 persona_name: args.persona_name,
             };
-            run("journal", &scanner, &parser, false, args.common.options()).await
+            run(
+                "journal",
+                &scanner,
+                &parser,
+                false,
+                args.common.options(),
+                args.common.report.clone(),
+            )
+            .await
         }
         Command::Http(args) => {
             let mut records = RecordMap::new(dotted(&args.items_path), &args.id_field);
@@ -627,17 +700,45 @@ async fn main() -> anyhow::Result<()> {
             for (name, value) in &args.headers {
                 scanner = scanner.with_header(name, value);
             }
+            // The supervisor's route for a credential: it resolved the
+            // variable the definition named and put the value here,
+            // where an argument vector cannot leak it.
+            if let Some(header) = &args.common.header_secret {
+                let value = std::env::var(SECRET_VAR).with_context(|| {
+                    format!(
+                        "--header-secret {header} needs the credential in ${SECRET_VAR}, \
+                         and it is not set"
+                    )
+                })?;
+                scanner = scanner.with_header(header, value);
+            }
             let parser = HttpRecordParser {
                 source_kind: args.source_kind.clone(),
             };
-            run("http", &scanner, &parser, false, args.common.options()).await
+            run(
+                "http",
+                &scanner,
+                &parser,
+                false,
+                args.common.options(),
+                args.common.report.clone(),
+            )
+            .await
         }
         Command::Tape(args) => {
             let scanner = FsScanner::new(args.dir)
                 .with_extensions(["txt"])
                 .with_source_kind(args.source_kind);
             let parser = TapeParser::new(Some(args.platform));
-            run("tape", &scanner, &parser, false, args.common.options()).await
+            run(
+                "tape",
+                &scanner,
+                &parser,
+                false,
+                args.common.options(),
+                args.common.report.clone(),
+            )
+            .await
         }
         Command::Image(args) => {
             let root = args.dir.unwrap_or_else(|| home_dir().join("Pictures"));
@@ -650,7 +751,15 @@ async fn main() -> anyhow::Result<()> {
             let parser = ImageParser::new(args.platform);
             let mut options = args.common.options();
             options.upload_concurrency = args.upload_concurrency.max(1);
-            run("image", &scanner, &parser, args.watch, options).await
+            run(
+                "image",
+                &scanner,
+                &parser,
+                args.watch,
+                options,
+                args.common.report.clone(),
+            )
+            .await
         }
         Command::Video(args) => {
             let scanner = FsScanner::new(args.dir)
@@ -663,6 +772,7 @@ async fn main() -> anyhow::Result<()> {
                 &parser,
                 args.watch,
                 args.common.options(),
+                args.common.report.clone(),
             )
             .await
         }
@@ -677,6 +787,7 @@ async fn main() -> anyhow::Result<()> {
                 &parser,
                 args.watch,
                 args.common.options(),
+                args.common.report.clone(),
             )
             .await
         }
@@ -685,17 +796,27 @@ async fn main() -> anyhow::Result<()> {
                 .with_extensions(TEXT_EXTENSIONS.iter().copied())
                 .with_source_kind(args.source_kind.unwrap_or_else(|| "text".into()));
             let parser = TextParser::new(args.platform);
-            run("text", &scanner, &parser, false, args.common.options()).await
+            run(
+                "text",
+                &scanner,
+                &parser,
+                false,
+                args.common.options(),
+                args.common.report.clone(),
+            )
+            .await
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run<S, P>(
     name: &str,
     scanner: &S,
     parser: &P,
     watch: bool,
     options: ImportOptions,
+    report: Option<PathBuf>,
 ) -> anyhow::Result<()>
 where
     S: asterism_importer_sdk::SourceScanner + ?Sized,
@@ -720,6 +841,7 @@ where
     // source from the beginning, because asking where the last one
     // stopped is the contact it is not making.
     let dry_run = options.dry_run;
+    let report_path = report.clone();
     let store = (!dry_run).then(|| HttpSyncStore::new(ApiClient::new(options.server.clone())));
     let kept = !dry_run && !matches!(options.resume, Resume::No);
     let summary = run_import_with(
@@ -732,6 +854,15 @@ where
             .map(|s| s as &dyn asterism_importer_sdk::SyncStore),
     )
     .await?;
+    // Written before anything below can end this function early, so a
+    // run that failed still reports what it managed. A supervisor left
+    // with no report has to say the importer died, which is a different
+    // and less useful thing than "it was rate limited after 40
+    // records".
+    if let Some(path) = &report_path {
+        write_report(path, &summary)
+            .with_context(|| format!("writing the run's report to {}", path.display()))?;
+    }
     // Printed for every run that started, including one a failure cut
     // short: the counts are what it managed, and they are worth having
     // either way.
@@ -804,7 +935,15 @@ async fn run_harvest(args: HarvestArgs) -> anyhow::Result<()> {
         auto_organize_base_dir: args.auto_organize_base_dir,
         resume: resume_policy(args.resume_from, args.no_resume),
     };
-    run("harvest", &scanner, &parser, args.watch, options).await
+    run(
+        "harvest",
+        &scanner,
+        &parser,
+        args.watch,
+        options,
+        args.report.clone(),
+    )
+    .await
 }
 
 async fn run_sqlite(args: SqliteArgs) -> anyhow::Result<()> {
@@ -818,7 +957,15 @@ async fn run_sqlite(args: SqliteArgs) -> anyhow::Result<()> {
         scanner = scanner.ordered_by_id();
     }
     let parser = SqliteRowParser { args: &args };
-    run("sqlite", &scanner, &parser, false, args.common.options()).await
+    run(
+        "sqlite",
+        &scanner,
+        &parser,
+        false,
+        args.common.options(),
+        args.common.report.clone(),
+    )
+    .await
 }
 
 /// One note per record, carrying the record's own JSON as its body.

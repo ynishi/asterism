@@ -28,3 +28,19 @@ chrono = { workspace = true }
 clap = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+
+# For `tests/import_run_e2e.rs`, which drives this binary the way the
+# server does: stored definition, spawned child, records landing over
+# HTTP. It needs a real server to push to, and the binary has to be the
+# one cargo built — `CARGO_BIN_EXE_asterism-import` is defined only for
+# tests of the crate declaring it, which is why the test is here rather
+# than beside the supervisor it exercises.
+#
+# Not a cycle: `asterism-server` depends on the importer SDK and the
+# image parser, never on this crate.
+[dev-dependencies]
+asterism-server = { path = "../asterism-server" }
+asterism-contract = { path = "../asterism-contract" }
+asterism-core = { path = "../asterism-core" }
+axum = { workspace = true }
+tempfile = "3"

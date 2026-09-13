@@ -105,39 +105,41 @@ use asterism_contract::command::{
     CreateDispatchCommand, CreateGroupCommand, CreateMaterialLayerCommand, CreateModalityCommand,
     CreateQueryGroupCommand, CreateSeriesStrategyCommand, CreateSnapshotCommand,
     CreateThreadCommand, DeclareAssetMetaCommand, DeclareProvenanceCommand,
-    DeclareSourceTypeCommand, DeleteAssetCommentCommand, DeleteChapterMarkCommand,
-    DeleteDirCommand, DeleteMaterialLayerCommand, DeleteMaterialMarkCommand, DeleteMessageCommand,
-    DeleteModalityCommand, DeletePersonaProfileCommand, DeletePersonaThemeCommand,
-    DeleteSeriesStrategyCommand, DeleteSessionCommand, DeleteTagCommand, DeleteTagResult,
-    DeleteThreadCommand, DetachTagBatchCommand, DetachTagBatchResult, DetachTagCommand,
-    DispatchRunCommand, EditAssetCommentCommand, EditChapterMarkCommand, EditMaterialMarkCommand,
-    EmptyTrashCommand, EmptyTrashResult, LinkGroupCommand, MergeAssetsCommand, MergeGroupsCommand,
-    MergeTagsCommand, MergeTagsResult, MoveDirCommand, MoveGroupToDirCommand,
-    OrganizeByLocationCommand, OrganizeByLocationResult, PatchSessionMetadataCommand,
-    PostAssetCommentCommand, PostChapterMarkCommand, PostMaterialMarkCommand,
-    PromoteSnapshotToGroupCommand, PromoteSnapshotToGroupResult, PromoteTagToGroupCommand,
-    PromoteTagToGroupResult, PromoteVolatileSelectionCommand, PurgeAssetCommand, PurgeGroupCommand,
-    PurgePersonaCommand, ReadImportStateCommand, RecordDiagCommand, RecordEventCommand,
-    RedispatchCommand, RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand,
-    RenameGroupCommand, RenameSessionCommand, RenameTagCommand, ReorderGroupAssetsCommand,
-    ReorderGroupChildrenCommand, ReorderPersonasCommand, ResetSettingCommand,
-    ResolveDuplicateConflictCommand, RestoreAssetCommand, RestoreGroupCommand,
-    RestorePersonaCommand, SetDefaultMaterialLayerCommand, SetPersonaProfileCommand,
-    SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand, TrashGroupCommand,
-    TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
-    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
-    UpdateQueryGroupQueryCommand, UpdateSeriesStrategyCommand, WriteImportStateCommand,
+    DeclareSourceTypeCommand, DefineImportCommand, DeleteAssetCommentCommand,
+    DeleteChapterMarkCommand, DeleteDirCommand, DeleteMaterialLayerCommand,
+    DeleteMaterialMarkCommand, DeleteMessageCommand, DeleteModalityCommand,
+    DeletePersonaProfileCommand, DeletePersonaThemeCommand, DeleteSeriesStrategyCommand,
+    DeleteSessionCommand, DeleteTagCommand, DeleteTagResult, DeleteThreadCommand,
+    DetachTagBatchCommand, DetachTagBatchResult, DetachTagCommand, DispatchRunCommand,
+    EditAssetCommentCommand, EditChapterMarkCommand, EditMaterialMarkCommand, EmptyTrashCommand,
+    EmptyTrashResult, LinkGroupCommand, MergeAssetsCommand, MergeGroupsCommand, MergeTagsCommand,
+    MergeTagsResult, MoveDirCommand, MoveGroupToDirCommand, OrganizeByLocationCommand,
+    OrganizeByLocationResult, PatchSessionMetadataCommand, PostAssetCommentCommand,
+    PostChapterMarkCommand, PostMaterialMarkCommand, PromoteSnapshotToGroupCommand,
+    PromoteSnapshotToGroupResult, PromoteTagToGroupCommand, PromoteTagToGroupResult,
+    PromoteVolatileSelectionCommand, PurgeAssetCommand, PurgeGroupCommand, PurgePersonaCommand,
+    ReadImportStateCommand, RecordDiagCommand, RecordEventCommand, RedispatchCommand,
+    RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand, RenameGroupCommand,
+    RenameSessionCommand, RenameTagCommand, ReorderGroupAssetsCommand, ReorderGroupChildrenCommand,
+    ReorderPersonasCommand, ResetSettingCommand, ResolveDuplicateConflictCommand,
+    RestoreAssetCommand, RestoreGroupCommand, RestorePersonaCommand, RunImportDefinitionCommand,
+    SetDefaultMaterialLayerCommand, SetPersonaProfileCommand, SetPersonaThemeCommand,
+    SetSettingCommand, TrashAssetCommand, TrashGroupCommand, TrashPersonaCommand,
+    UnlinkGroupCommand, UpdateAssetMetaBatchCommand, UpdateAssetMetaBatchResult,
+    UpdateAssetMetaCommand, UpdateModalityCommand, UpdateQueryGroupQueryCommand,
+    UpdateSeriesStrategyCommand, WriteImportStateCommand,
 };
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetIndexPageDto,
     AssetPageDto, AssetSourceTypeDto, AssetTextDto, ChapterMarkDto, ConstellationItemDto, DiagDto,
     DirDto, DispatchDto, DuplicateConflictDto, DuplicateReportDto, DuplicateResolutionDto, EdgeDto,
-    EventDto, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto, ImportStateDto, JobLogDto,
-    LineageViewDto, MaterialLayerDto, MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto,
-    MessageDto, ModalityDefDto, ObservationDto, PerfDto, PersonaDto, PersonaProfileDto,
-    PersonaThemeDto, ProvenanceViewDto, RetrievedIdsDto, RetrievedPageDto, SampledPageDto,
-    SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto,
-    TagSuggestionDto, ThreadDto, VideoPreviewDto, VisualModelStatusDto,
+    EventDto, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto, ImportDefinitionDto,
+    ImportRunDto, ImportStateDto, JobLogDto, LineageViewDto, MaterialLayerDto,
+    MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto, ModalityDefDto,
+    ObservationDto, PerfDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, ProvenanceViewDto,
+    RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SeriesStrategyDto, SessionDto,
+    SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, TagSuggestionDto, ThreadDto,
+    VideoPreviewDto, VisualModelStatusDto,
 };
 use asterism_contract::forge::{
     AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto,
@@ -285,6 +287,18 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route(
             "/asterism/settings/{key}",
             get(get_setting).put(set_setting).delete(reset_setting),
+        )
+        .route(
+            "/asterism/import/definitions",
+            get(list_import_definitions).post(define_import),
+        )
+        .route(
+            "/asterism/import/definitions/run",
+            post(run_import_definition),
+        )
+        .route(
+            "/asterism/import/definitions/{id}/runs",
+            get(list_import_runs),
         )
         .route("/asterism/import/state/read", post(read_import_state))
         .route("/asterism/import/state/write", post(write_import_state))
@@ -1901,6 +1915,63 @@ async fn delete_series_strategy(
         )
         .await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+/// `GET /asterism/import/definitions` — every stored import.
+///
+/// Carries each credential's *variable name* and never its value, which
+/// is the whole of what `secret_ref` is for. The arguments beside it are
+/// stored verbatim and are returned verbatim, so a token written into
+/// one by hand is readable here — said on the field rather than left to
+/// be discovered.
+async fn list_import_definitions(
+    State(ctx): State<Arc<ServerCtx>>,
+) -> ApiResult<Vec<ImportDefinitionDto>> {
+    Ok(Json(ctx.import_run_service.list().await?))
+}
+
+/// `POST /asterism/import/definitions` — stores an import so that
+/// nothing has to type it again.
+async fn define_import(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<DefineImportCommand>,
+) -> ApiResult<ImportDefinitionDto> {
+    Ok(Json(
+        ctx.import_run_service
+            .define(command, &asserted(None, None, None)?)
+            .await?,
+    ))
+}
+
+/// `POST /asterism/import/definitions/run` — runs one now.
+///
+/// Answers when the importer has finished, carrying what it did. A
+/// long import therefore holds the request open, which is the honest
+/// shape for a verb whose answer *is* the outcome — and the caller that
+/// wants to start one and walk away is the scheduler, which is not this
+/// slice.
+///
+/// `409` while a run of the same definition is still going: two
+/// importers over one source would each take up from a position the
+/// other is about to move.
+async fn run_import_definition(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<RunImportDefinitionCommand>,
+) -> ApiResult<ImportRunDto> {
+    Ok(Json(
+        ctx.import_run_service
+            .run(command, &asserted(None, None, None)?)
+            .await?,
+    ))
+}
+
+/// `GET /asterism/import/definitions/{id}/runs` — recent runs, newest
+/// first.
+async fn list_import_runs(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<ImportRunDto>> {
+    Ok(Json(ctx.import_run_service.runs(&id, 50).await?))
 }
 
 /// `POST /asterism/import/state/read` — where an importer got to, or

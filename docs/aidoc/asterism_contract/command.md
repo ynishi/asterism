@@ -35,6 +35,7 @@ convert them into domain types and surface any validation failures as
 - `DeclareAssetMetaCommand` — Records — or removes — one AlbumMeta statement on an asset.
 - `DeclareProvenanceCommand` — Declares (or repairs) the origin of an asset that is already in
 - `DeclareSourceTypeCommand` — Declares — or retracts — the asset's digital source type by hand.
+- `DefineImportCommand` — Stores an import that can be run without anybody typing it
 - `DeleteAssetCommentCommand` — Deletes an `AssetComment` by id. Idempotent.
 - `DeleteChapterMarkCommand` — Removes one section from a structure band the person owns.
 - `DeleteDirCommand` — Deletes an **empty** Dir. Rejected while the dir still contains
@@ -104,6 +105,7 @@ convert them into domain types and surface any validation failures as
 - `RestoreAssetCommand` — Returns a trashed asset to the live set. Idempotent.
 - `RestoreGroupCommand` — Returns a trashed Group to the sidebar, membership and drag order
 - `RestorePersonaCommand` — Returns a trashed persona and the assets that went to the trash with
+- `RunImportDefinitionCommand` — Runs a stored import now (`POST /asterism/import/definitions/run`).
 - `SetDefaultMaterialLayerCommand` — Chooses the band a surface shows, and the one a new mark lands in.
 - `SetPersonaProfileCommand` — Upserts the identity signal for a persona (avatar / bio /
 - `SetPersonaThemeCommand` — Sets (or clears) the wallpaper for a persona.

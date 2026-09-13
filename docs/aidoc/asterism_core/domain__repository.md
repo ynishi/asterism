@@ -69,6 +69,7 @@ projection instead of full `Asset` entities.
 - `DispatchRepository` — Persistence port for [`DispatchJob`].
 - `EdgeRepository` — Persistence port for [`ConstellationEdge`].
 - `GroupRepository` — Persistence port for [`Group`] and its many-to-many link with
+- `ImportDefinitionRepository` — Persistence port for stored imports and the record of running them
 - `ImportStateRepository` — Persistence port for an importer's resumption point
 - `InstanceRepository` — Persistence port for the instance identity record (`instance`
 - `JobQueue` — Port for enqueueing background jobs. The adapter wraps `apalis`

@@ -164,6 +164,7 @@ pub mod embedded_text;
 pub mod forge;
 pub mod generator_params;
 pub mod group;
+pub mod import_definition;
 pub mod import_state;
 pub mod instance;
 pub mod job;

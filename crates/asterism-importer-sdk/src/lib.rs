@@ -138,6 +138,11 @@ pub use asterism_contract::command::OccurredSource;
 /// markers stand for — is the server's, and an importer that could
 /// spell those rules would be a second place they are decided.
 pub use asterism_contract::digest;
+/// What a run reports back to whatever started it, re-exported on the
+/// same terms as the sidecar vocabulary below: an importer writes one
+/// and a supervisor reads it, and neither should have to reach past
+/// this crate to name the type they agree on.
+pub use asterism_contract::import_report::{ImportReport, ReportedFailure};
 /// Sidecar vocabulary, re-exported so a parser can look for
 /// `<locator>.meta.json` without taking a direct dependency on the
 /// contract crate (importers depend on this SDK and nothing else of

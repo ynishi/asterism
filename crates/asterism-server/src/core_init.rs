@@ -23,9 +23,9 @@ use asterism_core::application::DispatchService;
 use asterism_core::application::disclosure_service::DisclosureService;
 use asterism_core::application::query_group_invalidation::QueryGroupInvalidator;
 use asterism_core::application::{
-    AppSettingService, AssetCommentService, AssetService, ImportStateService, MaterialLayerService,
-    MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,
-    SessionService, SnapshotService, ThreadService, ThumbService,
+    AppSettingService, AssetCommentService, AssetService, ImportRunService, ImportStateService,
+    MaterialLayerService, MaterialMarkService, ModalityService, PersonaService, QueryGroupService,
+    SeriesStrategyService, SessionService, SnapshotService, ThreadService, ThumbService,
 };
 use asterism_core::application_support::{
     DispatchRunnerService, QueryGroupRefreshService, RetentionService, SupportServices,
@@ -545,6 +545,16 @@ pub struct CoreCtx {
     /// which is why its two routes are on the transport-parity test's
     /// recorded list rather than paired with Tauri commands.
     pub import_state_service: Arc<ImportStateService>,
+    /// Imports somebody stored so that nothing has to type them again,
+    /// and the record of running one.
+    pub import_run_service: Arc<ImportRunService>,
+    /// Where a spawned importer should post what it reads.
+    ///
+    /// Empty until whatever binds the listener fills it in, because
+    /// that is the moment the address exists — the port may be chosen
+    /// by a flag, or by the OS for a test. Until then a run is refused
+    /// as the machine's problem rather than started against a guess.
+    pub import_api_base: Arc<OnceLock<String>>,
     /// Session 1st-class entity lifecycle — SessionsView
     /// list source in P1b, HTTP CRUD backend in P2, importer
     /// find-or-create in P3.
@@ -721,6 +731,17 @@ pub async fn init_core_with(
     let app_setting_service = Arc::new(AppSettingService::new(app_settings));
     let import_states = Arc::new(sqlite::repo::SqliteImportStateRepository::new(isle.clone()));
     let import_state_service = Arc::new(ImportStateService::new(import_states));
+    let import_definitions = Arc::new(sqlite::repo::SqliteImportDefinitionRepository::new(
+        isle.clone(),
+    ));
+    // The launcher points the importer back at this process's own HTTP
+    // API, which is the whole of transport (iii): the child runs itself
+    // and pushes, and this end only decides when it starts.
+    let import_api_base: Arc<OnceLock<String>> = Arc::new(OnceLock::new());
+    let import_launcher = Arc::new(
+        asterism_infra::import_launcher::SubprocessImportLauncher::new(import_api_base.clone()),
+    );
+    let import_run_service = Arc::new(ImportRunService::new(import_definitions, import_launcher));
     let asset_bodies = sqlite::repo::SqliteAssetBodyRepository::new(isle.clone());
     let snapshots = Arc::new(sqlite::repo::SqliteSnapshotRepository::new(isle.clone()));
     let telemetry = asterism_infra::telemetry::Telemetry::new(isle.clone());
@@ -1492,6 +1513,8 @@ pub async fn init_core_with(
         )),
         app_setting_service,
         import_state_service,
+        import_run_service,
+        import_api_base,
         session_service,
         asset_comment_service: Arc::new(AssetCommentService::new(
             asset_comments,

@@ -2285,3 +2285,56 @@ pub struct WriteImportStateCommand {
     /// about.
     pub offset_json: String,
 }
+
+/// Stores an import that can be run without anybody typing it
+/// (`POST /asterism/import/definitions`).
+///
+/// The arguments are kept verbatim and handed to the importer as it
+/// receives them, so this is a stored command line — which is exactly
+/// where a credential wants to go and must not. See
+/// [`secret_ref`](Self::secret_ref).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefineImportCommand {
+    /// Persona the records land in.
+    pub persona_id: String,
+    /// What to call this import when reporting on it. Unique inside a
+    /// persona, so a run can be asked for by a name a person chose
+    /// rather than by an id they have to look up.
+    pub name: String,
+    /// Importer subcommand: `http`, `text`, `sqlite`, and the rest.
+    pub subcommand: String,
+    /// Arguments, exactly as the importer receives them.
+    ///
+    /// **Stored and readable.** Anything that can read this definition
+    /// can read these, so a credential written into one is a credential
+    /// in the database — the same trade the outbound side states about
+    /// its params blob, one surface along.
+    /// [`secret_ref`](Self::secret_ref) is the way out.
+    pub args: Vec<String>,
+    /// Name of the environment variable holding this import's
+    /// credential, or `None` for a source that needs none.
+    ///
+    /// A **name, never a value**, following `auth.secret_ref` on the
+    /// outbound side for the reason stated there: the value is resolved
+    /// when the importer is started, and is in neither this row nor
+    /// anything written down afterwards.
+    ///
+    /// It does not reach the child's *arguments* either, which is where
+    /// this diverges from the outbound side's `{{secret}}` template.
+    /// That one renders into an HTTP header inside a single process;
+    /// this would render into an argument vector every other process on
+    /// the machine can read. The importer is handed the value through
+    /// its environment instead.
+    pub secret_ref: Option<String>,
+}
+
+/// Runs a stored import now (`POST /asterism/import/definitions/run`).
+///
+/// Refused while a run of the same definition is still going: two
+/// importers over one source would each take up from a position the
+/// other is about to move.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunImportDefinitionCommand {
+    /// Which definition to run.
+    pub id: String,
+}

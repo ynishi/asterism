@@ -313,6 +313,21 @@
       "docs": "Writes one run's artifact under its label. Refuses an existing\nlabel: artifacts are immutable, and a collision means the caller\nskipped [`next_head_label`]."
     },
     {
+      "path": "asterism_infra::import_launcher",
+      "kind": "module",
+      "docs": "Starting `asterism-import`, and the two things that is really about.\n\nThe [`ImportLauncher`] port's implementation: the one place in this\nworkspace that spawns an importer. Everything above it is arranged so\nthat this file is the only one holding a credential and the only one\nthat knows a process exists.\n\n# Where the binary is\n\nThree rungs, and the same three the ffmpeg sidecar uses, in the same\norder: an explicit `$ASTERISM_IMPORT`, then a sibling of the running\nexecutable, then `PATH`. The middle rung is the one worth naming —\nthe comment beside `thumb_ffmpeg`'s ladder records what skipping it\ncost there, \"it reported `ffmpeg is required` on exactly the machines\nthe sidecar exists for\", and a bundled importer beside a bundled\nserver is the identical shape. A failure names every rung it tried,\nbecause \"not found\" without the list is a message an operator cannot\nact on.\n\n# Where the credential is, and where it is not\n\nThe definition names an environment variable; this reads it and puts\nthe value into the **child's environment**, under a fixed name the\nimporter knows. It is therefore in: this process's environment, the\nchild's environment. It is not in: the definition, the run record,\nthe child's argument vector, or any message this file produces.\n\nThat last exclusion is why this diverges from the outbound side's\n`{{secret}}` template, which renders a credential into the thing it\nis building. There, the thing is an HTTP header inside one process.\nHere it would be an argument vector, and an argument vector is\nreadable by every other process on the machine — `ps` is not a\nprivilege. So the value goes through the environment instead, and\nwhat `ps` shows is the *name* of a header.\n\nLoading a `.env` is the binary's job, done once at startup, for the\nreason the outbound side gives: an adapter that went looking for\ndotenv files itself would make \"which file did this credential come\nfrom\" invisible to the definition that named it."
+    },
+    {
+      "path": "asterism_infra::import_launcher::CHILD_SECRET_VAR",
+      "kind": "constant",
+      "docs": "The variable the child reads its credential out of.\n\nA fixed name rather than the definition's own, so that the importer\ndoes not have to be told which variable to look in and the value\ncannot be selected by anything the caller writes into an argument."
+    },
+    {
+      "path": "asterism_infra::import_launcher::SubprocessImportLauncher",
+      "kind": "struct",
+      "docs": "Spawns `asterism-import` and waits for it."
+    },
+    {
       "path": "asterism_infra::jobs",
       "kind": "module",
       "docs": "Job engine — apalis with the `apalis-sql` SQLite backend.\n\n## Contents\n\n- [`AsterismJob`] — the queue payload. A single typed queue holds every\n  kind of job; the kind is carried in a slug field.\n- [`SqliteJobQueue`] — implementation of the `JobQueue` port from\n  `asterism-core`.\n- [`start`] — runs `SqliteStorage::setup` and spawns the worker\n  `Monitor` on a tokio task.\n\n## Coexistence with `rusqlite-isle`\n\n`apalis-sql` reaches SQLite through `sqlx 0.8` (which uses\n`libsqlite3-sys 0.30`). The workspace pins `rusqlite-isle` to the\nrelease line built against the same cluster, so both stacks link\nagainst a single copy of `sqlite3`. Job persistence tables (`Jobs`,\nand so on) are created by `SqliteStorage::setup` inside the same DB\nfile as the domain tables — they are owned by apalis, and the domain\nnever mirrors them.\n\n## Handlers\n\n[`handlers`] holds the per-kind implementations: `cover_gen`\n(modality-specific heuristic), `auto_tag` (keyword extraction + tag\nmaterialisation), and `edge_rebuild` (windowed incremental rebuild via\n`plan_edges`). `asset_add`, `persona_import`, and `index_rebuild` are\nfuture work."
@@ -1091,6 +1106,16 @@
       "path": "asterism_infra::sqlite::repo::group::SqliteGroupRepository",
       "kind": "struct",
       "docs": "SQLite adapter (writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::import_definition",
+      "kind": "module",
+      "docs": "SQLite adapter for the `ImportDefinitionRepository` port.\n\nTwo tables behind one port, for the reason the port states: the\nquestion that spans them — is a run of this definition still going —\nis the one that stops a second importer starting over a source the\nfirst is about to move.\n\n`args_json` holds the argument vector as a JSON array. A column per\nargument is not a shape a command line has, and a single\nspace-joined string would have to be re-split by something that\nguessed at quoting — the one part of a command line it is genuinely\neasy to get wrong, and getting it wrong here means an importer run\nwith arguments nobody wrote."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::import_definition::SqliteImportDefinitionRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `ImportDefinitionRepository` (uses a writer isle)."
     },
     {
       "path": "asterism_infra::sqlite::repo::import_state",

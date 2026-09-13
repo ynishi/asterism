@@ -35,6 +35,7 @@ use crate::domain::dispatch::DispatchJob;
 use crate::domain::duplicate_conflict::{ConflictResolution, DuplicateAxis, DuplicateConflict};
 use crate::domain::edge::{ConstellationEdge, EdgeKind, IncidentEdge};
 use crate::domain::group::{Group, GroupLink, GroupSummary};
+use crate::domain::import_definition::{ImportDefinition, ImportRun};
 use crate::domain::import_state::{ImportState, ImportStateKey};
 use crate::domain::instance::InstanceIdentity;
 use crate::domain::job::JobKind;
@@ -4328,4 +4329,52 @@ pub trait ImportStateRepository: Send + Sync {
     /// checkpoint. A check here would be a second opinion on one
     /// question.
     async fn upsert(&self, state: &ImportState) -> Result<(), DomainError>;
+}
+
+/// Persistence port for stored imports and the record of running them
+/// (`import_definition` / `import_run` tables).
+///
+/// One port for two tables because one question spans them and is the
+/// reason both exist: [`running_for`](Self::running_for) is what stops
+/// a second run of a definition whose first has not finished. Splitting
+/// them would put that question on neither.
+#[async_trait]
+pub trait ImportDefinitionRepository: Send + Sync {
+    /// Inserts or replaces a definition.
+    async fn upsert(&self, definition: &ImportDefinition) -> Result<(), DomainError>;
+
+    /// One definition by id, or `None`.
+    async fn find(&self, id: &str) -> Result<Option<ImportDefinition>, DomainError>;
+
+    /// Every definition, oldest first.
+    async fn list(&self) -> Result<Vec<ImportDefinition>, DomainError>;
+
+    /// The run of `definition_id` that has started and not been
+    /// recorded as finished, if there is one.
+    ///
+    /// Read from the table rather than from any process's memory,
+    /// because the answer has to survive the process that wrote it: a
+    /// server restarted mid-run comes back with the row still saying
+    /// `running`, and a caller that trusted an in-memory set would
+    /// happily start a second importer over the same source.
+    ///
+    /// That also means a crashed run leaves a row nothing will ever
+    /// finish, and a definition that can then never be started again.
+    /// Sweeping those is not built and is not pretended to be — see the
+    /// service.
+    async fn running_for(&self, definition_id: &str) -> Result<Option<ImportRun>, DomainError>;
+
+    /// Records a run, inserting it or replacing what it said before.
+    ///
+    /// One verb for "it started" and "it ended", because they are the
+    /// same row: a run that was inserted at its start and updated at
+    /// its end is a run that cannot be lost between the two.
+    async fn record_run(&self, run: &ImportRun) -> Result<(), DomainError>;
+
+    /// Runs of one definition, newest first, capped at `limit`.
+    async fn runs_for(
+        &self,
+        definition_id: &str,
+        limit: u32,
+    ) -> Result<Vec<ImportRun>, DomainError>;
 }
