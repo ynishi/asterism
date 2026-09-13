@@ -15,25 +15,27 @@
 //! # Why this one exists
 //!
 //! Not for the sources it reaches. The port's classification was written
-//! for remote sources — [`Transient`](crate::SourceError::Transient),
-//! [`RateLimited`](crate::SourceError::RateLimited), the `retry_after` a
-//! rate limit carries — and until this scanner nothing in the workspace
-//! produced one outside a test fixture. A directory cannot be rate
-//! limited and a SQLite file is never briefly unreachable. An interface
-//! is only as good as the adapter shaped least like the ones it was
-//! written against, and this is that adapter.
+//! for remote sources, and no *scanner* had ever been one: a directory
+//! cannot be rate limited and a SQLite file is never briefly
+//! unreachable. [`RateLimited`](crate::SourceError::RateLimited) was
+//! constructed nowhere in this workspace but a fixture in the runner's
+//! tests, so `retry_after` — the field that whole class exists for —
+//! had never been filled in by anything that read a header. An
+//! interface is only as good as the adapter shaped least like the ones
+//! it was written against, and this is that adapter.
 //!
-//! Three things it does differently, each of which the port had never
-//! been asked about:
+//! Three things it does differently, each of which the port had ruled
+//! on and nothing had exercised:
 //!
 //! - **Its offset cannot be compared.** `FsScanner` compares paths and
 //!   `SqliteScanner` compares ids, so both can decide whether a record
 //!   falls before a resumption point. A cursor can only be handed back
 //!   to the source that issued it. The port's rule that an offset is
 //!   opaque and only its writer reads it is what makes that work.
-//! - **Its checkpoints are coarse.** The others emit one behind every
-//!   record. A page is the smallest thing this can take up after, so
-//!   fifty records share one checkpoint.
+//! - **Its checkpoints are coarse.** `FsScanner` emits one behind every
+//!   file, and `SqliteScanner` behind every row it can order. A page is
+//!   the smallest thing this can take up after, so fifty records share
+//!   one checkpoint.
 //! - **Resuming costs nothing.** The others read from the beginning and
 //!   skip what is behind the point. This asks the source to start
 //!   there, so the records before it are never fetched, parsed or paid
@@ -70,8 +72,11 @@ use crate::port::{SourceError, SyncState};
 ///
 /// One dialect, named rather than assumed: the response carries a token
 /// at `path`, and the next request sends it as the query parameter
-/// `param`. A response with nothing at `path`, or `null` there, is the
-/// last page.
+/// `param`.
+///
+/// Nothing at `path`, or `null` there, is the last page. A string or a
+/// number is the token. Anything else present is a failure rather than
+/// an end — see [`next_cursor`].
 #[derive(Debug, Clone)]
 pub struct Cursor {
     /// Path to the token in the response body, walked key by key.
@@ -101,11 +106,14 @@ pub struct RecordMap {
     /// Path to the array of records, walked key by key. Empty means the
     /// body is itself the array.
     pub items_path: Vec<String>,
-    /// Field on each record holding its id. Combined with the URL to
-    /// form [`RawItem::locator`], which is what the server's unique
-    /// index reads for idempotency — so it has to be stable for the
-    /// life of the record, and a field the service calls `position` or
-    /// `index` is not one.
+    /// Field on each record holding its id.
+    ///
+    /// Combined with the URL's address — scheme, host and path, without
+    /// the query string — to form [`RawItem::locator`], which is what
+    /// the server's identity reads. So it has to be stable for the life
+    /// of the record: a field the service calls `position` or `index` is
+    /// not one, and neither is anything that changes when the caller
+    /// moves a `since=` window.
     pub id_field: String,
     /// Optional field holding the record's occurrence time: RFC 3339
     /// text, or an integer read as unix epoch milliseconds.
@@ -140,8 +148,37 @@ pub struct HttpScanner {
     records: RecordMap,
     cursor: Cursor,
     source_kind: String,
+    max_pages: usize,
     client: reqwest::Client,
 }
+
+/// How long one request may take before it is a failure rather than a
+/// wait.
+///
+/// A whole-request ceiling, matching the outbound HTTP exporter's. A
+/// source that accepts a connection and then says nothing is
+/// indistinguishable from one that is slow, and without a clock the
+/// import waits for either forever with nothing reported — which is the
+/// same silence a runaway paging loop produces and just as hard to see.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How many pages a single scan will follow before calling the source
+/// broken.
+///
+/// A ceiling and not a limit: reaching it **fails the run** rather than
+/// ending it quietly, because a scan that stopped early and reported
+/// success is the silent loss this whole port is built to rule out.
+///
+/// It exists because the cycle guard below catches only the simplest
+/// non-progress — a token handed straight back. A source alternating
+/// two cursors, or issuing a fresh one forever, defeats it and pages
+/// until somebody notices, which on the evidence of this branch's own
+/// fixture is thirty-seven minutes and counting. High enough that a
+/// real source reaching it is a bug and not a Tuesday; [`with_max_pages`]
+/// is there for whoever has the exception.
+///
+/// [`with_max_pages`]: HttpScanner::with_max_pages
+const DEFAULT_MAX_PAGES: usize = 10_000;
 
 impl HttpScanner {
     /// Builds a scanner over `url`, reading records per `records` and
@@ -153,15 +190,34 @@ impl HttpScanner {
             records,
             cursor,
             source_kind: "http".into(),
-            client: reqwest::Client::new(),
+            max_pages: DEFAULT_MAX_PAGES,
+            client: reqwest::Client::builder()
+                .timeout(REQUEST_TIMEOUT)
+                .build()
+                .expect("reqwest client build"),
         }
+    }
+
+    /// Raises or lowers the page ceiling — see [`DEFAULT_MAX_PAGES`].
+    ///
+    /// For a source that genuinely has more pages than the default, and
+    /// for a caller who would rather be told sooner that one is not
+    /// advancing.
+    pub fn with_max_pages(mut self, pages: usize) -> Self {
+        self.max_pages = pages.max(1);
+        self
     }
 
     /// Adds a header to every request.
     ///
-    /// Where a credential goes, and the only place one does: this
-    /// scanner has no notion of an auth scheme, so whatever the service
-    /// wants is spelled by the caller who knows.
+    /// Where a credential goes, and the only place one safely does:
+    /// this scanner has no notion of an auth scheme, so whatever the
+    /// service wants is spelled by the caller who knows.
+    ///
+    /// Headers are not recorded anywhere. The URL is — whole, query
+    /// string included, in the partition a position is filed under and
+    /// in every failure message — so a token in a query parameter ends
+    /// up in the database and the logs, and one here does not.
     pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((name.into(), value.into()));
         self
@@ -171,6 +227,27 @@ impl HttpScanner {
     pub fn with_source_kind(mut self, slug: impl Into<String>) -> Self {
         self.source_kind = slug.into();
         self
+    }
+
+    /// The address half of a record's locator: this URL without its
+    /// query string.
+    ///
+    /// Kept apart from [`partition_key`](Self::partition_key), which
+    /// keeps the query, and the split is the one `SqliteScanner` makes:
+    /// a row is addressed `{db}#{id}` while its partition is the
+    /// database *and* the `SELECT`. Parameters choose *which* records
+    /// come back; they are not part of *where* a record lives.
+    ///
+    /// Getting this wrong duplicates. The server's identity is
+    /// `(persona_id, source_kind, source_locator)` compared as text, so
+    /// a locator carrying `?since=A` and one carrying `?since=B` are two
+    /// rows for one record — and two runs of the same import with a
+    /// moved window is the ordinary way to use such a flag.
+    fn address(&self) -> &str {
+        match self.url.split_once('?') {
+            Some((base, _)) => base,
+            None => &self.url,
+        }
     }
 
     /// The resumable unit: this scanner's kind and its URL.
@@ -187,11 +264,13 @@ impl HttpScanner {
 
     /// The cursor a resumption point says to start from.
     ///
-    /// Unlike the other two scanners, nothing is compared: the token is
-    /// handed back to the source, which is the only thing that knows
-    /// what it means. That is the port's opacity rule doing its job —
-    /// and the reason this scanner can resume without reading what it
-    /// has already read.
+    /// The partition is compared, as
+    /// [`SourceScanner::scan`](super::SourceScanner::scan) requires of
+    /// every scanner. The *token* is not: unlike a path or a row id it
+    /// is handed straight back to the source, which is the only thing
+    /// that knows what it means. That is the port's opacity rule doing
+    /// its job — and the reason this scanner can resume without reading
+    /// what it has already read.
     fn resume_after(&self, state: Option<SyncState>) -> Result<Option<String>, SourceError> {
         let Some(state) = state else {
             return Ok(None);
@@ -256,7 +335,18 @@ impl HttpScanner {
     async fn walk(self, start: Option<String>, tx: mpsc::Sender<Result<ScanEvent, SourceError>>) {
         let partition = self.partition_key();
         let mut cursor = start;
-        loop {
+        for page in 1.. {
+            if page > self.max_pages {
+                let _ = tx
+                    .send(Err(SourceError::Source(format!(
+                        "{}: stopped after {} pages without reaching the end of the \
+                         source — it is either larger than this scanner's ceiling or \
+                         not advancing; see HttpScanner::with_max_pages",
+                        self.url, self.max_pages
+                    ))))
+                    .await;
+                return;
+            }
             let body = match self.fetch(cursor.as_deref()).await {
                 Ok(body) => body,
                 Err(err) => {
@@ -276,7 +366,8 @@ impl HttpScanner {
                 // `Config`, because a path the caller got wrong and a
                 // response that changed shape look identical from here
                 // and only one of them is worth telling an operator to
-                // go and fix — see the module doc on classification.
+                // go and fix — see [`classify`](Self::classify) for
+                // where that cut is drawn over statuses.
                 _ => {
                     let _ = tx
                         .send(Err(SourceError::Source(format!(
@@ -299,10 +390,10 @@ impl HttpScanner {
                     // id is one the locator cannot address, and the
                     // rest of the page is unaffected. `FsScanner` makes
                     // the same call about an unreadable file;
-                    // `SqliteScanner` cannot, because its cursor is
-                    // detached by the failure. Three scanners, three
-                    // answers about their own sources, which is what
-                    // the port says this decision is.
+                    // `SqliteScanner` cannot, because the failure
+                    // detaches its cursor. The port leaves the answer
+                    // to the scanner for exactly that reason — each one
+                    // knows what its own source can still do.
                     Err(err) => {
                         if tx.send(Err(err)).await.is_err() {
                             return;
@@ -311,7 +402,20 @@ impl HttpScanner {
                 }
             }
 
-            let next = walk_path(&body, &self.cursor.path).and_then(|v| v.as_str());
+            let next = match next_cursor(walk_path(&body, &self.cursor.path)) {
+                Ok(next) => next,
+                Err(unsendable) => {
+                    let _ = tx
+                        .send(Err(SourceError::Source(format!(
+                            "{}: the next-page token at {:?} is {unsendable}, which \
+                             cannot be sent back as a query parameter",
+                            self.url,
+                            self.cursor.path.join(".")
+                        ))))
+                        .await;
+                    return;
+                }
+            };
             let Some(next) = next else {
                 // The last page. **No checkpoint for it**, because the
                 // only token this scanner can hand back is one the
@@ -344,7 +448,7 @@ impl HttpScanner {
             // loop into a thirty-seven-minute hang instead of a failed
             // assertion. A real service that echoes a cursor would have
             // done the same to an import.
-            if cursor.as_deref() == Some(next) {
+            if cursor.as_deref() == Some(next.as_str()) {
                 let _ = tx
                     .send(Err(SourceError::Source(format!(
                         "{}: pagination is not advancing — the source returned the \
@@ -360,14 +464,22 @@ impl HttpScanner {
             // smallest unit this source can be taken up after. The
             // token stored is the one that fetches what comes *next*,
             // so resuming is a request rather than a comparison.
+            //
+            // Emitted even when a record on this page was lost, and
+            // that is not this scanner's oversight: a checkpoint says
+            // the page was handed over, and whether the records on it
+            // *landed* is the runner's to know —
+            // `ImportSummary::resume_from` withholds the position from
+            // any run that failed a record, so a lost record here means
+            // nothing is stored and the next run re-reads the page.
             let checkpoint = ScanEvent::Checkpoint(SyncState::new(
                 partition.clone(),
-                json!({ "after_cursor": next }),
+                json!({ "after_cursor": next.clone() }),
             ));
             if tx.send(Ok(checkpoint)).await.is_err() {
                 return;
             }
-            cursor = Some(next.to_string());
+            cursor = Some(next);
         }
     }
 
@@ -461,7 +573,7 @@ impl HttpScanner {
             })?;
         let payload = serde_json::to_vec(item).map_err(|err| {
             SourceError::item(
-                format!("{}#{id}", self.url),
+                format!("{}#{id}", self.address()),
                 format!("record did not serialise: {err}"),
             )
         })?;
@@ -474,11 +586,37 @@ impl HttpScanner {
 
         Ok(RawItem {
             source_kind: self.source_kind.clone(),
-            locator: format!("{}#{id}", self.url),
+            locator: format!("{}#{id}", self.address()),
             payload,
             occurred_at,
             extra: json!({ "source_url": self.url }),
         })
+    }
+}
+
+/// The next page's token, `None` at the end of the source, or the name
+/// of a shape that cannot be one.
+///
+/// Absent and `null` are the end — the two ways a service says there is
+/// no more. A string is the token; so is a number, because a service
+/// that numbers its cursors is sending the same thing in a different
+/// JSON type and both go back on the query string identically.
+///
+/// Anything else is a **failure and not an end**, which is the whole
+/// point of this function existing. The first shape of this read the
+/// token with `as_str` and treated everything that was not a string as
+/// the last page: a source whose cursor was a number imported its first
+/// page and reported a clean, complete run. Silence over a source with
+/// more to give is the failure mode this port was built to rule out,
+/// and it had arrived here by way of a convenience method.
+fn next_cursor(value: Option<&Value>) -> Result<Option<String>, &'static str> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(token)) => Ok(Some(token.clone())),
+        Some(Value::Number(token)) => Ok(Some(token.to_string())),
+        Some(Value::Bool(_)) => Err("a boolean"),
+        Some(Value::Array(_)) => Err("an array"),
+        Some(Value::Object(_)) => Err("an object"),
     }
 }
 
@@ -490,8 +628,10 @@ fn walk_path<'a>(value: &'a Value, path: &[String]) -> Option<&'a Value> {
 /// An id as text, from the two JSON types an id is.
 ///
 /// A number is rendered rather than refused, because plenty of services
-/// number their records and a locator is text either way. A bool, a
-/// null, an object or an array is not an id and is not guessed at.
+/// number their records and a locator is text either way. Everything
+/// else is refused, the empty string included — which is the one a real
+/// service plausibly sends, and an address of `<url>#` would collide
+/// every such record onto one row.
 fn value_as_id(value: &Value) -> Option<String> {
     match value {
         Value::String(s) if !s.is_empty() => Some(s.clone()),
@@ -601,7 +741,8 @@ mod tests {
     ///
     /// Hand-rolled for the reason the runner's counting server is: this
     /// crate has no HTTP test dependency, and what these tests need is a
-    /// socket that can be made to say 429 — which no real service can.
+    /// socket that says 429 on demand — which is the one thing a real
+    /// service will not do when asked.
     async fn spawn_source(replies: Vec<Reply>) -> (u16, Asked) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -906,10 +1047,10 @@ mod tests {
 
     /// A record with no id costs that record, and the page goes on.
     ///
-    /// The third answer to the port's one question, and a third source
-    /// giving it for its own reasons: `FsScanner` takes the next file,
-    /// `SqliteScanner` cannot because the failure detaches its cursor,
-    /// and this one can because the page is already in hand.
+    /// A third source answering the port's one question for its own
+    /// reasons: `FsScanner` takes the next file, `SqliteScanner` cannot
+    /// because the failure detaches its cursor, and this one can
+    /// because the page is already in hand.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_record_with_no_id_costs_that_record_and_the_page_goes_on() {
         let (port, _) = spawn_source(vec![Reply::ok(
@@ -932,6 +1073,59 @@ mod tests {
             err.disposition(),
             Disposition::RecordLost,
             "one record, not the run: {err}"
+        );
+    }
+
+    /// A cursor the source sends as a number is followed, not mistaken
+    /// for the end of the source.
+    ///
+    /// The first shape of this read the token with `as_str`, so a
+    /// service that numbered its cursors imported its first page and
+    /// reported a clean, complete run — silence over a source with more
+    /// to give, which is the failure this port exists to rule out.
+    /// Nothing in the three-page fixture could have shown it: every
+    /// token there is a string.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_numeric_cursor_is_a_cursor() {
+        let (port, asked) = spawn_source(vec![
+            Reply::ok(r#"{"data":{"items":[{"id":"1"}]},"paging":{"next":2}}"#),
+            Reply::ok(r#"{"data":{"items":[{"id":"2"}]},"paging":{"next":null}}"#),
+        ])
+        .await;
+
+        let events = drain_events(&scanner(port), None).await;
+        assert!(failures(&events).is_empty(), "{:?}", failures(&events));
+        assert_eq!(locators(&events).len(), 2, "both pages, not just the first");
+        assert_eq!(
+            asked.cursors(),
+            vec![None, Some("2".into())],
+            "the number went back on the query string as itself"
+        );
+    }
+
+    /// A token that is there and cannot be sent ends the run loudly.
+    ///
+    /// The other half of the same rule. An object at the cursor's path
+    /// is a source this build does not know how to follow, and saying
+    /// so is the only honest answer — reporting the page as the last
+    /// one would be the silence above by another route.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_token_this_build_cannot_send_is_a_failure_and_not_an_end() {
+        let (port, _) = spawn_source(vec![Reply::ok(
+            r#"{"data":{"items":[{"id":"1"}]},"paging":{"next":{"after":"x"}}}"#,
+        )])
+        .await;
+
+        let events = drain_events(&scanner(port), None).await;
+        assert_eq!(locators(&events).len(), 1, "the page still arrived");
+        let err = failures(&events).into_iter().next().expect("one failure");
+        assert!(
+            matches!(err, SourceError::Source(_)),
+            "the far end speaks a dialect this build does not: {err}"
+        );
+        assert!(
+            err.to_string().contains("an object"),
+            "and it says what it found: {err}"
         );
     }
 
@@ -961,6 +1155,77 @@ mod tests {
             asked.cursors(),
             vec![None, Some("stuck".into())],
             "two requests and no third"
+        );
+    }
+
+    /// A source that never reaches an end fails the run rather than
+    /// being followed until somebody notices.
+    ///
+    /// The cycle guard catches only a token handed straight back. This
+    /// source alternates two, which defeats it and pages forever — the
+    /// shape that cost this branch thirty-seven minutes when a fixture
+    /// did it by accident. The ceiling is what bounds it, and reaching
+    /// one is a **failure**: a scan that stopped early and reported
+    /// success would be the silent loss the whole port is built against.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_source_that_never_ends_hits_the_ceiling_and_says_so() {
+        let (port, asked) = spawn_source(vec![
+            Reply::page(&["1"], Some("a")),
+            Reply::page(&["2"], Some("b")),
+            Reply::page(&["3"], Some("a")),
+            Reply::page(&["4"], Some("b")),
+            Reply::page(&["5"], Some("a")),
+        ])
+        .await;
+
+        let events = drain_events(&scanner(port).with_max_pages(3), None).await;
+        assert_eq!(
+            locators(&events).len(),
+            3,
+            "the pages it did read still arrive"
+        );
+        let err = failures(&events).into_iter().next().expect("one failure");
+        assert!(
+            matches!(err, SourceError::Source(_)),
+            "a source that will not end is the far side's trouble: {err}"
+        );
+        assert_eq!(
+            asked.cursors().len(),
+            3,
+            "and it stopped asking rather than running on"
+        );
+    }
+
+    /// A record's address does not move when the caller moves a query
+    /// parameter.
+    ///
+    /// The identity the server compares is
+    /// `(persona_id, source_kind, source_locator)` as text, so a locator
+    /// carrying `?since=A` and one carrying `?since=B` would be two rows
+    /// for one record — and moving that window between runs is the
+    /// ordinary way to use such a flag. The partition keeps the query,
+    /// because parameters choose *which* records come back; the locator
+    /// does not, because they are not part of *where* one lives.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_records_address_does_not_move_with_a_query_parameter() {
+        let (port, _) = spawn_source(vec![Reply::page(&["7"], None)]).await;
+        let with_query = HttpScanner::new(
+            format!("http://127.0.0.1:{port}/records?since=2026-01-01"),
+            RecordMap::new(["data", "items"], "id"),
+            Cursor::new(["paging", "next"], "cursor"),
+        );
+
+        let events = drain_events(&with_query, None).await;
+        assert_eq!(
+            locators(&events),
+            vec![format!("http://127.0.0.1:{port}/records#7")],
+            "the window the caller asked through is not part of the address"
+        );
+        assert!(
+            SourceScanner::partition(&with_query)
+                .expect("a URL has a partition")
+                .contains("since=2026-01-01"),
+            "but it is part of what the position is a position in"
         );
     }
 

@@ -22,8 +22,9 @@ Scanner  ─→ RawItem  ─→ Parser  ─→ Footprint  ─→ AssetSpec  ─�
 
 - [`SourceScanner`] enumerates or watches an external source and
   emits [`ScanEvent`]s — the [`RawItem`]s themselves, and the points
-  a later scan could take up from. Implementations bundled here:
-  [`FsScanner`], [`SqliteScanner`].
+  a later scan could take up from. Implementations are bundled in
+  [`scanner`]'s sibling modules; an importer reaches for one of
+  those before writing its own.
 - [`SourceParser`] turns a `RawItem` into zero or more
   [`Footprint`]s; it is the only source-specific piece an importer
   author has to write.

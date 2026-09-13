@@ -5,9 +5,8 @@
 Enumerates or watches an external source and produces
 [`ScanEvent`]s: the [`RawItem`]s themselves, and the points a later
 scan could take up from.
-Bundled implementations live in the sibling modules
-([`fs`] and [`sqlite`]); importer authors typically reuse one
-instead of writing their own.
+Bundled implementations live in this module's siblings; importer
+authors typically reuse one instead of writing their own.
 
 ## Types
 

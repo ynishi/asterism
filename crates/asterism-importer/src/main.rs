@@ -266,6 +266,11 @@ struct HttpArgs {
     /// Whole, because parameters choose what comes back — a `since=` or
     /// a `type=` makes it a different set of records, and the stored
     /// position is filed under the URL for exactly that reason.
+    ///
+    /// **Not where a credential goes.** The whole URL, query string
+    /// included, is written into the stored position and into every
+    /// failure message; `--header` is neither. A token put in a query
+    /// parameter is a token in the database and in the logs.
     #[arg(long)]
     url: String,
     /// Header sent with every request, as `Name: value`. Repeatable.
@@ -298,10 +303,11 @@ struct HttpArgs {
     cursor_param: String,
     /// Slug written to every footprint's source kind.
     ///
-    /// Name the service here. It leads the stored position's partition
-    /// and every locator, so two HTTP imports in one persona stay apart
-    /// — and it has to stay the same across releases of this importer,
-    /// because the server's unique index reads it.
+    /// Name the service here. It leads the stored position's partition,
+    /// and the server's identity for a record is this slug together
+    /// with the locator — so two HTTP imports in one persona stay
+    /// apart, and the slug has to stay the same across releases of this
+    /// importer or every record it already landed becomes a new one.
     #[arg(long, default_value = "http")]
     source_kind: String,
 }

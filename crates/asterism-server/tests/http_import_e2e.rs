@@ -296,10 +296,10 @@ async fn a_cursor_the_server_kept_takes_the_next_run_where_it_left_off() {
 /// A run that reached a rate limit keeps the position it had earned up
 /// to that point, and says when the source is expected back.
 ///
-/// The case the whole classification was built for, and the first one
-/// in this workspace driven by a source that really answered 429. Both
-/// halves matter: the records before the limit are not re-read next
-/// time, and the operator is told a time rather than a failure.
+/// The case the whole classification was built for, driven end to end
+/// by a source that really answers 429. Both halves matter: the records
+/// before the limit are not re-read next time, and the operator is told
+/// a time rather than a failure.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_rate_limited_run_keeps_what_it_reached_and_says_when_to_return() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

@@ -10,6 +10,33 @@ and this project adheres to
 
 ### Added
 
+- **Imports can read a paginated HTTP source** (#297). `HttpScanner` is the
+  third bundled scanner, and it takes a URL, a path to the records and a path to
+  the next-page token the way `SqliteScanner` takes a `SELECT` and a column map
+  — no per-service knowledge, so a service is a set of values rather than a
+  release. `asterism-import http` runs it. It is here for what it stresses as
+  much as for what it reaches: the port's classification was written for remote
+  sources and no scanner had ever been one, so `RateLimited` was constructed
+  nowhere outside a test fixture and `retry_after` had never been filled in by
+  anything that read a header. Three shapes the port had ruled on and nothing
+  had exercised: an **offset that cannot be compared** — a cursor can only be
+  handed back to the source that issued it, where a path and a row id can both
+  be ordered; **checkpoints that are coarse**, because a page is the smallest
+  thing a cursor can take up after; and a **resumption that costs nothing**,
+  since the source is asked to start there rather than read from the beginning
+  and skipped. All three held. The status map is new: a **429** is `RateLimited`
+  carrying `Retry-After` (in its seconds form — a date needs a clock both ends
+  agree on, and a wait computed from a skewed one is worse than none stated),
+  **502/503/504** are `Transient` because the far side is unavailable right now,
+  every other **5xx** is `Source` because a 500 says this request broke it, and
+  **4xx** is `Config`. A record's locator is the URL **without its query
+  string**, so moving a `since=` window between runs does not give one record
+  two addresses; the partition keeps the query, because parameters choose which
+  records come back. Two ways a scan could have run forever are closed — a
+  source that hands back the token it was given ends the run, and so does one
+  that has not finished after ten thousand pages — and both fail loudly rather
+  than reporting a short read as a complete one.
+
 - **An import takes up where the last one stopped** (#293). The inbound port had
   a vocabulary for resumption and no way to use it: `SyncState` existed, nothing
   emitted one, and every scan began at the beginning — which for a source of any

@@ -10085,8 +10085,9 @@ Scanner  ─→ RawItem  ─→ Parser  ─→ Footprint  ─→ AssetSpec  ─�
 
 - [`SourceScanner`] enumerates or watches an external source and
   emits [`ScanEvent`]s — the [`RawItem`]s themselves, and the points
-  a later scan could take up from. Implementations bundled here:
-  [`FsScanner`], [`SqliteScanner`].
+  a later scan could take up from. Implementations are bundled in
+  [`scanner`]'s sibling modules; an importer reaches for one of
+  those before writing its own.
 - [`SourceParser`] turns a `RawItem` into zero or more
   [`Footprint`]s; it is the only source-specific piece an importer
   author has to write.
@@ -11615,9 +11616,8 @@ messages addressed `<file>#<uuid>`, and one PNG yields itself.
 Enumerates or watches an external source and produces
 [`ScanEvent`]s: the [`RawItem`]s themselves, and the points a later
 scan could take up from.
-Bundled implementations live in the sibling modules
-([`fs`] and [`sqlite`]); importer authors typically reuse one
-instead of writing their own.
+Bundled implementations live in this module's siblings; importer
+authors typically reuse one instead of writing their own.
 
 ## Types
 
@@ -11675,25 +11675,27 @@ version of "thirty or forty adapters" that stays maintainable.
 # Why this one exists
 
 Not for the sources it reaches. The port's classification was written
-for remote sources — [`Transient`](crate::SourceError::Transient),
-[`RateLimited`](crate::SourceError::RateLimited), the `retry_after` a
-rate limit carries — and until this scanner nothing in the workspace
-produced one outside a test fixture. A directory cannot be rate
-limited and a SQLite file is never briefly unreachable. An interface
-is only as good as the adapter shaped least like the ones it was
-written against, and this is that adapter.
+for remote sources, and no *scanner* had ever been one: a directory
+cannot be rate limited and a SQLite file is never briefly
+unreachable. [`RateLimited`](crate::SourceError::RateLimited) was
+constructed nowhere in this workspace but a fixture in the runner's
+tests, so `retry_after` — the field that whole class exists for —
+had never been filled in by anything that read a header. An
+interface is only as good as the adapter shaped least like the ones
+it was written against, and this is that adapter.
 
-Three things it does differently, each of which the port had never
-been asked about:
+Three things it does differently, each of which the port had ruled
+on and nothing had exercised:
 
 - **Its offset cannot be compared.** `FsScanner` compares paths and
   `SqliteScanner` compares ids, so both can decide whether a record
   falls before a resumption point. A cursor can only be handed back
   to the source that issued it. The port's rule that an offset is
   opaque and only its writer reads it is what makes that work.
-- **Its checkpoints are coarse.** The others emit one behind every
-  record. A page is the smallest thing this can take up after, so
-  fifty records share one checkpoint.
+- **Its checkpoints are coarse.** `FsScanner` emits one behind every
+  file, and `SqliteScanner` behind every row it can order. A page is
+  the smallest thing this can take up after, so fifty records share
+  one checkpoint.
 - **Resuming costs nothing.** The others read from the beginning and
   skip what is behind the point. This asks the source to start
   there, so the records before it are never fetched, parsed or paid
