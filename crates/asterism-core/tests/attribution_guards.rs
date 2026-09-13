@@ -362,6 +362,12 @@ fn public_fns(root: &Path, path: &Path) -> Vec<PublicFn> {
 /// inconvenience to be managed: a new entry is a new verb that writes
 /// without saying whose write it is.
 const CONTEXT_EXEMPT: &[(&str, &str)] = &[
+    (
+        "import_state_service::read",
+        "read — where an importer got to, fetched by the importer about \
+         to take up from it. Its sibling `write` does take a context, \
+         and neither persists one: the row has no room for a writer",
+    ),
     // ---- line_service: reads (#63)
     (
         "line_service::get",
