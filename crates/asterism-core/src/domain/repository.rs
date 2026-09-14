@@ -4385,4 +4385,30 @@ pub trait ImportDefinitionRepository: Send + Sync {
         definition_id: &str,
         limit: u32,
     ) -> Result<Vec<ImportRun>, DomainError>;
+
+    /// Every definition whose interval says it should have started by
+    /// `now`.
+    ///
+    /// Three rules, all of them here rather than in the caller so that
+    /// "when is this due" has one answer:
+    ///
+    /// - A definition with no
+    ///   [`every_minutes`](crate::domain::import_definition::ImportDefinition::every_minutes)
+    ///   is never due. Nothing starts it but a person.
+    /// - One that has never run is due at once.
+    /// - Otherwise it is due at `last.started_at + every_minutes`, and
+    ///   — when the last run carries a `retry_after_secs` and an end —
+    ///   no earlier than `last.ended_at + retry_after_secs`. The later
+    ///   of the two wins, because the interval is what the operator
+    ///   asked for and the wait is what the source said, and a source
+    ///   saying "not for an hour" is not a thing an interval overrides.
+    ///
+    /// **Whether a run is currently going is not asked.** That question
+    /// belongs to the process holding the children and is answered
+    /// there; a definition due while its own run is still going is
+    /// returned here and refused by
+    /// [`ImportRunService::run`](crate::application::ImportRunService::run).
+    /// Asking it in SQL would put a second answer to "is it going"
+    /// beside the first, which is the shape #299 took out.
+    async fn due(&self, now: DateTime<Utc>) -> Result<Vec<ImportDefinition>, DomainError>;
 }

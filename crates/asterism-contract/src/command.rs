@@ -2350,6 +2350,18 @@ pub struct DefineImportCommand {
     /// states is *where the credential goes*; which argument carries
     /// that to `asterism-import` is a detail of how it is started.
     pub secret_header: Option<String>,
+    /// Minutes between starts. Absent means nothing starts this but a
+    /// person, which is what every definition was before #302.
+    ///
+    /// An interval and not a time of day, because what is being asked
+    /// for is "keep this filling" — an interval has no timezone, so it
+    /// has no hour that happens twice a year and none that does not
+    /// happen at all.
+    ///
+    /// Zero is refused. A schedule of no minutes is not a schedule, and
+    /// reading it as "manual" would answer a typo by silently doing
+    /// nothing for as long as nobody noticed.
+    pub every_minutes: Option<u32>,
 }
 
 /// Runs a stored import now (`POST /asterism/import/definitions/run`).

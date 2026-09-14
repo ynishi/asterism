@@ -35,6 +35,7 @@
 - [asterism-core::application::forge::pursuit_service](asterism_core/application__forge__pursuit_service.md): Work use cases — opening a line of work, writing rounds, looking at
 - [asterism-core::application::forge::thread_service](asterism_core/application__forge__thread_service.md): Saying something about work, and correcting it.
 - [asterism-core::application::import_run_service](asterism_core/application__import_run_service.md): Defining an import, and running one without anybody typing it.
+- [asterism-core::application::import_scheduler](asterism_core/application__import_scheduler.md): The timer #299 said belonged on top of the supervisor.
 - [asterism-core::application::import_state_service](asterism_core/application__import_state_service.md): Reading and writing where an importer got to.
 - [asterism-core::application::mapping](asterism_core/application__mapping.md): Conversion between domain types and contract DTOs.
 - [asterism-core::application::material_layer_service](asterism_core/application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's

@@ -2612,6 +2612,9 @@ pub struct ImportDefinitionDto {
     pub secret_ref: Option<String>,
     /// Header the credential is sent as, when there is one.
     pub secret_header: Option<String>,
+    /// Minutes between starts, or absent for an import nothing starts
+    /// on its own.
+    pub every_minutes: Option<u32>,
 }
 
 /// What one run of an import did.

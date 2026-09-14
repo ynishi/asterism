@@ -22,6 +22,7 @@ use asterism_core::domain::import_definition::{ImportDefinition, ImportRun, RunO
 use asterism_core::domain::repository::ImportDefinitionRepository;
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use rusqlite::{OptionalExtension, params};
 use rusqlite_isle::AsyncIsle;
 
@@ -51,11 +52,12 @@ struct DefinitionRow {
     args_json: String,
     secret_ref: Option<String>,
     secret_header: Option<String>,
+    every_minutes: Option<i64>,
 }
 
 impl DefinitionRow {
-    const COLUMNS: &'static str =
-        "id, persona_id, name, subcommand, args_json, secret_ref, secret_header";
+    const COLUMNS: &'static str = "id, persona_id, name, subcommand, args_json, \
+                                   secret_ref, secret_header, every_minutes";
 
     fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
         Ok(Self {
@@ -66,6 +68,7 @@ impl DefinitionRow {
             args_json: row.get(4)?,
             secret_ref: row.get(5)?,
             secret_header: row.get(6)?,
+            every_minutes: row.get(7)?,
         })
     }
 
@@ -82,6 +85,24 @@ impl DefinitionRow {
                 self.id
             ))
         })?;
+        // An interval this build cannot read is an error and not "no
+        // schedule", for the reason the arguments give one line up. A
+        // definition silently demoted to manual is an import that
+        // quietly stops filling, which is the failure the whole slice
+        // exists to prevent, and it would look exactly like one nobody
+        // had scheduled.
+        let every_minutes = self
+            .every_minutes
+            .map(|minutes| {
+                u32::try_from(minutes).map_err(|_| {
+                    DomainError::Infra(anyhow::anyhow!(
+                        "import definition {}: {minutes} is not an interval this \
+                         build can read",
+                        self.id
+                    ))
+                })
+            })
+            .transpose()?;
         Ok(ImportDefinition {
             id: self.id,
             persona_id: self.persona_id,
@@ -90,6 +111,7 @@ impl DefinitionRow {
             args,
             secret_ref: self.secret_ref,
             secret_header: self.secret_header,
+            every_minutes,
         })
     }
 }
@@ -175,6 +197,7 @@ impl ImportDefinitionRepository for SqliteImportDefinitionRepository {
         })?;
         let secret_ref = definition.secret_ref.clone();
         let secret_header = definition.secret_header.clone();
+        let every_minutes = definition.every_minutes.map(i64::from);
         let now = datetime_to_ms(&chrono::Utc::now());
         let clash_name = name.clone();
         let clashed = self
@@ -196,15 +219,16 @@ impl ImportDefinitionRepository for SqliteImportDefinitionRepository {
                 conn.execute(
                     "INSERT INTO import_definition
                          (id, persona_id, name, subcommand, args_json, secret_ref,
-                          secret_header, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                          secret_header, created_at, every_minutes)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                      ON CONFLICT(id) DO UPDATE SET
                          persona_id    = excluded.persona_id,
                          name          = excluded.name,
                          subcommand    = excluded.subcommand,
                          args_json     = excluded.args_json,
                          secret_ref    = excluded.secret_ref,
-                         secret_header = excluded.secret_header",
+                         secret_header = excluded.secret_header,
+                         every_minutes = excluded.every_minutes",
                     params![
                         id,
                         persona_id,
@@ -213,7 +237,8 @@ impl ImportDefinitionRepository for SqliteImportDefinitionRepository {
                         args_json,
                         secret_ref,
                         secret_header,
-                        now
+                        now,
+                        every_minutes
                     ],
                 )?;
                 Ok(None)
@@ -366,5 +391,360 @@ impl ImportDefinitionRepository for SqliteImportDefinitionRepository {
             .await
             .map_err(infra_err)?;
         rows.into_iter().map(RunRow::into_domain).collect()
+    }
+
+    /// One query, and the whole of "when is this due" is in it.
+    ///
+    /// The port's doc states the three rules; what is worth saying here
+    /// is how they are spelled. `COALESCE(..., 0)` is the definition
+    /// that has never run — an absent subquery result becomes an epoch
+    /// nothing is earlier than, so such a definition is due. `max()` of
+    /// the two candidate times is the interval against the wait the
+    /// source stated, and the `CASE` floors the second at `0` rather
+    /// than letting it be `NULL`, because SQLite's `max()` answers
+    /// `NULL` if any argument is.
+    ///
+    /// A run still going has no `ended_at`, so it contributes only its
+    /// interval — which is what should happen. A definition whose run
+    /// is overdue while still running comes back from here and is
+    /// refused by the service, and that refusal is the one answer to
+    /// "is it going".
+    async fn due(&self, now: DateTime<Utc>) -> Result<Vec<ImportDefinition>, DomainError> {
+        let now_ms = datetime_to_ms(&now);
+        let rows = self
+            .isle
+            .call(move |conn| {
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT {} FROM import_definition
+                      WHERE every_minutes IS NOT NULL
+                        AND ?1 >= COALESCE((
+                              SELECT max(
+                                       r.started_at
+                                         + import_definition.every_minutes * 60000,
+                                       CASE WHEN r.retry_after_secs IS NOT NULL
+                                                 AND r.ended_at IS NOT NULL
+                                            THEN r.ended_at + r.retry_after_secs * 1000
+                                            ELSE 0
+                                       END)
+                                FROM import_run r
+                               WHERE r.definition_id = import_definition.id
+                            ORDER BY r.started_at DESC
+                               LIMIT 1), 0)
+                   ORDER BY created_at",
+                    DefinitionRow::COLUMNS
+                ))?;
+                let rows = stmt
+                    .query_map(params![now_ms], DefinitionRow::from_row)?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(infra_err)?;
+        rows.into_iter().map(DefinitionRow::into_domain).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sqlite::open_and_migrate_in_memory;
+    use chrono::Duration;
+
+    /// A repository over an empty in-memory database.
+    async fn repo() -> (SqliteImportDefinitionRepository, impl Sized) {
+        let (isle, driver) = open_and_migrate_in_memory().await.expect("open");
+        (SqliteImportDefinitionRepository::new(isle), driver)
+    }
+
+    fn definition(name: &str, every_minutes: Option<u32>) -> ImportDefinition {
+        ImportDefinition {
+            id: uuid::Uuid::now_v7().to_string(),
+            persona_id: "p1".into(),
+            name: name.into(),
+            subcommand: "text".into(),
+            args: vec!["--dir".into(), "/corpus".into()],
+            secret_ref: None,
+            secret_header: None,
+            every_minutes,
+        }
+    }
+
+    /// A finished run of `definition`, started `ago` before `now`.
+    fn run_started(
+        definition: &ImportDefinition,
+        now: DateTime<Utc>,
+        started_ago: Duration,
+        ended_ago: Option<Duration>,
+        retry_after_secs: Option<u64>,
+    ) -> ImportRun {
+        ImportRun {
+            id: uuid::Uuid::now_v7().to_string(),
+            definition_id: definition.id.clone(),
+            started_at: now - started_ago,
+            ended_at: ended_ago.map(|ago| now - ago),
+            outcome: RunOutcome::Ok,
+            imported: 0,
+            failed: 0,
+            ended_by_class: None,
+            ended_by_message: None,
+            retry_after_secs,
+        }
+    }
+
+    async fn due_names(repo: &SqliteImportDefinitionRepository, now: DateTime<Utc>) -> Vec<String> {
+        repo.due(now)
+            .await
+            .expect("a read")
+            .into_iter()
+            .map(|d| d.name)
+            .collect()
+    }
+
+    /// Nothing but a person starts a definition with no interval, and
+    /// no amount of time changes that.
+    #[tokio::test]
+    async fn a_definition_with_no_interval_is_never_due() {
+        let (repo, _driver) = repo().await;
+        let manual = definition("manual", None);
+        repo.upsert(&manual).await.expect("stored");
+
+        let now = Utc::now();
+        assert!(due_names(&repo, now).await.is_empty());
+        assert!(
+            due_names(&repo, now + Duration::days(365)).await.is_empty(),
+            "a year later it is still nobody's to start but a person's"
+        );
+    }
+
+    /// Setting an interval is asking for the archive to start filling,
+    /// not to start filling an interval from now.
+    #[tokio::test]
+    async fn a_scheduled_definition_that_never_ran_is_due_at_once() {
+        let (repo, _driver) = repo().await;
+        repo.upsert(&definition("hourly", Some(60)))
+            .await
+            .expect("stored");
+
+        assert_eq!(due_names(&repo, Utc::now()).await, vec!["hourly"]);
+    }
+
+    /// The interval is a cadence, not a rest.
+    ///
+    /// The case that tells the two apart: a run that started forty
+    /// minutes ago and ended five minutes ago, on a thirty-minute
+    /// interval. Measured from the start it is due; measured from the
+    /// end it has twenty-five minutes to wait. An import that takes
+    /// longer than its interval would otherwise drift further behind
+    /// every time it ran.
+    #[tokio::test]
+    async fn due_is_measured_from_the_start_of_the_last_run() {
+        let (repo, _driver) = repo().await;
+        let now = Utc::now();
+
+        let long = definition("long", Some(30));
+        repo.upsert(&long).await.expect("stored");
+        repo.record_run(&run_started(
+            &long,
+            now,
+            Duration::minutes(40),
+            Some(Duration::minutes(5)),
+            None,
+        ))
+        .await
+        .expect("recorded");
+
+        assert_eq!(
+            due_names(&repo, now).await,
+            vec!["long"],
+            "forty minutes since it started is past a thirty-minute interval"
+        );
+    }
+
+    /// And the same definition is not due before the interval is up.
+    #[tokio::test]
+    async fn a_definition_inside_its_interval_is_not_due() {
+        let (repo, _driver) = repo().await;
+        let now = Utc::now();
+
+        let recent = definition("recent", Some(30));
+        repo.upsert(&recent).await.expect("stored");
+        repo.record_run(&run_started(
+            &recent,
+            now,
+            Duration::minutes(10),
+            Some(Duration::minutes(9)),
+            None,
+        ))
+        .await
+        .expect("recorded");
+
+        assert!(due_names(&repo, now).await.is_empty());
+        assert_eq!(
+            due_names(&repo, now + Duration::minutes(21)).await,
+            vec!["recent"],
+            "and it is due when the interval is up"
+        );
+    }
+
+    /// A wait the source stated wins over the interval when it lands
+    /// later.
+    ///
+    /// This is the consumer `retry_after_secs` has been recorded for
+    /// since #297. A source that answered 429 and said "in an hour" is
+    /// not something a thirty-minute interval overrides.
+    #[tokio::test]
+    async fn a_stated_wait_holds_the_next_start_back() {
+        let (repo, _driver) = repo().await;
+        let now = Utc::now();
+
+        let limited = definition("limited", Some(30));
+        repo.upsert(&limited).await.expect("stored");
+        repo.record_run(&run_started(
+            &limited,
+            now,
+            Duration::minutes(40),
+            Some(Duration::minutes(39)),
+            Some(3600),
+        ))
+        .await
+        .expect("recorded");
+
+        assert!(
+            due_names(&repo, now).await.is_empty(),
+            "the interval is up, and the source said not for an hour"
+        );
+        assert_eq!(
+            due_names(&repo, now + Duration::minutes(22)).await,
+            vec!["limited"],
+            "and it is due once the hour the source asked for is over"
+        );
+    }
+
+    /// A wait shorter than the interval does not pull a start in.
+    ///
+    /// The pair that makes "the later of the two" a rule rather than a
+    /// description of one case: here the interval is the later, and it
+    /// is what holds.
+    #[tokio::test]
+    async fn a_short_wait_does_not_shorten_the_interval() {
+        let (repo, _driver) = repo().await;
+        let now = Utc::now();
+
+        let brief = definition("brief", Some(30));
+        repo.upsert(&brief).await.expect("stored");
+        repo.record_run(&run_started(
+            &brief,
+            now,
+            Duration::minutes(10),
+            Some(Duration::minutes(9)),
+            Some(60),
+        ))
+        .await
+        .expect("recorded");
+
+        assert!(
+            due_names(&repo, now).await.is_empty(),
+            "the minute the source asked for is over and the interval is not"
+        );
+    }
+
+    /// Only the most recent run is consulted.
+    ///
+    /// An old run that was rate limited must not hold a definition back
+    /// after a later run went through — which is what reading anything
+    /// but the newest row would do.
+    #[tokio::test]
+    async fn an_older_run_s_wait_is_not_still_in_force() {
+        let (repo, _driver) = repo().await;
+        let now = Utc::now();
+
+        let recovered = definition("recovered", Some(30));
+        repo.upsert(&recovered).await.expect("stored");
+        repo.record_run(&run_started(
+            &recovered,
+            now,
+            Duration::hours(5),
+            Some(Duration::hours(5)),
+            Some(86_400),
+        ))
+        .await
+        .expect("the rate-limited run");
+        repo.record_run(&run_started(
+            &recovered,
+            now,
+            Duration::minutes(40),
+            Some(Duration::minutes(39)),
+            None,
+        ))
+        .await
+        .expect("the run that went through");
+
+        assert_eq!(
+            due_names(&repo, now).await,
+            vec!["recovered"],
+            "yesterday's wait is not still in force"
+        );
+    }
+
+    /// An interval survives the round trip, and so does its absence.
+    #[tokio::test]
+    async fn an_interval_is_read_back_as_it_was_written() {
+        let (repo, _driver) = repo().await;
+        let scheduled = definition("scheduled", Some(45));
+        let manual = definition("manual", None);
+        repo.upsert(&scheduled).await.expect("stored");
+        repo.upsert(&manual).await.expect("stored");
+
+        assert_eq!(
+            repo.find(&scheduled.id)
+                .await
+                .expect("a read")
+                .expect("stored")
+                .every_minutes,
+            Some(45)
+        );
+        assert_eq!(
+            repo.find(&manual.id)
+                .await
+                .expect("a read")
+                .expect("stored")
+                .every_minutes,
+            None
+        );
+    }
+
+    /// An interval this build cannot read is an error, not a silent
+    /// demotion to manual.
+    ///
+    /// Written straight into the column, because nothing above this
+    /// layer can produce one — which is the point: the row outlives the
+    /// build that wrote it, and a definition quietly demoted is an
+    /// import that stops filling and looks like one nobody scheduled.
+    #[tokio::test]
+    async fn an_unreadable_interval_is_refused_rather_than_ignored() {
+        let (repo, _driver) = repo().await;
+        let odd = definition("odd", Some(30));
+        repo.upsert(&odd).await.expect("stored");
+
+        let id = odd.id.clone();
+        repo.isle
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE import_definition SET every_minutes = -1 WHERE id = ?1",
+                    params![id],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("a write");
+
+        let err = repo
+            .find(&odd.id)
+            .await
+            .expect_err("an interval no u32 can hold");
+        assert!(
+            err.to_string().contains("-1"),
+            "and it says what it found: {err}"
+        );
     }
 }

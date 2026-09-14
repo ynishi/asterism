@@ -67,6 +67,27 @@ pub struct ImportDefinition {
     /// another binary's flag by name. A pair the type keeps together
     /// cannot be half-filled.
     pub secret_header: Option<String>,
+    /// Minutes between starts, or `None` for an import nothing starts
+    /// on its own.
+    ///
+    /// Measured from one run's **start**, so an import taking twenty
+    /// minutes on a thirty-minute interval runs every thirty and not
+    /// every fifty: this is a cadence, not a rest between runs.
+    ///
+    /// A definition that has never run and carries one is due at once.
+    /// Somebody setting an interval is asking for the archive to start
+    /// filling, not to start filling an interval from now.
+    ///
+    /// It is not the only thing that decides when the next run starts.
+    /// A `retry_after_secs` on the last run is a wait the *source*
+    /// stated, and it wins when it lands later — see
+    /// [`ImportDefinitionRepository::due`]. Nothing else backs off: a
+    /// source that is simply down is tried again on the interval,
+    /// because an invented backoff is a second policy with its own
+    /// failure modes and belongs to whoever asks for it.
+    ///
+    /// [`ImportDefinitionRepository::due`]: crate::domain::repository::ImportDefinitionRepository::due
+    pub every_minutes: Option<u32>,
 }
 
 /// How a run ended.

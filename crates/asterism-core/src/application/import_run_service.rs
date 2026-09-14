@@ -74,7 +74,7 @@ use std::sync::{Arc, Mutex};
 use asterism_contract::command::{DefineImportCommand, RunImportDefinitionCommand};
 use asterism_contract::dto::{ImportDefinitionDto, ImportRunDto};
 use asterism_contract::import_report::ImportReport;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::domain::attribution::AttributionContext;
@@ -249,6 +249,20 @@ impl ImportRunService {
                     .into(),
             ));
         }
+        // Zero minutes is the typo this catches. Read as "manual" it
+        // would answer a mistyped schedule by doing nothing, for as
+        // long as nobody thought to look — and an import that quietly
+        // stops filling is the one failure the schedule exists to
+        // prevent. Refused here rather than by a `CHECK`, because the
+        // column was added to a table that already existed; the
+        // migration says so.
+        if command.every_minutes == Some(0) {
+            return Err(DomainError::Validation(
+                "an interval of zero minutes is not a schedule: leave it unset for \
+                 an import nothing starts on its own"
+                    .into(),
+            ));
+        }
         let definition = ImportDefinition {
             id: Uuid::now_v7().to_string(),
             persona_id: command.persona_id,
@@ -257,6 +271,7 @@ impl ImportRunService {
             args: command.args,
             secret_ref: command.secret_ref,
             secret_header: command.secret_header,
+            every_minutes: command.every_minutes,
         };
         self.repo.upsert(&definition).await?;
         Ok(to_definition_dto(definition))
@@ -382,6 +397,57 @@ impl ImportRunService {
         Ok(to_run_dto(run))
     }
 
+    /// Starts every import whose interval says it is due, and answers
+    /// how many were started.
+    ///
+    /// The verb a timer calls, and everything hard about it is already
+    /// somewhere else: when a definition is due is
+    /// [`ImportDefinitionRepository::due`]'s, and whether one is
+    /// already going is [`run`](Self::run)'s.
+    ///
+    /// **A refusal is not a failure here.** A definition due while its
+    /// own run is still going comes back from `due` and is refused by
+    /// `run`; that is the two answering correctly, not something to
+    /// report. Anything else that goes wrong is logged against the
+    /// definition it happened to and does not stop the others — a
+    /// caller on a timer has nobody to return an error to, and one
+    /// unreachable definition must not cost the rest their turn.
+    ///
+    /// [`ImportDefinitionRepository::due`]: crate::domain::repository::ImportDefinitionRepository::due
+    pub async fn start_due(
+        self: &Arc<Self>,
+        now: DateTime<Utc>,
+        by: &AttributionContext,
+    ) -> Result<u64, DomainError> {
+        let due = self.repo.due(now).await?;
+        let mut started = 0;
+        for definition in due {
+            match self
+                .run(
+                    RunImportDefinitionCommand {
+                        id: definition.id.clone(),
+                    },
+                    by,
+                )
+                .await
+            {
+                Ok(_) => started += 1,
+                Err(DomainError::Conflict {
+                    kind: ConflictKind::Blocked,
+                    ..
+                }) => {}
+                Err(err) => tracing::warn!(
+                    event = "diag.import_schedule.start_failed",
+                    definition = %definition.id,
+                    name = %definition.name,
+                    error = %err,
+                    "a scheduled import would not start"
+                ),
+            }
+        }
+        Ok(started)
+    }
+
     /// Recent runs of one import, newest first.
     pub async fn runs(
         &self,
@@ -441,6 +507,7 @@ fn to_definition_dto(definition: ImportDefinition) -> ImportDefinitionDto {
         args: definition.args,
         secret_ref: definition.secret_ref,
         secret_header: definition.secret_header,
+        every_minutes: definition.every_minutes,
     }
 }
 

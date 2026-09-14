@@ -259,6 +259,22 @@ pub fn run() {
             // that has nothing to do with Asterism. In windowed mode we
             // warn and keep running as a plain UI; in headless mode
             // serving is the only reason to exist, so we exit.
+            // The import timer, started here for the reason
+            // `asterism_core::application::import_scheduler` gives: what
+            // starts a loop over the service graph is the same kind of
+            // decision as what binds a port, and this is the process
+            // that makes both. `init_core` starting it would hand one to
+            // every end-to-end test that only wanted a core.
+            //
+            // Managed rather than held in a local, because the handle
+            // stops the timer when it drops and a local would drop at
+            // the end of `setup`. Tauri's state outlives the process's
+            // useful life, which is exactly the timer's.
+            app.manage(asterism_core::application::ImportSchedule::spawn(
+                server_ctx.import_run_service.clone(),
+                asterism_core::application::DEFAULT_TICK,
+            ));
+
             let port = opts.port;
             let headless = opts.headless;
             tauri::async_runtime::spawn(async move {

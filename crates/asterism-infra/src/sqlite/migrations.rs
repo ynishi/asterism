@@ -8156,6 +8156,44 @@ CREATE TABLE import_run (
 CREATE INDEX idx_import_run_definition ON import_run(definition_id, started_at DESC);
 "#;
 
+/// V113 — how often an import should run, when it should run at all.
+///
+/// One nullable column. `NULL` is every definition V112 could hold: a
+/// stored command line somebody starts. A number is minutes between
+/// starts, and it is the only thing on the row a timer reads.
+///
+/// # Minutes, and not a cron expression
+///
+/// What is being scheduled is "keep this filling", not "run at a time
+/// of day". An interval has no timezone, so there is no hour that
+/// happens twice a year and none that does not happen at all, and no
+/// question about which of those a missed run belongs to. A time of day
+/// is a different column when somebody wants one, and it will want its
+/// own answers to exactly those questions. A `schedule_json` able to
+/// hold either would buy the option at the price of making "what is
+/// due" unanswerable here.
+///
+/// # From the start of the last run, not its end
+///
+/// Due-ness is `last.started_at + every_minutes`, which
+/// `ImportDefinitionRepository::due` computes and this file does not
+/// store. An import taking twenty minutes on a thirty-minute interval
+/// therefore runs every thirty, not every fifty — the interval is a
+/// cadence and not a rest.
+///
+/// # No `CHECK` on the value
+///
+/// V112's `outcome` has one because that table was being created.
+/// `ALTER TABLE ... ADD COLUMN` in SQLite cannot carry every constraint
+/// a fresh column could, and rebuilding a table to gain a `CHECK` on an
+/// integer is a trade against a migration that cannot half-apply. The
+/// rule — a schedule of zero minutes is not a schedule — is
+/// `ImportRunService::define`'s, stated where the person who typed it
+/// can be told so.
+const V113_IMPORT_SCHEDULE: &str = r#"
+ALTER TABLE import_definition ADD COLUMN every_minutes INTEGER;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -8271,6 +8309,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V110_ASSET_ZONE),
     Step::Sql(V111_IMPORT_STATE),
     Step::Sql(V112_IMPORT_DEFINITION),
+    Step::Sql(V113_IMPORT_SCHEDULE),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -12402,6 +12441,60 @@ mod tests {
             refused.is_err(),
             "and the CHECK admits those five and nothing else"
         );
+    }
+
+    /// V113 gives a definition an interval, and gives every definition
+    /// that already existed none.
+    ///
+    /// The second half is the one worth a test. A schedule column that
+    /// arrived with a default would turn every stored import into one
+    /// that runs by itself, on a machine where somebody chose each time
+    /// it ran — which is a behaviour change nobody asked for delivered
+    /// by a migration.
+    #[test]
+    fn v113_adds_an_interval_and_leaves_existing_imports_manual() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 112).unwrap();
+        conn.execute(
+            "INSERT INTO import_definition \
+                 (id, persona_id, name, subcommand, args_json, secret_ref, \
+                  secret_header, created_at) \
+             VALUES ('d1', 'p1', 'notes', 'text', '[]', NULL, NULL, 0)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        let inherited: Option<i64> = conn
+            .query_row(
+                "SELECT every_minutes FROM import_definition WHERE id = 'd1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            inherited, None,
+            "an import that was nobody's to start but a person's stays that way"
+        );
+
+        // And a number is what a scheduled one carries.
+        conn.execute(
+            "INSERT INTO import_definition \
+                 (id, persona_id, name, subcommand, args_json, secret_ref, \
+                  secret_header, created_at, every_minutes) \
+             VALUES ('d2', 'p1', 'hourly', 'text', '[]', NULL, NULL, 0, 60)",
+            [],
+        )
+        .unwrap();
+        let stored: Option<i64> = conn
+            .query_row(
+                "SELECT every_minutes FROM import_definition WHERE id = 'd2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, Some(60));
     }
 
     /// The marker a pre-probe import left on the content axis of a JPEG,

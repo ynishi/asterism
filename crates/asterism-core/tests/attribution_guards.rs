@@ -800,13 +800,23 @@ const SYNC_EXEMPT_MODULES: &[(&str, &str)] = &[(
 
 /// Individual synchronous `pub fn`s that are neither constructors nor
 /// covered by a module exemption, with the reason.
-const SYNC_EXEMPT_FNS: &[(&str, &str)] = &[(
-    "query_group_invalidation::notify_persona",
-    "enqueues a refresh for the query groups a persona's change made \
-     stale. Fire-and-forget notification about derived membership, and \
-     synchronous because it only hands work to the queue (making it \
-     async is a separate question from attribution)",
-)];
+const SYNC_EXEMPT_FNS: &[(&str, &str)] = &[
+    (
+        "query_group_invalidation::notify_persona",
+        "enqueues a refresh for the query groups a persona's change made \
+         stale. Fire-and-forget notification about derived membership, and \
+         synchronous because it only hands work to the queue (making it \
+         async is a separate question from attribution)",
+    ),
+    (
+        "import_scheduler::spawn",
+        "starts the timer and returns the handle that stops it. Writes \
+         nothing itself and never could: what it starts is a loop calling \
+         `import_run_service::start_due`, which takes a context and is in \
+         the population the previous guard walks. Synchronous because \
+         handing a task to the runtime is not something to await",
+    ),
+];
 
 /// Names a synchronous `pub fn` in `application/` may have.
 const CONSTRUCTOR_NAMES: &[&str] = &["new", "with_env"];

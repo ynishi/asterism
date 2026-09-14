@@ -135,6 +135,10 @@ fn define(persona: &str, name: &str, port: u16, mut args: Vec<String>) -> Define
         args,
         secret_ref: None,
         secret_header: None,
+        // No schedule: every phase below starts its run itself, so a
+        // timer picking one up would be a second caller nobody asked
+        // for. #302's own test is where a schedule is driven.
+        every_minutes: None,
     }
 }
 
@@ -225,6 +229,10 @@ fn http_definition(persona: &str, name: &str, source: u16, port: u16) -> DefineI
         ],
         secret_ref: None,
         secret_header: None,
+        // No schedule: every phase below starts its run itself, so a
+        // timer picking one up would be a second caller nobody asked
+        // for. #302's own test is where a schedule is driven.
+        every_minutes: None,
     }
 }
 
