@@ -2638,8 +2638,14 @@ pub struct ImportRunDto {
     pub imported: u64,
     /// Records that did not land.
     pub failed: u64,
-    /// What ended the run early, as the importer classified it. The
-    /// tokens are [`ReportedFailure::class`](crate::import_report::ReportedFailure)'s.
+    /// What ended the run early. The tokens are
+    /// [`ReportedFailure::class`](crate::import_report::ReportedFailure)'s.
+    ///
+    /// Usually the importer's own classification, carried off its
+    /// report. One case is not: a child that ran and left no report is
+    /// recorded as `source` by the service, which knows only that
+    /// something ran and said nothing — the child's words are in
+    /// `ended_by_message`, and that is where the reason actually is.
     ///
     /// Absent when nothing ended it early — a run that read its source
     /// to the end, and equally a run that never started, where nothing
@@ -2649,8 +2655,9 @@ pub struct ImportRunDto {
     pub ended_by_message: Option<String>,
     /// How long the source asked us to wait, in seconds, when it said.
     ///
-    /// Nothing reads it yet. It is recorded because the run that
-    /// produced it is the only moment it exists, and the scheduler that
-    /// will wait it out is the next slice.
+    /// Recorded because the run that produced it is the only moment it
+    /// exists: a source states the wait once, in the reply that refused
+    /// the request, and whoever eventually waits it out is not the
+    /// process that heard it.
     pub retry_after_secs: Option<u64>,
 }

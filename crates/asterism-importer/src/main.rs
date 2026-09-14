@@ -5,8 +5,9 @@
 //! entries, tapes, image / video / audio files, and written documents.
 //! Every subcommand
 //! runs the same importer-SDK pipeline: walk the source, parse it into
-//! typed footprints, and push them in batches to a running
-//! `asterism-server` over HTTP (`--server`, default local). All imports
+//! typed footprints, and push them in batches over HTTP to whatever is
+//! serving Asterism's local API — `asterism-ui`, windowed or
+//! `--headless` (`--server`, default local). All imports
 //! are persona-scoped (`--persona-id`) and support `--dry-run`, which
 //! validates and reports without writing anything.
 

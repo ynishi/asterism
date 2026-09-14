@@ -2298,8 +2298,10 @@ pub struct DefineImportCommand {
     /// Persona the records land in.
     pub persona_id: String,
     /// What to call this import when reporting on it. Unique inside a
-    /// persona, so a run can be asked for by a name a person chose
-    /// rather than by an id they have to look up.
+    /// persona, so what a run is reported under is a name a person
+    /// chose. A run is *started* by the definition's id — see
+    /// [`RunImportDefinitionCommand`] — and the name never resolves
+    /// one.
     pub name: String,
     /// Importer subcommand: `http`, `text`, `sqlite`, and the rest.
     pub subcommand: String,
@@ -2352,9 +2354,11 @@ pub struct DefineImportCommand {
 
 /// Runs a stored import now (`POST /asterism/import/definitions/run`).
 ///
-/// Refused while a run of the same definition is still going: two
-/// importers over one source would each take up from a position the
-/// other is about to move.
+/// Answers with the run as it was opened, and is refused while a run of
+/// the same definition is still going. `ImportRunService::run` in
+/// `asterism-core` is where that rule lives and where its reason is
+/// written; this crate cannot link to it, and restating the reason here
+/// is how the two drift apart.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunImportDefinitionCommand {
     /// Which definition to run.

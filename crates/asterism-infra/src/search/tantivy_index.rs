@@ -128,7 +128,10 @@ impl TantivyIndex {
 
     /// Opens the Tantivy index at `dir` for reading only. Identical to
     /// [`open`](Self::open) but the `IndexWriter` is not acquired, so
-    /// only one process needs the exclusive writer lock. The write face
+    /// it does not take the exclusive writer lock and does not refuse
+    /// to open beside something that holds it. Its callers are tests
+    /// that want a reader beside a live core; #300 removed the second
+    /// process it was written for. The write face
     /// (`upsert` / `remove` / `flush`) rejects with a read-only error;
     /// retrieval / reader paths are unaffected.
     pub fn open_read_only(dir: PathBuf) -> Result<Self> {

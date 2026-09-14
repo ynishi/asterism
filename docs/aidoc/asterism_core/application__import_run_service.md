@@ -14,7 +14,8 @@ how a credential reaches it, what happens when a run is already
 going, what is left behind when nothing worked — is answerable
 without a clock. The timer is also where the wait a rate limit
 states — carried here as `ImportRun::retry_after_secs` — finally
-gets a consumer; this slice records it and reads it nowhere.
+gets a consumer; this layer records it and has nothing to do with
+it.
 
 ## Starting is not waiting
 
@@ -45,14 +46,19 @@ So the answer lives in a set held here, and
 [`ImportDefinitionRepository::abandon_running`] closes at startup
 whatever a previous process left open.
 
-**A process-local answer is only sound while one process opens a
-core, and that is now enforced rather than assumed.** The Tantivy
-index is opened for writing unconditionally (#300), which takes an
-exclusive writer lock, so a second core over the same index does not
-start. A review round was spent asking which process should host
-this supervisor; the answer is that there is one, and nothing here
-is conditioned on a mode. That question existed because `CoreMode`
-did.
+**A process-local answer is only sound while one core is open over
+a given database, and that is now enforced rather than assumed.**
+The Tantivy index is opened for writing unconditionally (#300) and
+that lock is exclusive, so a second core over the same index does
+not start. The index and the database are resolved together from the
+active profile, so for the shipped app this is one core per machine;
+a test handing its own tempdir to `init_core_with` gets a pair of
+its own and a set of its own, which is the same rule applied and not
+an exception to it.
+
+A review round was spent asking which process should host this
+supervisor; the answer is that there is one, and nothing here is
+conditioned on a mode. That question existed because `CoreMode` did.
 
 ## Spawning is not this layer's
 

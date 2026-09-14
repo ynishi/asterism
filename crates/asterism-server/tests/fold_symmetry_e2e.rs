@@ -109,8 +109,9 @@ async fn persona(core: &CoreCtx, tag: &str) -> (String, PersonaId) {
 /// Per-kind pending counts, keyed by the job's slug.
 ///
 /// Read rather than a recording double so what is counted is what the
-/// production queue actually persisted. `ReadOnly` mode never drains, so
-/// a count taken after a call is a count of everything that call pushed.
+/// production queue actually persisted. Nothing drains it in this
+/// process, so a count taken after a call is a count of everything that
+/// call pushed.
 async fn pending_by_kind(core: &CoreCtx) -> BTreeMap<String, u64> {
     jobs_snapshot(&core.jobs_pool)
         .await

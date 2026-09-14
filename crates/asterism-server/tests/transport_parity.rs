@@ -111,7 +111,7 @@ const ROUTES_WITHOUT_COMMAND: &[(&str, &str)] = &[
     ),
     (
         "run_import_definition",
-        "an importer's own plumbing: what invokes this is a scheduler",
+        "an importer's own plumbing: not a verb a person reaches for in the app",
     ),
     (
         "list_import_runs",

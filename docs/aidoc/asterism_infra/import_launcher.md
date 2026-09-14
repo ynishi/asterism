@@ -19,12 +19,15 @@ too: ffmpeg's override is terminal, and this one falls through, so
 an override pointing at nothing is still a run that finds the
 binary.
 
-The middle rung is the one worth naming — the comment beside
-`thumb_ffmpeg`'s ladder records what skipping it cost there, "it
-reported `ffmpeg is required` on exactly the machines the sidecar
-exists for", and a bundled importer beside a bundled server is the
-identical shape. A failure names every rung it tried, because "not
-found" without the list is a message an operator cannot act on.
+The middle rung is the one worth naming, because it is the rung a
+development build lands on: `cargo build` puts `asterism-ui` and
+`asterism-import` in one target directory, and neither is on
+anybody's `PATH`. Nothing bundles the importer today —
+`tauri.bundle.conf.json`'s `externalBin` lists the ffmpeg sidecar
+and nothing else — so a shipped app reaches an importer by the
+first rung or the third. A failure names every rung it tried,
+because "not found" without the list is a message an operator
+cannot act on.
 
 # Where the credential is, and where it is not
 
@@ -47,24 +50,50 @@ reason the outbound side gives: an adapter that went looking for
 dotenv files itself would make "which file did this credential come
 from" invisible to the definition that named it.
 
-# Where the records go, and why nothing here says
+# Where the records go, and how the child is told
 
-Nothing passes `--server`. The child resolves it the way the
-operator's shell does — the active profile's port — and it inherits
-`$ASTERISM_PROFILE` from this process, so it resolves the same
-profile this one is serving. A server on a port of its own puts
-`--server` in the definition's arguments, which is what a person
-running the importer by hand does already.
+`--server`, resolved here from the active profile. It is the same
+question the serving process asks — `asterism-ui` binds
+`active_profile().default_http_port()` — so two processes reading
+one profile meet on one port without either being handed the
+other's address.
 
-The first shape told the child instead, which meant this file had to
-be given an address, which meant something had to hand it one after
-binding a listener — an `Arc<OnceLock<String>>` filled by whoever
-served. Nothing filled it. Every shipped binary called `axum::serve`
-directly, the cell stayed empty, and every run in the product would
-have answered "this server has not finished starting" forever. The
-end-to-end test passed because the *test* filled it. A wiring step
-that can be forgotten is one that will be, and the way to not forget
-it turned out to be not having one.
+It is passed only when the definition did not say. A server
+started on `--port` is the case a profile cannot answer, and a
+definition's own `--server` is what answers it — the same argument
+a person running the importer by hand types.
+
+Omitted rather than overridden, because the importer refuses a
+repeated `--server` outright ("cannot be used multiple times")
+rather than taking the last one. That is clap's answer and not a
+choice made here, so passing both would turn every definition that
+names its own server into a run that exits 2 before it starts. The
+credential's flag goes the other way — appended after the
+definition's arguments, where a second occurrence is *also* refused,
+which is exactly the point: a definition cannot quietly substitute
+its own.
+
+Two earlier shapes failed here, in opposite directions, and both are
+worth keeping because either is easy to rebuild.
+
+The first had this file *given* an address, which meant something
+had to hand it one after binding a listener — an
+`Arc<OnceLock<String>>` filled by whoever served. Nothing filled it.
+Every shipped binary called `axum::serve` directly, the cell stayed
+empty, and every run in the product would have answered "this server
+has not finished starting" forever; the end-to-end test passed
+because the *test* filled it.
+
+The second passed nothing and claimed the child worked the address
+out for itself from `$ASTERISM_PROFILE`. It does not.
+`asterism-import` carries a literal `http://127.0.0.1:8989` default
+and does not depend on this crate, so under any profile but dogfood
+the child posted at a door with nothing behind it — silently, since
+a refused push is a failed run and not a wrong one.
+
+Both are one mistake: an address known in one process and needed in
+another, carried by a step somebody has to remember. Asking the
+profile at both ends carries nothing.
 
 ## Types
 

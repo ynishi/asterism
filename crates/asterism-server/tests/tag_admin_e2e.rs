@@ -62,9 +62,9 @@ use tower::ServiceExt;
 
 /// Spins up a core over a tempdir and returns it with the router built
 /// on top. `init_core_with` keeps the Tantivy index inside the tempdir
-/// rather than the developer's active profile, and `ReadOnly` opens the
-/// job queue without a worker — see the module note for what a live one
-/// does to these fixtures.
+/// rather than the developer's active profile, and `JobWorker::None`
+/// opens the job queue without a worker — see the module note for what
+/// a live one does to these fixtures.
 async fn harness(tmp: &std::path::Path) -> (CoreCtx, Router) {
     let core = init_core_with(
         &tmp.join("asterism.db"),

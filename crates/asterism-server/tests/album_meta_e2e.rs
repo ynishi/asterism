@@ -102,6 +102,9 @@ async fn fixture() -> Fixture {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
+        // No worker: every assertion here is about what one write left
+        // beside another, and a job rewriting `_trace` behind them
+        // would be a second author nobody called.
         JobWorker::None,
         Some(&tmp.path().join("tantivy")),
     )

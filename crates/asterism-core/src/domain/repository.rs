@@ -3388,7 +3388,8 @@ pub trait JobQueue: Send + Sync {
 }
 
 /// Port for pushing job progress to the UI. In Tauri, the adapter emits
-/// `job:progress:{id}` events; in the standalone server it logs.
+/// `job:progress:{id}` events; where there is no event bus, the log
+/// emitter writes them to stderr.
 #[async_trait]
 pub trait ProgressEmitter: Send + Sync {
     /// Pushes a single progress payload. Emitter failures should not tear
@@ -4363,11 +4364,12 @@ pub trait ImportDefinitionRepository: Send + Sync {
     /// one that is gone — nothing is going to finish it, and leaving it
     /// says a run is in progress that is not.
     ///
-    /// Unscoped, which is only correct because one process opens a core
-    /// at a time: the Tantivy writer lock is taken unconditionally, so
-    /// a second core over the same index does not start. Before #300 a
-    /// second one could, and this sweep would have rewritten a live
-    /// run's row.
+    /// Unscoped, which is only correct because one core is open over
+    /// this database: the Tantivy writer lock beside it is taken
+    /// unconditionally and is exclusive, so a second core does not
+    /// start. `import_run_service`'s module doc is where that argument
+    /// lives. Before #300 a second one could, and this sweep would have
+    /// rewritten a live run's row.
     async fn abandon_running(&self) -> Result<u64, DomainError>;
 
     /// Records a run, inserting it or replacing what it said before.

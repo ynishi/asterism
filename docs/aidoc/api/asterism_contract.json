@@ -490,7 +490,7 @@
     {
       "path": "asterism_contract::command::RunImportDefinitionCommand",
       "kind": "struct",
-      "docs": "Runs a stored import now (`POST /asterism/import/definitions/run`).\n\nRefused while a run of the same definition is still going: two\nimporters over one source would each take up from a position the\nother is about to move."
+      "docs": "Runs a stored import now (`POST /asterism/import/definitions/run`).\n\nAnswers with the run as it was opened, and is refused while a run of\nthe same definition is still going. `ImportRunService::run` in\n`asterism-core` is where that rule lives and where its reason is\nwritten; this crate cannot link to it, and restating the reason here\nis how the two drift apart."
     },
     {
       "path": "asterism_contract::command::SetDefaultMaterialLayerCommand",

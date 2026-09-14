@@ -19,10 +19,10 @@
 //! shares a lineage with the keeper (or was born of a dispatch) share
 //! this fixture and vary only the input the axis under test names.
 //!
-//! `Full` mode throughout, for the reason `duplicate_conflict_resolution_e2e`
-//! gives: the pipeline the caller is exercising is the one the worker
-//! actually runs, and a `ReadOnly` init would test the merge against a
-//! partial version of it.
+//! The job worker spawned throughout, for the reason
+//! `duplicate_conflict_resolution_e2e` gives: the pipeline the caller
+//! is exercising is the one the worker actually runs, and a core
+//! without one would test the merge against a partial version of it.
 
 use std::sync::Arc;
 

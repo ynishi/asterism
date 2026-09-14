@@ -78,6 +78,9 @@ async fn fixture() -> Fixture {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
+        // No worker: the module note's "runs no jobs" is this line. The
+        // container type is what the importer stated, and a probe job
+        // would put a second answer on the row.
         JobWorker::None,
         Some(&tmp.path().join("tantivy")),
     )

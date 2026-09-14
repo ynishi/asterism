@@ -11,11 +11,11 @@ library.
 ## Modules
 
 - [`attribution`](attribution.md): Turning what a remote caller said into the attribution a write
-- [`core_init`](core_init.md): Shared backend initialisation for both the Tauri UI and the standalone
+- [`core_init`](core_init.md): Backend initialisation — the whole service graph, assembled once.
 - [`http`](http.md): HTTP transport — axum router.
 - [`mcp`](mcp.md): MCP transport — the third adapter over the same application services.
 - [`mcp_proxy`](mcp_proxy.md): MCP stdio proxy — the lifecycle-aware entry point MCP clients spawn.
 - [`release_dirs`](release_dirs.md): The two registered directories the release surface uses, resolved.
-- [`state`](state.md): Backend context for the standalone server. Thin wrapper over the
+- [`state`](state.md): Backend context for the HTTP surface. A thin selection over the
 - [`transfer_profiles`](transfer_profiles.md): The destination profiles a send can be aimed with, listed from disk.
 

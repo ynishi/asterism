@@ -86,13 +86,17 @@ pub enum RunOutcome {
     /// The importer ran and something cost it — the class is on the
     /// run, because that is what a caller acts on.
     Failed,
-    /// The importer never ran: no binary, it could not be spawned, or
-    /// the credential it named was not set.
+    /// Nothing the importer did can explain this run: no binary, it
+    /// could not be spawned, the credential it named was not set, or
+    /// the launcher itself failed.
     ///
     /// Kept apart from [`Failed`](Self::Failed) because they ask
-    /// different things of whoever reads the record. One means the
-    /// source or the configuration; this one means the machine, and no
-    /// amount of looking at the source will explain it.
+    /// different things of whoever reads the record. `Failed` sends a
+    /// reader to the source or to the definition; this one sends them
+    /// to the machine this ran on. An unset credential is the case
+    /// that sits between the two, and it is here because the fix is on
+    /// the machine — the variable is not set in the process that
+    /// spawns importers.
     Unstarted,
     /// The process that started it did not outlive it.
     ///

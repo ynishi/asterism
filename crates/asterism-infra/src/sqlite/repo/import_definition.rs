@@ -22,9 +22,10 @@ use asterism_core::domain::import_definition::{ImportDefinition, ImportRun, RunO
 use asterism_core::domain::repository::ImportDefinitionRepository;
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use rusqlite_isle::AsyncIsle;
 
+use crate::fault::StoreFault;
 use crate::sqlite::map::{datetime_to_ms, infra_err, ms_to_datetime};
 
 /// SQLite adapter for `ImportDefinitionRepository` (uses a writer isle).
@@ -152,6 +153,18 @@ impl RunRow {
 
 #[async_trait]
 impl ImportDefinitionRepository for SqliteImportDefinitionRepository {
+    /// Writes a definition, refusing a second one by a name the persona
+    /// already uses.
+    ///
+    /// The `(persona_id, name)` index is a rule an ordinary caller
+    /// breaks by ordinary means — two people naming an import
+    /// "Bluesky" — so it is asked rather than tripped. Tripped, it
+    /// arrives as `Infra` and answers 500, which tells the person
+    /// nothing they can act on and reads like a fault in the server.
+    ///
+    /// The read and the write are one `call`, so they are one turn on
+    /// one connection and nothing writes between them. A check made out
+    /// here would be a race the index still catches — as a 500.
     async fn upsert(&self, definition: &ImportDefinition) -> Result<(), DomainError> {
         let id = definition.id.clone();
         let persona_id = definition.persona_id.clone();
@@ -163,8 +176,23 @@ impl ImportDefinitionRepository for SqliteImportDefinitionRepository {
         let secret_ref = definition.secret_ref.clone();
         let secret_header = definition.secret_header.clone();
         let now = datetime_to_ms(&chrono::Utc::now());
-        self.isle
+        let clash_name = name.clone();
+        let clashed = self
+            .isle
             .call(move |conn| {
+                let held_by: Option<String> = conn
+                    .query_row(
+                        "SELECT id FROM import_definition
+                          WHERE persona_id = ?1 AND name = ?2",
+                        params![&persona_id, &name],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if let Some(held_by) = held_by
+                    && held_by != id
+                {
+                    return Ok(Some(held_by));
+                }
                 conn.execute(
                     "INSERT INTO import_definition
                          (id, persona_id, name, subcommand, args_json, secret_ref,
@@ -188,10 +216,23 @@ impl ImportDefinitionRepository for SqliteImportDefinitionRepository {
                         now
                     ],
                 )?;
-                Ok(())
+                Ok(None)
             })
             .await
-            .map_err(infra_err)
+            .map_err(infra_err)?;
+        match clashed {
+            None => Ok(()),
+            // Through `StoreFault`, because what a refusal means to a
+            // caller is not this crate's to say — see
+            // `tests/store_fault_is_the_only_door.rs`. The id of the
+            // definition holding the name is left out: it is the name
+            // the caller chose and can change.
+            Some(_) => Err(StoreFault::taken(
+                "an import's name inside its persona",
+                format!("{clash_name:?}"),
+            )
+            .into()),
+        }
     }
 
     async fn find(&self, id: &str) -> Result<Option<ImportDefinition>, DomainError> {

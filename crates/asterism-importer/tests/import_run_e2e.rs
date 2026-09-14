@@ -29,9 +29,10 @@
 //! test performing wiring the product does not is a test that proves
 //! the wrong thing.
 //!
-//! Nothing is wired now: the child resolves its own server the way an
-//! operator's shell does, and a server on a port of its own is named in
-//! the definition's arguments, which is what this test does below.
+//! Nothing is wired now: the launcher resolves the address from the
+//! active profile, and a server on a port of its own is named in the
+//! definition's arguments — which is what this test does below, because
+//! it serves on whatever port the OS handed out.
 
 use std::sync::Arc;
 
@@ -120,12 +121,11 @@ async fn settled(core: &CoreCtx, definition_id: &str, run_id: &str) -> ImportRun
 
 /// A definition pointed at this test's own server.
 ///
-/// `--server` in the arguments, because the child resolves the active
-/// profile's port by default and this server is on whatever the OS
-/// handed out. This is exactly what an operator with a server on a
-/// non-default port writes, which is the point: there is no wiring step
-/// for anybody to forget, only an argument that is either right or
-/// visibly wrong.
+/// `--server` in the arguments, because the launcher's own is the
+/// active profile's port and this server is on whatever the OS handed
+/// out. This is exactly what an operator with a server on a non-default
+/// port writes, which is the point: there is no wiring step for anybody
+/// to forget, only an argument that is either right or visibly wrong.
 fn define(persona: &str, name: &str, port: u16, mut args: Vec<String>) -> DefineImportCommand {
     args.extend(["--server".into(), format!("http://127.0.0.1:{port}")]);
     DefineImportCommand {
@@ -244,6 +244,8 @@ async fn a_stored_import_runs_recording_what_happened_each_way() {
     a_second_run_of_one_import_is_refused_while_the_first_is_going().await;
     a_credential_with_nowhere_to_go_is_refused_when_it_is_defined().await;
     a_credential_that_is_not_set_is_said_plainly().await;
+    a_second_import_by_one_name_is_refused().await;
+    a_child_that_writes_no_report_is_a_failed_run_carrying_its_words().await;
     // Last, because it empties `$PATH` and points `$ASTERISM_IMPORT` at
     // nothing — a state nothing after it could run in.
     a_missing_binary_is_recorded_as_the_machine_s_problem().await;
@@ -465,6 +467,24 @@ async fn a_second_run_of_one_import_is_refused_while_the_first_is_going() {
         .await
         .expect("the first run starts");
 
+    // A second core over one index does not start, and — because the
+    // orphan sweep sits *below* the writer lock — does not close the
+    // run that is going on its way out. The sweep is unscoped: it
+    // rewrites every open row in the database, so run above the lock it
+    // would report this live run as `abandoned` and then fail anyway.
+    // That is what a person opening a second window would have done.
+    let refused_core = init_core_with(
+        &tmp.path().join("asterism.db"),
+        Arc::new(LogEmitter),
+        JobWorker::None,
+        Some(&tmp.path().join("tantivy")),
+    )
+    .await;
+    assert!(
+        refused_core.is_err(),
+        "the exclusive writer lock admits one core per index"
+    );
+
     let refused = core
         .import_run_service
         .run(
@@ -481,7 +501,12 @@ async fn a_second_run_of_one_import_is_refused_while_the_first_is_going() {
         "and says which import it was: {said}"
     );
 
-    settled(&core, &defined.id, &opened.id).await;
+    let first = settled(&core, &defined.id, &opened.id).await;
+    assert_ne!(
+        first.outcome, "abandoned",
+        "the core that failed to open left this run alone: {:?}",
+        first.ended_by_message
+    );
 
     // Once it is done, the definition can be run again — `Blocked`
     // means the same request works after something else changes, and
@@ -610,11 +635,138 @@ async fn a_missing_binary_is_recorded_as_the_machine_s_problem() {
 
     assert_eq!(run.outcome, "unstarted");
     let said = run.ended_by_message.expect("it says what happened");
-    for rung in ["ASTERISM_IMPORT", "beside this executable", "PATH"] {
+    // The middle rung is asserted as the path itself. "beside this
+    // executable" is a location the person then has to work out, and
+    // the list exists to be acted on.
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("asterism-import")))
+        .expect("this test's own process has a path")
+        .display()
+        .to_string();
+    for rung in ["ASTERISM_IMPORT", beside.as_str(), "PATH"] {
         assert!(
             said.contains(rung),
             "the message names every rung it tried, so an operator knows where to \
              put the binary — {rung} is missing from: {said}"
         );
     }
+}
+
+/// A name a persona already uses is refused as a conflict, not as a
+/// fault in the server.
+///
+/// The `(persona_id, name)` index is reachable by ordinary use — two
+/// people, or one person twice, naming an import "daily" — and an index
+/// left to trip answers `Infra`, which the HTTP surface renders as a
+/// 500. A caller reading that has no way to tell "you already have one
+/// of these" from "the database is broken".
+async fn a_second_import_by_one_name_is_refused() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (core, port) = boot(tmp.path()).await;
+    let persona = register(&core, "e2e-import-run-name-clash").await;
+
+    let taken = || define(&persona, "daily", port, vec!["--dir".into(), "/tmp".into()]);
+
+    core.import_run_service
+        .define(taken(), &unattributed())
+        .await
+        .expect("the first import by that name");
+
+    let refused = core
+        .import_run_service
+        .define(taken(), &unattributed())
+        .await
+        .expect_err("a second import by a name this persona already uses");
+    assert_eq!(
+        refused.reason(),
+        Some("clashes"),
+        "a conflict a caller can act on, not an `Infra`: {refused}"
+    );
+    let said = refused.to_string();
+    assert!(
+        said.contains("daily"),
+        "and it says which name is taken: {said}"
+    );
+
+    // The same name under a different persona is a different import,
+    // which is what makes the index `(persona_id, name)` rather than
+    // `name`.
+    let other = register(&core, "e2e-import-run-name-clash-other").await;
+    core.import_run_service
+        .define(
+            define(&other, "daily", port, vec!["--dir".into(), "/tmp".into()]),
+            &unattributed(),
+        )
+        .await
+        .expect("another persona's import may carry the same name");
+}
+
+/// A child that ran and left no report is a failed run carrying what it
+/// said.
+///
+/// The path between "could not start" and "finished and reported": the
+/// binary was there, it ran, it exited non-zero, and there is no report
+/// to count. Reached here with arguments the importer itself refuses,
+/// which is what a definition stored against an older version of the
+/// binary looks like.
+///
+/// It is recorded as `failed` and not `unstarted`, because something
+/// did run — and the class is the coarse one the launcher can honestly
+/// give. It cannot tell a refused argument from a source that hung up;
+/// what it can do is keep the child's own words, which is where the
+/// answer actually is, and this asserts they survive.
+async fn a_child_that_writes_no_report_is_a_failed_run_carrying_its_words() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    unsafe { std::env::set_var("ASTERISM_IMPORT", importer_binary()) };
+
+    let (core, port) = boot(tmp.path()).await;
+    let persona = register(&core, "e2e-import-run-no-report").await;
+
+    let defined = core
+        .import_run_service
+        .define(
+            define(
+                &persona,
+                "stale-arguments",
+                port,
+                vec!["--a-flag-this-binary-does-not-have".into()],
+            ),
+            &unattributed(),
+        )
+        .await
+        .expect("a definition; nothing here validates another binary's flags");
+
+    let opened = core
+        .import_run_service
+        .run(
+            RunImportDefinitionCommand {
+                id: defined.id.clone(),
+            },
+            &unattributed(),
+        )
+        .await
+        .expect("the run starts");
+    let run = settled(&core, &defined.id, &opened.id).await;
+
+    assert_eq!(
+        run.outcome, "failed",
+        "something ran, so this is not `unstarted`"
+    );
+    assert_eq!(
+        (run.imported, run.failed),
+        (0, 0),
+        "there was nothing to count"
+    );
+    let said = run
+        .ended_by_message
+        .expect("a run with no report still says why");
+    assert!(
+        said.contains("exit"),
+        "the child's exit is kept, because it is all a caller has: {said}"
+    );
+    assert!(
+        said.contains("--a-flag-this-binary-does-not-have"),
+        "and so is what the child said, which is where the reason is: {said}"
+    );
 }

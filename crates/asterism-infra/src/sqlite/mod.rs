@@ -70,9 +70,8 @@ fn init_connection(conn: &mut Connection) -> Result<(), rusqlite::Error> {
 /// queued jobs and join the SQLite thread.
 ///
 /// Migration is convenience-first: the CLI is the authoritative
-/// entry point, but embedding processes (the Tauri UI, the standalone
-/// server's `serve` subcommand) call this helper so they succeed even
-/// on a fresh install. Anything that needs stricter control should call
+/// entry point, but the embedding process (`asterism-ui`) calls this
+/// helper so it succeeds even on a fresh install. Anything that needs stricter control should call
 /// [`open_expecting_latest`] instead.
 pub async fn open_and_migrate(
     path: impl AsRef<Path>,

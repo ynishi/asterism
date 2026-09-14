@@ -95,6 +95,8 @@ async fn fixture() -> Fixture {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
+        // No worker: the question is what the two write verbs store,
+        // and a job rewriting the row would answer it for them.
         JobWorker::None,
         Some(&tmp.path().join("tantivy")),
     )

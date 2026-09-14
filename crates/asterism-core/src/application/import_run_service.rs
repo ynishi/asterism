@@ -12,7 +12,8 @@
 //! going, what is left behind when nothing worked — is answerable
 //! without a clock. The timer is also where the wait a rate limit
 //! states — carried here as `ImportRun::retry_after_secs` — finally
-//! gets a consumer; this slice records it and reads it nowhere.
+//! gets a consumer; this layer records it and has nothing to do with
+//! it.
 //!
 //! ## Starting is not waiting
 //!
@@ -43,14 +44,19 @@
 //! [`ImportDefinitionRepository::abandon_running`] closes at startup
 //! whatever a previous process left open.
 //!
-//! **A process-local answer is only sound while one process opens a
-//! core, and that is now enforced rather than assumed.** The Tantivy
-//! index is opened for writing unconditionally (#300), which takes an
-//! exclusive writer lock, so a second core over the same index does not
-//! start. A review round was spent asking which process should host
-//! this supervisor; the answer is that there is one, and nothing here
-//! is conditioned on a mode. That question existed because `CoreMode`
-//! did.
+//! **A process-local answer is only sound while one core is open over
+//! a given database, and that is now enforced rather than assumed.**
+//! The Tantivy index is opened for writing unconditionally (#300) and
+//! that lock is exclusive, so a second core over the same index does
+//! not start. The index and the database are resolved together from the
+//! active profile, so for the shipped app this is one core per machine;
+//! a test handing its own tempdir to `init_core_with` gets a pair of
+//! its own and a set of its own, which is the same rule applied and not
+//! an exception to it.
+//!
+//! A review round was spent asking which process should host this
+//! supervisor; the answer is that there is one, and nothing here is
+//! conditioned on a mode. That question existed because `CoreMode` did.
 //!
 //! ## Spawning is not this layer's
 //!
@@ -203,8 +209,8 @@ impl ImportRunService {
     ) -> Result<ImportDefinitionDto, DomainError> {
         if command.name.trim().is_empty() {
             return Err(DomainError::Validation(
-                "an import needs a name: it is how a run is asked for and how one is \
-                 reported on"
+                "an import needs a name: it is what a run of it is reported under, \
+                 and a run with nothing to call it is a run nobody can read"
                     .into(),
             ));
         }
@@ -232,10 +238,10 @@ impl ImportRunService {
                     .into(),
             ));
         }
-        // A watch never ends, so it can never be a run that finishes —
-        // it would hold the row that stops a second run open for as
-        // long as the process lived, and the request that started it
-        // with it.
+        // A watch never ends, so it can never be a run that finishes.
+        // It would hold this definition's slot for as long as the
+        // process lived, and every later run of it would be refused by
+        // a run that is never going to end.
         if command.args.iter().any(|arg| arg == "--watch") {
             return Err(DomainError::Validation(
                 "a stored import cannot watch: a watch never ends, and a run that \

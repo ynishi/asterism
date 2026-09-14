@@ -11,9 +11,9 @@
 //! router, the actual SQLite table — with nobody typing a resumption
 //! point at any stage.
 //!
-//! `ReadOnly` throughout: this is about what the importer and the store
-//! say to each other, and a job worker reading files would add a second
-//! process to a question that does not involve one.
+//! No worker throughout: this is about what the importer and the store
+//! say to each other, and a job reading files would add a second author
+//! to a question that does not involve one.
 //!
 //! Its own test binary because `init_core` opens a Tantivy index (one
 //! core per test binary, as with the sibling e2e files).

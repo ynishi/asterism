@@ -1,12 +1,21 @@
-//! # asterism-server — Asterism local API server (HTTP + MCP dual transport)
+//! # asterism-server — the MCP bridge, and the database
 //!
 //! ## Role
 //!
-//! Serves the domain and application layers of `asterism-core` as a local
-//! API over two transports, which is why the binary is named
-//! `asterism-server` rather than `asterism-mcp`.
+//! This crate is two things with one name, and the split is worth having
+//! straight before reading further.
 //!
-//! - **HTTP transport** (`serve` subcommand): axum, bound to loopback.
+//! As a **library** it builds the local API: the domain and application
+//! layers of `asterism-core` behind an axum router and an MCP surface.
+//! `asterism-ui` takes it and serves it in its own process.
+//!
+//! As a **binary** it does not serve anything. It bridges MCP over stdio
+//! to whatever is serving, and it creates and migrates the database. It
+//! once had a `serve` subcommand; #300 removed it, and what that served
+//! is described below for the router's sake rather than that
+//! subcommand's.
+//!
+//! - **HTTP transport**: axum, bound to loopback by `asterism-ui`.
 //!   Consumers include Lua scripts using `agent-block-core`, external
 //!   persona tooling, and future bridge receivers. Route conventions live
 //!   in the `http` module and mirror the Tauri command surface. The same
@@ -17,11 +26,11 @@
 //!   app's lifecycle (launch on access, `app_status` / `app_restart`).
 //!   It starts with no backend and connects lazily, so the MCP client's
 //!   session never depends on the app's start order (see `mcp_proxy`).
-//! - **Shared database**: the UI process and the server process point at
-//!   the same SQLite file under WAL, using `busy_timeout = 5000`. The
-//!   default path is selected by the local data profile (override with
-//!   `$ASTERISM_HOME`); resolution is shared with `asterism-ui` via
-//!   `asterism_infra::paths`.
+//! - **The database**: one SQLite file under WAL, using
+//!   `busy_timeout = 5000`. This binary creates and migrates it; the
+//!   process that serves opens it. The default path is selected by the
+//!   local data profile (override with `$ASTERISM_HOME`); resolution is
+//!   shared with `asterism-ui` via `asterism_infra::paths`.
 //! - **Authentication**: none in v1 — access is gated by binding to
 //!   loopback. Tokens will follow in a later phase.
 //! - **LLM path**: any future LLM-backed tool (for example `asset_ask`)

@@ -1370,7 +1370,8 @@ how a credential reaches it, what happens when a run is already
 going, what is left behind when nothing worked — is answerable
 without a clock. The timer is also where the wait a rate limit
 states — carried here as `ImportRun::retry_after_secs` — finally
-gets a consumer; this slice records it and reads it nowhere.
+gets a consumer; this layer records it and has nothing to do with
+it.
 
 ## Starting is not waiting
 
@@ -1401,14 +1402,19 @@ So the answer lives in a set held here, and
 [`ImportDefinitionRepository::abandon_running`] closes at startup
 whatever a previous process left open.
 
-**A process-local answer is only sound while one process opens a
-core, and that is now enforced rather than assumed.** The Tantivy
-index is opened for writing unconditionally (#300), which takes an
-exclusive writer lock, so a second core over the same index does not
-start. A review round was spent asking which process should host
-this supervisor; the answer is that there is one, and nothing here
-is conditioned on a mode. That question existed because `CoreMode`
-did.
+**A process-local answer is only sound while one core is open over
+a given database, and that is now enforced rather than assumed.**
+The Tantivy index is opened for writing unconditionally (#300) and
+that lock is exclusive, so a second core over the same index does
+not start. The index and the database are resolved together from the
+active profile, so for the shipped app this is one core per machine;
+a test handing its own tempdir to `init_core_with` gets a pair of
+its own and a set of its own, which is the same rule applied and not
+an exception to it.
+
+A review round was spent asking which process should host this
+supervisor; the answer is that there is one, and nothing here is
+conditioned on a mode. That question existed because `CoreMode` did.
 
 ## Spawning is not this layer's
 
@@ -10012,8 +10018,9 @@ agent-harvest envelopes, arbitrary SQLite queries, persona-journal
 entries, tapes, image / video / audio files, and written documents.
 Every subcommand
 runs the same importer-SDK pipeline: walk the source, parse it into
-typed footprints, and push them in batches to a running
-`asterism-server` over HTTP (`--server`, default local). All imports
+typed footprints, and push them in batches over HTTP to whatever is
+serving Asterism's local API — `asterism-ui`, windowed or
+`--headless` (`--server`, default local). All imports
 are persona-scoped (`--persona-id`) and support `--dry-run`, which
 validates and reports without writing anything.
 
@@ -12558,12 +12565,15 @@ too: ffmpeg's override is terminal, and this one falls through, so
 an override pointing at nothing is still a run that finds the
 binary.
 
-The middle rung is the one worth naming — the comment beside
-`thumb_ffmpeg`'s ladder records what skipping it cost there, "it
-reported `ffmpeg is required` on exactly the machines the sidecar
-exists for", and a bundled importer beside a bundled server is the
-identical shape. A failure names every rung it tried, because "not
-found" without the list is a message an operator cannot act on.
+The middle rung is the one worth naming, because it is the rung a
+development build lands on: `cargo build` puts `asterism-ui` and
+`asterism-import` in one target directory, and neither is on
+anybody's `PATH`. Nothing bundles the importer today —
+`tauri.bundle.conf.json`'s `externalBin` lists the ffmpeg sidecar
+and nothing else — so a shipped app reaches an importer by the
+first rung or the third. A failure names every rung it tried,
+because "not found" without the list is a message an operator
+cannot act on.
 
 # Where the credential is, and where it is not
 
@@ -12586,24 +12596,50 @@ reason the outbound side gives: an adapter that went looking for
 dotenv files itself would make "which file did this credential come
 from" invisible to the definition that named it.
 
-# Where the records go, and why nothing here says
+# Where the records go, and how the child is told
 
-Nothing passes `--server`. The child resolves it the way the
-operator's shell does — the active profile's port — and it inherits
-`$ASTERISM_PROFILE` from this process, so it resolves the same
-profile this one is serving. A server on a port of its own puts
-`--server` in the definition's arguments, which is what a person
-running the importer by hand does already.
+`--server`, resolved here from the active profile. It is the same
+question the serving process asks — `asterism-ui` binds
+`active_profile().default_http_port()` — so two processes reading
+one profile meet on one port without either being handed the
+other's address.
 
-The first shape told the child instead, which meant this file had to
-be given an address, which meant something had to hand it one after
-binding a listener — an `Arc<OnceLock<String>>` filled by whoever
-served. Nothing filled it. Every shipped binary called `axum::serve`
-directly, the cell stayed empty, and every run in the product would
-have answered "this server has not finished starting" forever. The
-end-to-end test passed because the *test* filled it. A wiring step
-that can be forgotten is one that will be, and the way to not forget
-it turned out to be not having one.
+It is passed only when the definition did not say. A server
+started on `--port` is the case a profile cannot answer, and a
+definition's own `--server` is what answers it — the same argument
+a person running the importer by hand types.
+
+Omitted rather than overridden, because the importer refuses a
+repeated `--server` outright ("cannot be used multiple times")
+rather than taking the last one. That is clap's answer and not a
+choice made here, so passing both would turn every definition that
+names its own server into a run that exits 2 before it starts. The
+credential's flag goes the other way — appended after the
+definition's arguments, where a second occurrence is *also* refused,
+which is exactly the point: a definition cannot quietly substitute
+its own.
+
+Two earlier shapes failed here, in opposite directions, and both are
+worth keeping because either is easy to rebuild.
+
+The first had this file *given* an address, which meant something
+had to hand it one after binding a listener — an
+`Arc<OnceLock<String>>` filled by whoever served. Nothing filled it.
+Every shipped binary called `axum::serve` directly, the cell stayed
+empty, and every run in the product would have answered "this server
+has not finished starting" forever; the end-to-end test passed
+because the *test* filled it.
+
+The second passed nothing and claimed the child worked the address
+out for itself from `$ASTERISM_PROFILE`. It does not.
+`asterism-import` carries a literal `http://127.0.0.1:8989` default
+and does not depend on this crate, so under any profile but dogfood
+the child posted at a door with nothing behind it — silently, since
+a refused push is a failed run and not a wrong one.
+
+Both are one mistake: an address known in one process and needed in
+another, carried by a step somebody has to remember. Asking the
+profile at both ends carries nothing.
 
 ## Types
 
@@ -15212,12 +15248,12 @@ library.
 ## Modules
 
 - [`attribution`](attribution.md): Turning what a remote caller said into the attribution a write
-- [`core_init`](core_init.md): Shared backend initialisation for both the Tauri UI and the standalone
+- [`core_init`](core_init.md): Backend initialisation — the whole service graph, assembled once.
 - [`http`](http.md): HTTP transport — axum router.
 - [`mcp`](mcp.md): MCP transport — the third adapter over the same application services.
 - [`mcp_proxy`](mcp_proxy.md): MCP stdio proxy — the lifecycle-aware entry point MCP clients spawn.
 - [`release_dirs`](release_dirs.md): The two registered directories the release surface uses, resolved.
-- [`state`](state.md): Backend context for the standalone server. Thin wrapper over the
+- [`state`](state.md): Backend context for the HTTP surface. A thin selection over the
 - [`transfer_profiles`](transfer_profiles.md): The destination profiles a send can be aimed with, listed from disk.
 
 
@@ -15250,15 +15286,14 @@ surface or from authentication, never from the claim).
 <!-- asterism_server/core_init.md -->
 # asterism-server::core_init
 
-Shared backend initialisation for both the Tauri UI and the standalone
-server.
+Backend initialisation — the whole service graph, assembled once.
 
-The two processes assemble the exact same service graph. The only
-differences are (1) the progress emitter (`TauriEmitter` in the UI, the
-stderr [`LogEmitter`] in the server), (2) whether the Tantivy index is
-opened read-write or read-only, and (3) whether a job-worker `Monitor`
-is spawned. Those three axes are captured by [`JobWorker`]; everything
-else lives here so the ~160 lines of DI wiring are written once.
+Its caller in the product is `asterism-ui`; its other callers are
+the end-to-end tests, which want the same graph over a tempdir. Two
+things differ between them: the progress emitter (`TauriEmitter` in
+the UI, the stderr [`LogEmitter`] elsewhere) and whether a job-worker
+`Monitor` is spawned, which is [`JobWorker`]. Everything else lives
+here so the ~160 lines of DI wiring are written once.
 
 Callers wrap the returned [`CoreCtx`] into their own context struct
 (`ServerCtx` / `AppState`) and add nothing to it. A service assembled
@@ -15275,7 +15310,7 @@ four Tauri commands and no HTTP route.
 
 - `CoreCtx` — Shared service graph assembled by [`init_core`].
 - `JobWorker` — Whether this process runs the job worker.
-- `LogEmitter` — Default [`ProgressEmitter`] for processes without a UI event bus (the
+- `LogEmitter` — Default [`ProgressEmitter`] for a core with no UI event bus behind
 
 
 <!-- asterism_server/http.md -->
@@ -15534,9 +15569,15 @@ itself is a value that cannot be pointed anywhere.
 <!-- asterism_server/state.md -->
 # asterism-server::state
 
-Backend context for the standalone server. Thin wrapper over the
-shared [`crate::core_init::init_core`] (`ReadOnly` mode): assembles a
-[`ServerCtx`] from the returned `CoreCtx`.
+Backend context for the HTTP surface. A thin selection over the
+shared [`crate::core_init::init_core`]: assembles a [`ServerCtx`]
+from the returned `CoreCtx`.
+
+Its callers are `asterism-ui`, which serves this router in its own
+process, and the end-to-end tests, which build one over a tempdir
+core. There was a third — the `asterism-server serve` subcommand —
+and #300 removed it along with the `init` helper that existed only
+for it.
 
 The server shares the SQLite file with the Tauri UI process under
 WAL; the `busy_timeout = 5000` pragma is applied by `sqlite::open`.
@@ -16677,7 +16718,7 @@ dependency — serving exactly one route for exactly one request.
 Tauri's own `State` container gives us `Arc`-style sharing, so this
 struct just holds `Arc<Service>` fields and does not wrap again. The
 heavy lifting is delegated to the shared `asterism_server::core_init`
-(`Full` mode: read-write tantivy index + job worker); this module only
+(the writer lock and the job worker); this module only
 adapts the returned `CoreCtx` into `AppState` and supplies the Tauri
 progress emitter.
 

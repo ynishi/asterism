@@ -30,10 +30,10 @@
 //! what the fixture is withholding. Under a mode that drains the queue
 //! the suite is racing its own fixture: whichever of the release and
 //! the hash reaches the member first decides the answer, and when the
-//! hash wins there is nothing unstampable left to find. `ReadOnly`
-//! opens the queue without a `Monitor`, so those jobs sit where they
-//! were pushed. It was a failure of exactly this that cost CI run
-//! 34672262204 its first attempt.
+//! hash wins there is nothing unstampable left to find.
+//! `JobWorker::None` opens the queue without a `Monitor`, so those jobs
+//! sit where they were pushed. It was a failure of exactly this that
+//! cost CI run 34672262204 its first attempt.
 //!
 //! It opens Tantivy without the writer lock as well, which this suite
 //! notices only in that nothing here reads search.

@@ -16,14 +16,18 @@
 //! `run_import`, parsed by `ImageParser`, and POSTed to the actual
 //! router over loopback.
 //!
-//! # The two modes, and why each fixture uses the one it does
+//! # The worker, and why each fixture asks for what it does
 //!
-//! - `Full` spawns the job worker, so the file really is read and the
-//!   claim really is checked. That is what the agreement fixture needs.
-//! - `ReadOnly` opens the queue and spawns **nothing**, so no file is
-//!   ever read. That is what turns "the server proposed a duplicate
-//!   without opening the file" from a race into a fact: in that process
-//!   there is no code path that could have opened it.
+//! - [`JobWorker::Spawn`] runs the queue, so the file really is read
+//!   and the claim really is checked. That is what the agreement
+//!   fixture needs.
+//! - [`JobWorker::None`] opens the queue and spawns **nothing**, so no
+//!   file is ever read. That is what turns "the server proposed a
+//!   duplicate without opening the file" from a race into a fact: in
+//!   that process there is no code path that could have opened it.
+//!
+//! [`JobWorker::Spawn`]: asterism_server::core_init::JobWorker::Spawn
+//! [`JobWorker::None`]: asterism_server::core_init::JobWorker::None
 //!
 //! Its own test binary because `init_core` opens a Tantivy index (one
 //! core per test binary, as with the sibling e2e files).
@@ -346,8 +350,9 @@ async fn the_digest_the_importer_declares_is_the_one_the_hash_job_computes() {
 /// **An exact copy is proposed at ingest, and the server never opened
 /// it.**
 ///
-/// `ReadOnly` is what makes the second half a fact rather than a race:
-/// the process spawns no job worker, so no code path in it reads a file.
+/// Asking for no worker is what makes the second half a fact rather
+/// than a race: the process spawns none, so no code path in it reads a
+/// file.
 /// The newcomer's own fingerprint columns are still empty when the
 /// conflict row exists — the only digest that could have produced that
 /// row is the one the importer stated.

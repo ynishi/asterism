@@ -8111,10 +8111,10 @@ CREATE TABLE import_state (
 ///
 /// # `outcome` admits a state no process is backing
 ///
-/// `running` is one of the four the `CHECK` allows, and a row can sit
+/// `running` is one of the states the `CHECK` allows, and a row can sit
 /// in it with nothing alive behind it: the process that wrote it is
-/// gone. That is why `abandoned` is the fourth — a startup sweep writes
-/// it over whatever a previous process left open. Which process is
+/// gone. That is why `abandoned` is there — a startup sweep writes it
+/// over whatever a previous process left open. Which process is
 /// allowed to decide that, and why the row is not the lock that stops a
 /// second run, is `asterism_core::application::import_run_service`'s to
 /// say.
@@ -12314,12 +12314,9 @@ mod tests {
 
     /// V112 gives an import a definition and a record of running one.
     ///
-    /// Two shapes worth pinning. A definition's name is unique inside a
-    /// persona, so a run can be asked for by something a person chose.
-    /// And a run survives the definition being deleted — no foreign
-    /// key, which is the opposite of the usual call and deliberate:
-    /// "this ran for a month and then the import went away" is a real
-    /// question, and a cascade answers it with silence.
+    /// Two shapes worth pinning: the name is unique inside a persona,
+    /// and a run survives the definition being deleted. The const's own
+    /// doc says why there is no foreign key.
     #[test]
     fn v112_keeps_a_definition_and_the_runs_of_it() {
         let mut conn = test_conn();

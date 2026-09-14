@@ -41,6 +41,8 @@ async fn boot(tmp: &std::path::Path) -> (CoreCtx, u16) {
     let core = init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
+        // No worker: the subject is two halves agreeing about a cursor
+        // neither understands, and nothing in the job queue takes part.
         JobWorker::None,
         Some(&tmp.join("tantivy")),
     )

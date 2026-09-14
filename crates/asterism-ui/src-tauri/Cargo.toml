@@ -117,9 +117,9 @@ tracing = { workspace = true }
 # effects.
 [features]
 wdio = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
-# The ONNX encoder path (#112). The app process is the one that runs
-# job workers, so this is the binary the feature matters on — the
-# standalone server's serve mode only enqueues. Same default-off
+# The ONNX encoder path (#112). This process is the one that runs job
+# workers — since #300 it is the only one that opens a core at all —
+# so this is the binary the feature matters on. Same default-off
 # reasoning as the server's flag.
 vision = ["asterism-server/vision"]
 

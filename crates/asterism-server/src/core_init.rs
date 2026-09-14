@@ -1,12 +1,11 @@
-//! Shared backend initialisation for both the Tauri UI and the standalone
-//! server.
+//! Backend initialisation — the whole service graph, assembled once.
 //!
-//! The two processes assemble the exact same service graph. The only
-//! differences are (1) the progress emitter (`TauriEmitter` in the UI, the
-//! stderr [`LogEmitter`] in the server), (2) whether the Tantivy index is
-//! opened read-write or read-only, and (3) whether a job-worker `Monitor`
-//! is spawned. Those three axes are captured by [`JobWorker`]; everything
-//! else lives here so the ~160 lines of DI wiring are written once.
+//! Its caller in the product is `asterism-ui`; its other callers are
+//! the end-to-end tests, which want the same graph over a tempdir. Two
+//! things differ between them: the progress emitter (`TauriEmitter` in
+//! the UI, the stderr [`LogEmitter`] elsewhere) and whether a job-worker
+//! `Monitor` is spawned, which is [`JobWorker`]. Everything else lives
+//! here so the ~160 lines of DI wiring are written once.
 //!
 //! Callers wrap the returned [`CoreCtx`] into their own context struct
 //! (`ServerCtx` / `AppState`) and add nothing to it. A service assembled
@@ -53,7 +52,7 @@ use async_trait::async_trait;
 /// Whether this process runs the job worker.
 ///
 /// The one thing about opening a core that anybody has ever wanted to
-/// choose. It replaced `JobWorker`, which bundled four unrelated
+/// choose. It replaced `CoreMode`, which bundled four unrelated
 /// decisions — the Tantivy writer lock, this, the startup sweeps, the
 /// startup query-group refresh — into two combinations, "all of them"
 /// and "none of them".
@@ -61,9 +60,9 @@ use async_trait::async_trait;
 /// Three of those four stopped being questions when `asterism-server
 /// serve` went (#300): one process opens a core now, it opens the index
 /// to write, and its startup work is startup's. The fourth is this one,
-/// and it is a question only a **test** ever asked — fifteen of them,
-/// each wanting the queue left undrained so that an enqueue is a
-/// recorded push rather than a race with something draining it.
+/// and it is a question only a **test** ever asked — each wanting the
+/// queue left undrained so that an enqueue is a recorded push rather
+/// than a race with something draining it.
 ///
 /// Asked as an argument rather than answered by a mode, because that is
 /// what it is: a collaborator this process either runs or does not. A
@@ -78,9 +77,10 @@ pub enum JobWorker {
     None,
 }
 
-/// Default [`ProgressEmitter`] for processes without a UI event bus (the
-/// standalone server). Logs each progress payload to stderr; `broadcast`
-/// falls back to the trait's no-op default.
+/// Default [`ProgressEmitter`] for a core with no UI event bus behind
+/// it, which since #300 means the end-to-end tests. Logs each progress
+/// payload to stderr; `broadcast` falls back to the trait's no-op
+/// default.
 pub struct LogEmitter;
 
 #[async_trait]
@@ -487,7 +487,7 @@ fn warn_if_key_is_readable_by_others(_path: &Path) {}
 
 /// Shared service graph assembled by [`init_core`].
 ///
-/// Both the Tauri UI (`AppState`) and the standalone server (`ServerCtx`)
+/// Both the Tauri UI (`AppState`) and a test's own `ServerCtx`
 /// wrap this bundle. Every service is assembled here rather than in
 /// either wrapper: a service built on one side only is reachable from
 /// one transport only, which is how the comment thread ended up with
@@ -641,11 +641,11 @@ pub struct CoreCtx {
 ///
 /// `db_path` is the SQLite file shared by the UI and the server; `emitter`
 /// is the process-specific progress sink; `mode` selects the read-write
-/// ([`JobWorker::Spawn`]) versus read-only / enqueue-only
-/// ([`JobWorker::None`]) shape. The startup drift check (rebuild the
-/// Session snapshot when stale) runs at the end in both modes — in
-/// `ReadOnly` the resulting `SessionRebuild` no-op still enqueues
-/// but the `Full` worker consumes it.
+/// ([`JobWorker::Spawn`]) versus queue-only ([`JobWorker::None`])
+/// shape. The startup drift check (rebuild the
+/// Session snapshot when stale) runs at the end either way: with no
+/// worker the resulting `SessionRebuild` no-op is enqueued and stays
+/// there, which is what a caller that asked for none expects.
 pub async fn init_core(
     db_path: &Path,
     emitter: Arc<dyn ProgressEmitter>,
@@ -742,40 +742,14 @@ pub async fn init_core_with(
     let import_definitions = Arc::new(sqlite::repo::SqliteImportDefinitionRepository::new(
         isle.clone(),
     ));
-    // The launcher points the importer back at this process's own HTTP
-    // and pushes, and this end only decides when it starts. It is not
-    // told where to push: the child resolves the same profile this
-    // process is serving, which is why nothing here has an address to
-    // forget to hand over.
+    // The launcher spawns the importer and the importer pushes back
+    // over HTTP; this end only decides when it starts. Where it pushes
+    // is resolved inside the launcher from the active profile — see
+    // `asterism_infra::import_launcher` for why the address is not
+    // handed over from here.
     let import_launcher =
         Arc::new(asterism_infra::import_launcher::SubprocessImportLauncher::new());
     let import_run_service = Arc::new(ImportRunService::new(import_definitions, import_launcher));
-    // A run is a child of the process that spawned it, so a row still
-    // saying `running` when this process starts belongs to one that is
-    // gone. Swept here rather than read as a lock later: the table is
-    // history, and history with an open end reads as a run in progress
-    // that is not.
-    //
-    // Unconditional, and it is worth saying why there is nothing to
-    // condition it on. Supervising imports has nothing to do with
-    // running the job worker — gating it on `JobWorker` would rebuild,
-    // in one step, the bundling #300 took apart, and would leave the
-    // end-to-end test that runs with no worker unable to run an import
-    // at all. What makes a process-local supervisor sound is that the
-    // Tantivy writer lock admits one core per index, not a flag.
-    match import_run_service.abandon_orphans().await {
-        Ok(0) => {}
-        Ok(swept) => tracing::info!(
-            event = "diag.import_run.abandoned",
-            runs = swept,
-            "closed import runs a previous process did not outlive"
-        ),
-        Err(err) => tracing::warn!(
-            event = "diag.import_run.abandon_failed",
-            error = %err,
-            "could not close import runs a previous process left open"
-        ),
-    }
     let asset_bodies = sqlite::repo::SqliteAssetBodyRepository::new(isle.clone());
     let snapshots = Arc::new(sqlite::repo::SqliteSnapshotRepository::new(isle.clone()));
     let telemetry = asterism_infra::telemetry::Telemetry::new(isle.clone());
@@ -814,8 +788,9 @@ pub async fn init_core_with(
     // server all agree on one directory. A caller may hand in a
     // tempdir instead (tests do this — see `init_core_with`) so a
     // spun-up core does not collide with the profile-global index the
-    // running app has opened. `Full` takes the exclusive writer lock;
-    // `ReadOnly` skips it (the read path is identical either way).
+    // running app has opened. The writer lock is taken whatever the
+    // caller asked about the worker — see the open below, and
+    // `import_run_service` for what one core per index buys.
     let tantivy_dir = match tantivy_index_dir {
         Some(explicit) => {
             std::fs::create_dir_all(explicit)?;
@@ -829,6 +804,41 @@ pub async fn init_core_with(
     let search_index = Arc::new(
         TantivyIndex::open(tantivy_dir).map_err(|e| anyhow::anyhow!("open tantivy index: {e}"))?,
     );
+
+    // A run is a child of the process that spawned it, so a row still
+    // saying `running` when this process starts belongs to one that is
+    // gone. Swept here rather than read as a lock later: the table is
+    // history, and history with an open end reads as a run in progress
+    // that is not.
+    //
+    // **Below the index open, and that is the whole of why it is here
+    // rather than beside the service it belongs to.** The sweep is
+    // unscoped — it closes every open row in the database, not this
+    // process's — and what makes that sound is the exclusive writer
+    // lock taken one statement above: a second core does not reach
+    // this line. Run before the open, a second `asterism-ui` started
+    // beside a running one would rewrite every live run to `abandoned`
+    // and only then die at the lock.
+    //
+    // Unconditional, and it is worth saying why there is nothing to
+    // condition it on. Supervising imports has nothing to do with
+    // running the job worker — gating it on `JobWorker` would rebuild,
+    // in one step, the bundling #300 took apart, and would leave the
+    // end-to-end test that runs with no worker unable to run an import
+    // at all.
+    match import_run_service.abandon_orphans().await {
+        Ok(0) => {}
+        Ok(swept) => tracing::info!(
+            event = "diag.import_run.abandoned",
+            runs = swept,
+            "closed import runs a previous process did not outlive"
+        ),
+        Err(err) => tracing::warn!(
+            event = "diag.import_run.abandon_failed",
+            error = %err,
+            "could not close import runs a previous process left open"
+        ),
+    }
     // An asset's body feeds two indexes with two different jobs: the
     // SQL trigram index answers the Query-side `text_match` predicate
     // (an exact set), Tantivy answers Retrieval (a ranked shortlist).
@@ -892,9 +902,11 @@ pub async fn init_core_with(
     // siblings: its post-reify provenance repair pass composes
     // `AssetService`, which cannot exist until the job queue does.
 
-    // Job engine. `Full` starts the worker `Monitor`; `ReadOnly` only opens
-    // the queue (enqueue-only — jobs stay Pending until the `Full` worker
-    // drains the shared apalis DB).
+    // Job engine. `Spawn` starts the worker `Monitor`; `None` only
+    // opens the queue, so an enqueue is recorded and nothing takes it
+    // off — jobs stay Pending, which is what a caller that asked for no
+    // worker is asking for. Either way the queue is the same apalis
+    // tables in the same database.
     let pool = jobs::open_job_pool(db_path).await?;
     let jobs_pool = pool.clone();
     // Late-bound dispatch runtime cell — filled after the queue exists
@@ -938,8 +950,9 @@ pub async fn init_core_with(
             // layer, or to the default) — the registry range is what
             // keeps it from being unusable in the first place.
             //
-            // Resolved inside this arm because ReadOnly never starts
-            // workers and would otherwise pay the query for nothing.
+            // Resolved inside this arm because a core that spawns no
+            // worker has nothing to size, and would otherwise pay the
+            // query for nothing.
             let job_concurrency = match app_setting_service.get("jobs.concurrency").await {
                 Ok(dto) => serde_json::from_str::<i64>(&dto.value_json)
                     .ok()
@@ -1079,7 +1092,7 @@ pub async fn init_core_with(
         asset_service.clone(),
         job_queue_arc.clone(),
     ));
-    // Kick one retention sweep per `Full` startup. The sweep is
+    // Kick one retention sweep per startup. The sweep is
     // self-chaining while pages come back full, so this single enqueue
     // drains whatever aged past retention while the app was closed —
     // which is the realistic case for a desktop app that is not running
@@ -1494,8 +1507,10 @@ pub async fn init_core_with(
     // connection migrate time; see `migrations::v19_selection_model`).
     // Runs before the context is handed to any boundary, so a query
     // group is never served with stale-or-empty members after a schema
-    // wave — the refresh leaves no window open. `Full` mode only: the
-    // read-only process must not write memberships. Failures are loud
+    // wave — the refresh leaves no window open. Unconditional since
+    // #300: it was gated because a second, lock-less process must not
+    // write memberships, and there is no second process. Failures are
+    // loud
     // but non-fatal: one corrupt rule does not block the app.
     {
         let outcome = query_group_refresh.refresh_all().await;
@@ -1601,7 +1616,7 @@ fn packages_in(dir: &std::path::Path) -> anyhow::Result<Vec<std::path::PathBuf>>
 /// Where the shipped encoder lives, if anywhere: the directory named
 /// by `ASTERISM_BUNDLED_MODELS` (the Tauri shell sets it to its
 /// resource directory), else `bundled-models/` beside the executable
-/// (the standalone server's convention). `None` — a dev build with
+/// (the headless convention). `None` — a dev build with
 /// neither — is the feature staying off, exactly as before the bundle
 /// existed.
 #[cfg(feature = "vision")]

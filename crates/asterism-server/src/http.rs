@@ -1945,15 +1945,13 @@ async fn define_import(
 
 /// `POST /asterism/import/definitions/run` — runs one now.
 ///
-/// Answers when the importer has finished, carrying what it did. A
-/// long import therefore holds the request open, which is the honest
-/// shape for a verb whose answer *is* the outcome — and the caller that
-/// wants to start one and walk away is the scheduler, which is not this
-/// slice.
+/// Answers with the run as it was opened — `outcome: "running"`, no
+/// end — and does not wait for the importer. What the run became lands
+/// on that row, which a caller reads back through the listing.
 ///
-/// `409` while a run of the same definition is still going: two
-/// importers over one source would each take up from a position the
-/// other is about to move.
+/// `409` while a run of the same definition is still going; the reason
+/// is [`ImportRunService::run`](asterism_core::application::ImportRunService::run)'s
+/// to give, and it gives it in the message.
 async fn run_import_definition(
     State(ctx): State<Arc<ServerCtx>>,
     Json(command): Json<RunImportDefinitionCommand>,
