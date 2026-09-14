@@ -8160,7 +8160,9 @@ CREATE INDEX idx_import_run_definition ON import_run(definition_id, started_at D
 ///
 /// One nullable column. `NULL` is every definition V112 could hold: a
 /// stored command line somebody starts. A number is minutes between
-/// starts, and it is the only thing on the row a timer reads.
+/// starts, and it is the only thing on this row that decides whether a
+/// timer should have started it — the rest of the row is what the
+/// importer is then run with.
 ///
 /// # Minutes, and not a cron expression
 ///
@@ -8173,25 +8175,30 @@ CREATE INDEX idx_import_run_definition ON import_run(definition_id, started_at D
 /// hold either would buy the option at the price of making "what is
 /// due" unanswerable here.
 ///
-/// # From the start of the last run, not its end
+/// # Nothing here records when a definition last ran
 ///
-/// Due-ness is `last.started_at + every_minutes`, which
-/// `ImportDefinitionRepository::due` computes and this file does not
-/// store. An import taking twenty minutes on a thirty-minute interval
-/// therefore runs every thirty, not every fifty — the interval is a
-/// cadence and not a rest.
+/// That is `import_run.started_at`, and turning the two into a due time
+/// is `ImportDefinitionRepository::due`'s, which is also where the rule
+/// for doing so is written. This column is minutes and nothing else.
 ///
-/// # No `CHECK` on the value
+/// # Zero is refused here as well as above
 ///
-/// V112's `outcome` has one because that table was being created.
-/// `ALTER TABLE ... ADD COLUMN` in SQLite cannot carry every constraint
-/// a fresh column could, and rebuilding a table to gain a `CHECK` on an
-/// integer is a trade against a migration that cannot half-apply. The
-/// rule — a schedule of zero minutes is not a schedule — is
-/// `ImportRunService::define`'s, stated where the person who typed it
-/// can be told so.
+/// A schedule of no minutes is not a schedule, and a `0` in this column
+/// is a definition due at every tick for ever.
+/// `ImportRunService::define` refuses one, and that is where a person
+/// who typed it is told so in words — this is the backstop behind it,
+/// for a writer that is not `define`.
+///
+/// It is a `CHECK` on an added column, which `ALTER TABLE` accepts:
+/// SQLite's restrictions on `ADD COLUMN` are `PRIMARY KEY`, `UNIQUE`,
+/// `NOT NULL` without a default, `REFERENCES` without a `NULL` default,
+/// a non-constant default, and `STORED` generated columns. An earlier
+/// draft of this doc asserted otherwise and skipped the constraint on
+/// that reasoning; three migrations in this file already do it —
+/// `bucket.kind`, `query_group.last_refresh_status`, `asset.role`.
 const V113_IMPORT_SCHEDULE: &str = r#"
-ALTER TABLE import_definition ADD COLUMN every_minutes INTEGER;
+ALTER TABLE import_definition ADD COLUMN every_minutes INTEGER
+    CHECK (every_minutes IS NULL OR every_minutes > 0);
 "#;
 
 /// Migrations in application order. **Append only** — never rewrite an

@@ -6,14 +6,21 @@
 //!
 //! ## What is here and what is deliberately not
 //!
-//! Running one on demand. **No schedule**: a timer belongs on top of
-//! this and calls it, and every hard question — where the binary is,
-//! how a credential reaches it, what happens when a run is already
-//! going, what is left behind when nothing worked — is answerable
-//! without a clock. The timer is also where the wait a rate limit
-//! states — carried here as `ImportRun::retry_after_secs` — finally
-//! gets a consumer; this layer records it and has nothing to do with
-//! it.
+//! Running one on demand, and [`ImportRunService::start_due`] for
+//! whatever is asking on a clock. **The clock is not here**: it is
+//! [`import_scheduler`](super::import_scheduler), a sibling that calls
+//! that verb and nothing else, because every hard question — where the
+//! binary is, how a credential reaches it, what happens when a run is
+//! already going, what is left behind when nothing worked — is
+//! answerable without one, and was answered before there was one
+//! (#299, then #302).
+//!
+//! The wait a rate limit states is recorded here, as
+//! `ImportRun::retry_after_secs`, and read by
+//! [`ImportDefinitionRepository::due`] — not by the timer, which asks
+//! what is due and is told. So this layer writes that field and never
+//! reads it, which is the same division the rest of the run record
+//! has.
 //!
 //! ## Starting is not waiting
 //!
@@ -253,9 +260,12 @@ impl ImportRunService {
         // would answer a mistyped schedule by doing nothing, for as
         // long as nobody thought to look — and an import that quietly
         // stops filling is the one failure the schedule exists to
-        // prevent. Refused here rather than by a `CHECK`, because the
-        // column was added to a table that already existed; the
-        // migration says so.
+        // prevent.
+        //
+        // The column has a `CHECK` for the same value. This is the one
+        // that runs first and the only one that can say it in words;
+        // the constraint is what answers a writer that is not this
+        // verb.
         if command.every_minutes == Some(0) {
             return Err(DomainError::Validation(
                 "an interval of zero minutes is not a schedule: leave it unset for \
@@ -432,10 +442,22 @@ impl ImportRunService {
                 .await
             {
                 Ok(_) => started += 1,
+                // Not a failure, and not silence either. A child that
+                // hangs inside a living process holds its slot until
+                // the process restarts, and the only outward sign is
+                // this refusal repeating every tick — so it is recorded
+                // at `debug`, which is where a minute-by-minute line
+                // belongs and is still there when somebody goes looking
+                // for why an archive stopped filling.
                 Err(DomainError::Conflict {
                     kind: ConflictKind::Blocked,
                     ..
-                }) => {}
+                }) => tracing::debug!(
+                    event = "diag.import_schedule.still_running",
+                    definition = %definition.id,
+                    name = %definition.name,
+                    "a scheduled import came due while its own run was still going"
+                ),
                 Err(err) => tracing::warn!(
                     event = "diag.import_schedule.start_failed",
                     definition = %definition.id,

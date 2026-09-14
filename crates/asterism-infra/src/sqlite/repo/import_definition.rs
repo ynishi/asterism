@@ -405,10 +405,8 @@ impl ImportDefinitionRepository for SqliteImportDefinitionRepository {
     /// `NULL` if any argument is.
     ///
     /// A run still going has no `ended_at`, so it contributes only its
-    /// interval — which is what should happen. A definition whose run
-    /// is overdue while still running comes back from here and is
-    /// refused by the service, and that refusal is the one answer to
-    /// "is it going".
+    /// interval — which is what should happen, for the reason the port
+    /// gives about not asking here whether one is going.
     async fn due(&self, now: DateTime<Utc>) -> Result<Vec<ImportDefinition>, DomainError> {
         let now_ms = datetime_to_ms(&now);
         let rows = self
@@ -720,6 +718,11 @@ mod tests {
     /// layer can produce one — which is the point: the row outlives the
     /// build that wrote it, and a definition quietly demoted is an
     /// import that stops filling and looks like one nobody scheduled.
+    ///
+    /// The value is `2^32`, which is the band the `CHECK` does not
+    /// cover: the constraint says "null or positive" and says nothing
+    /// about how large, so the two guards divide the space between them
+    /// rather than overlapping.
     #[tokio::test]
     async fn an_unreadable_interval_is_refused_rather_than_ignored() {
         let (repo, _driver) = repo().await;
@@ -730,21 +733,73 @@ mod tests {
         repo.isle
             .call(move |conn| {
                 conn.execute(
-                    "UPDATE import_definition SET every_minutes = -1 WHERE id = ?1",
+                    "UPDATE import_definition SET every_minutes = 4294967296 \
+                     WHERE id = ?1",
                     params![id],
                 )?;
                 Ok(())
             })
             .await
-            .expect("a write");
+            .expect("a write the CHECK allows");
 
         let err = repo
             .find(&odd.id)
             .await
             .expect_err("an interval no u32 can hold");
         assert!(
-            err.to_string().contains("-1"),
+            err.to_string().contains("4294967296"),
             "and it says what it found: {err}"
+        );
+    }
+
+    /// Zero never reaches the column, whatever wrote it.
+    ///
+    /// `ImportRunService::define` refuses one and says so in words; this
+    /// is the backstop behind that, and the reason the migration stopped
+    /// leaving the column unconstrained. A `0` here would be a
+    /// definition due at every tick for ever.
+    #[tokio::test]
+    async fn the_column_refuses_an_interval_of_no_minutes() {
+        let (repo, _driver) = repo().await;
+        let fine = definition("fine", Some(30));
+        repo.upsert(&fine).await.expect("stored");
+
+        let id = fine.id.clone();
+        let refused = repo
+            .isle
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE import_definition SET every_minutes = 0 WHERE id = ?1",
+                    params![id],
+                )?;
+                Ok(())
+            })
+            .await;
+        assert!(refused.is_err(), "zero is not a schedule at any layer");
+
+        // And neither is a negative one, which is the other half of
+        // what the constraint says.
+        let id = fine.id.clone();
+        let refused = repo
+            .isle
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE import_definition SET every_minutes = -1 WHERE id = ?1",
+                    params![id],
+                )?;
+                Ok(())
+            })
+            .await;
+        assert!(refused.is_err());
+
+        assert_eq!(
+            repo.find(&fine.id)
+                .await
+                .expect("a read")
+                .expect("stored")
+                .every_minutes,
+            Some(30),
+            "and the row is what it was"
         );
     }
 }

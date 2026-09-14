@@ -30,13 +30,21 @@ the credit. [`MissedTickBehavior::Delay`] stops a suspended process
 waking up owing a tick for every minute it slept, and a tick is a
 *question*: asking it six hundred times in a burst would answer the
 same thing six hundred times and start the same one run. So that
-line saves six hundred queries and guards nothing. Swapping it for
-`Burst` changes no outcome any test can see, and none does.
+line saves queries and guards nothing.
+
+## What it does not limit
+
+How many start at once. Everything `due` answers with is started on
+the same tick, so a machine whose definitions all come due together
+— every one of them, the first time the process runs — spawns an
+importer each. No limit is invented here for the reason no backoff
+is: a number capping them is a policy with a knob, and whoever wants
+one will want to say what it is and what becomes of the rest.
 
 ## Where it is started, and why not in `init_core`
 
-By whatever process serves, beside the listener it already binds,
-and **not** by `init_core`.
+By the process that binds the port, beside the listener itself, and
+**not** by `init_core`.
 
 `init_core` assembles the service graph. What starts a loop over
 that graph is the same kind of decision as what binds a port, and
@@ -50,8 +58,8 @@ The risk in that placement is #299's own, and it is worth naming
 rather than dressing up: a step in the serving process that can be
 forgotten is one that will be, and #299's first shape was forgotten
 at exactly that seam. What is done about it is that there is one
-function to call, and the end-to-end test calls the same one. The
-type system does not prevent the omission.
+function to call and the end-to-end test calls it too. The type
+system does not prevent the omission.
 
 [`MissedTickBehavior::Delay`]: tokio::time::MissedTickBehavior::Delay
 

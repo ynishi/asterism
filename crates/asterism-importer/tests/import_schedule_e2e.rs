@@ -20,7 +20,8 @@
 //! The timer's tick and the definition's interval are separate, and the
 //! test needs them far apart to say anything. The tick here is
 //! milliseconds because a test cannot wait out
-//! `ImportSchedule::DEFAULT_TICK`; the interval is a minute because the
+//! `asterism_core::application::DEFAULT_TICK`; the interval is a minute
+//! because the
 //! point of the second half is that a definition already run is *not*
 //! started again by the forty ticks that follow.
 
@@ -143,12 +144,23 @@ async fn run_count(core: &CoreCtx, definition_id: &str) -> usize {
         .len()
 }
 
+/// Both halves of what a schedule is, in order.
+///
+/// One test because the launcher reads this process's environment for
+/// which binary to run, and cargo runs the tests in a binary
+/// concurrently — the sibling file learned that the hard way and says
+/// so at length.
+#[tokio::test(flavor = "multi_thread")]
+async fn what_an_interval_starts_and_what_a_source_can_say_about_it() {
+    an_interval_starts_an_import_and_an_absent_one_does_not().await;
+    a_wait_a_source_stated_reaches_the_run_record().await;
+}
+
 /// **An import runs because its interval said so, and one that has no
 /// interval does not.**
 ///
 /// The criterion #302 exists for, and the one thing a person cannot
 /// observe by reading code: nobody in this test asks for a run.
-#[tokio::test(flavor = "multi_thread")]
 async fn an_interval_starts_an_import_and_an_absent_one_does_not() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let scheduled_dir = tmp.path().join("scheduled");
@@ -238,5 +250,127 @@ async fn an_interval_starts_an_import_and_an_absent_one_does_not() {
         run_count(&core, &manual.id).await,
         0,
         "and a definition with no interval is nobody's to start but a person's"
+    );
+}
+
+/// A loopback source that refuses with 429 and says how long to wait.
+///
+/// Written by hand rather than built on a client library because what
+/// is under test is a header on the way out of a real socket: the
+/// scanner reads `Retry-After` off the wire, and a fake that handed the
+/// value over in Rust would prove the wrong half.
+async fn spawn_rate_limited_source(retry_after_secs: u64) -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let port = listener.local_addr().expect("local_addr").port();
+
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                let mut request = String::new();
+                let mut buf = vec![0u8; 8 * 1024];
+                loop {
+                    let Ok(n) = socket.read(&mut buf).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        break;
+                    }
+                    request.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    if request.contains("\r\n\r\n") {
+                        break;
+                    }
+                }
+                let response = format!(
+                    "HTTP/1.1 429 Too Many Requests\r\n\
+                     Retry-After: {retry_after_secs}\r\n\
+                     Content-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.flush().await;
+            });
+        }
+    });
+    port
+}
+
+/// **A wait the source stated survives two processes and lands on the
+/// run.**
+///
+/// The seam this slice claims to close, and the one no test crossed:
+/// #297 made `RateLimited` reachable and #299 recorded
+/// `retry_after_secs`, and until now every assertion about that column
+/// was made against a row built by hand. Here a real source answers a
+/// real 429 with a real `Retry-After`, a real child reads it, writes a
+/// report, and this end puts it on the record.
+///
+/// What `due` then does with the number is pinned next to `due` —
+/// `a_stated_wait_holds_the_next_start_back` and
+/// `a_short_wait_does_not_shorten_the_interval` in
+/// `asterism-infra`'s `import_definition` tests. Splitting it there is
+/// deliberate: an hour's wait cannot be waited out here, and due-ness is
+/// a pure function of the row this phase proves gets written.
+async fn a_wait_a_source_stated_reaches_the_run_record() {
+    const STATED: u64 = 3600;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    unsafe { std::env::set_var("ASTERISM_IMPORT", importer_binary()) };
+
+    let source = spawn_rate_limited_source(STATED).await;
+    let (core, port) = boot(tmp.path()).await;
+    let persona = register(&core, "e2e-import-schedule-429").await;
+
+    let limited = core
+        .import_run_service
+        .define(
+            DefineImportCommand {
+                persona_id: persona.clone(),
+                name: "rate-limited".into(),
+                subcommand: "http".into(),
+                args: vec![
+                    "--url".into(),
+                    format!("http://127.0.0.1:{source}/records"),
+                    "--items-path".into(),
+                    "data.items".into(),
+                    "--cursor-path".into(),
+                    "paging.next".into(),
+                    "--server".into(),
+                    format!("http://127.0.0.1:{port}"),
+                ],
+                secret_ref: None,
+                secret_header: None,
+                every_minutes: Some(1),
+            },
+            &unattributed(),
+        )
+        .await
+        .expect("a definition");
+
+    let _timer = ImportSchedule::spawn(core.import_run_service.clone(), Duration::from_millis(50));
+
+    let run = settled_run(&core, &limited.id).await;
+    assert_eq!(
+        run.outcome, "failed",
+        "a refusal is a failed run: {:?}",
+        run.ended_by_message
+    );
+    assert_eq!(
+        run.ended_by_class.as_deref(),
+        Some("rate_limited"),
+        "and the class the source's 429 earns is its own, not `source` or \
+         `transient`: {:?}",
+        run.ended_by_message
+    );
+    assert_eq!(
+        run.retry_after_secs,
+        Some(STATED),
+        "and the seconds the source stated are on the row, which is the whole \
+         of what #297 recorded and nothing read"
     );
 }

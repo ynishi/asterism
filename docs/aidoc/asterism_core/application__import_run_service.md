@@ -8,14 +8,21 @@ to Asterism and says nothing about what starts it. This starts it.
 
 ## What is here and what is deliberately not
 
-Running one on demand. **No schedule**: a timer belongs on top of
-this and calls it, and every hard question — where the binary is,
-how a credential reaches it, what happens when a run is already
-going, what is left behind when nothing worked — is answerable
-without a clock. The timer is also where the wait a rate limit
-states — carried here as `ImportRun::retry_after_secs` — finally
-gets a consumer; this layer records it and has nothing to do with
-it.
+Running one on demand, and [`ImportRunService::start_due`] for
+whatever is asking on a clock. **The clock is not here**: it is
+[`import_scheduler`](super::import_scheduler), a sibling that calls
+that verb and nothing else, because every hard question — where the
+binary is, how a credential reaches it, what happens when a run is
+already going, what is left behind when nothing worked — is
+answerable without one, and was answered before there was one
+(#299, then #302).
+
+The wait a rate limit states is recorded here, as
+`ImportRun::retry_after_secs`, and read by
+[`ImportDefinitionRepository::due`] — not by the timer, which asks
+what is due and is told. So this layer writes that field and never
+reads it, which is the same division the rest of the run record
+has.
 
 ## Starting is not waiting
 

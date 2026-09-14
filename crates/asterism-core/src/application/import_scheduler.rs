@@ -28,13 +28,21 @@
 //! waking up owing a tick for every minute it slept, and a tick is a
 //! *question*: asking it six hundred times in a burst would answer the
 //! same thing six hundred times and start the same one run. So that
-//! line saves six hundred queries and guards nothing. Swapping it for
-//! `Burst` changes no outcome any test can see, and none does.
+//! line saves queries and guards nothing.
+//!
+//! ## What it does not limit
+//!
+//! How many start at once. Everything `due` answers with is started on
+//! the same tick, so a machine whose definitions all come due together
+//! — every one of them, the first time the process runs — spawns an
+//! importer each. No limit is invented here for the reason no backoff
+//! is: a number capping them is a policy with a knob, and whoever wants
+//! one will want to say what it is and what becomes of the rest.
 //!
 //! ## Where it is started, and why not in `init_core`
 //!
-//! By whatever process serves, beside the listener it already binds,
-//! and **not** by `init_core`.
+//! By the process that binds the port, beside the listener itself, and
+//! **not** by `init_core`.
 //!
 //! `init_core` assembles the service graph. What starts a loop over
 //! that graph is the same kind of decision as what binds a port, and
@@ -48,8 +56,8 @@
 //! rather than dressing up: a step in the serving process that can be
 //! forgotten is one that will be, and #299's first shape was forgotten
 //! at exactly that seam. What is done about it is that there is one
-//! function to call, and the end-to-end test calls the same one. The
-//! type system does not prevent the omission.
+//! function to call and the end-to-end test calls it too. The type
+//! system does not prevent the omission.
 //!
 //! [`MissedTickBehavior::Delay`]: tokio::time::MissedTickBehavior::Delay
 
@@ -93,20 +101,16 @@ impl ImportSchedule {
     /// Starts asking every `tick` which imports are due, and starting
     /// them.
     ///
-    /// The only way this module is entered, so that the product and the
-    /// test that proves the product start the same loop. `tick` is the
-    /// resolution, not a schedule: [`DEFAULT_TICK`] is what the serving
-    /// process passes, and a test passes something short because it
-    /// cannot wait a minute to learn anything.
+    /// The product and the test that proves the product start the same
+    /// loop through here. `tick` is the resolution, not a schedule:
+    /// [`DEFAULT_TICK`] is what the serving process passes, and a test
+    /// passes something short because it cannot wait a minute to learn
+    /// anything.
     pub fn spawn(service: Arc<ImportRunService>, tick: Duration) -> Self {
         let task = tokio::spawn(async move {
             let mut ticker = tokio::time::interval(tick);
-            // Not `Burst`, which is the default: a suspended process
-            // wakes owing a tick for every one it slept through. This
-            // saves the repeated question and nothing more — what makes
-            // the answer one run rather than six hundred is `due`, and
-            // the module doc says so rather than letting this line take
-            // the credit.
+            // Not `Burst`, the default: it saves the repeated
+            // question after a suspend, and guards nothing. Module doc.
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             // The first tick of a tokio interval completes immediately,
             // and that is wanted: a definition that came due while the
