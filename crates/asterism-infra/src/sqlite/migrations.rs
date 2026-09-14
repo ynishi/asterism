@@ -8035,8 +8035,8 @@ CREATE UNIQUE INDEX idx_forge_send_dispatch ON forge_send(dispatch_id);
 ///
 /// The reason once given here for that — "`ALTER TABLE ADD COLUMN`
 /// cannot carry one" — is false, and so was the example beside it:
-/// `asset.role` and `asset.fold_policy` each carry one, added by
-/// exactly that statement (V51). A column-level `CHECK` survives
+/// `asset.role` (V37) and `asset.fold_policy` (V51) each carry one,
+/// added by exactly that statement. A column-level `CHECK` survives
 /// `ADD COLUMN`; the table-level kind V47 wanted does not. V51 is where
 /// that is measured and where it is stated. Nothing about this column
 /// changes on the strength of a corrected sentence — a constraint is
@@ -8195,16 +8195,12 @@ CREATE INDEX idx_import_run_definition ON import_run(definition_id, started_at D
 /// for a writer that is not `define`.
 ///
 /// A **column-level** `CHECK`, which is the kind that survives
-/// `ALTER TABLE ADD COLUMN`. That is V51's measurement and V51's to
-/// state; `v51_folds_are_marked_and_the_policy_is_checked` is the test
-/// that keeps it true, and every step adding a constrained column
-/// stands on it rather than on its own reading of SQLite.
+/// `ALTER TABLE ADD COLUMN`. V51 is where that is measured and stated
+/// (`v51_folds_are_marked_and_the_policy_is_checked`); nothing about it
+/// is this step's to restate.
 ///
 /// An earlier draft of this doc skipped the constraint, on the reasoning
-/// that `ADD COLUMN` could not carry one. It can. The sentence was not
-/// arrived at independently — V110's doc, a hundred and sixty lines up
-/// in this file, says the same false thing, which is what a rule with
-/// no single site costs.
+/// that `ADD COLUMN` could not carry one. It can.
 const V113_IMPORT_SCHEDULE: &str = r#"
 ALTER TABLE import_definition ADD COLUMN every_minutes INTEGER
     CHECK (every_minutes IS NULL OR every_minutes > 0);

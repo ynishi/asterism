@@ -21,8 +21,8 @@
 //! test needs them far apart to say anything. The tick here is
 //! milliseconds because a test cannot wait out
 //! `asterism_core::application::DEFAULT_TICK`; the interval is a minute
-//! because the point of the second half is that a definition already
-//! run is *not* started again by the forty ticks that follow.
+//! because the first phase's closing assertion is that a definition
+//! already run is *not* started again by the forty ticks that follow.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -254,10 +254,10 @@ async fn an_interval_starts_an_import_and_an_absent_one_does_not() {
 
 /// A loopback source that refuses with 429 and says how long to wait.
 ///
-/// A raw socket for the reason the SDK's own fixtures give: this crate
-/// has no HTTP server dependency, and what is wanted is something that
-/// says 429 on demand — which is the one thing a real source will not
-/// do when asked.
+/// A raw socket rather than a second axum router beside `boot`'s,
+/// because this end never reads the request: whatever arrives, the
+/// answer is 429 with a `Retry-After`, which is the one thing a real
+/// source will not say on demand, and one function is the whole of it.
 async fn spawn_rate_limited_source(retry_after_secs: u64) -> u16 {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

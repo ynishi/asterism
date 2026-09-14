@@ -2245,7 +2245,7 @@
     {
       "path": "asterism_core::domain::import_definition::ImportDefinition",
       "kind": "struct",
-      "docs": "An import that can be run on demand."
+      "docs": "An import that can be run on demand, or on an interval it carries."
     },
     {
       "path": "asterism_core::domain::import_definition::ImportRun",

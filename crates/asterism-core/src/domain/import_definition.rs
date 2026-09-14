@@ -37,7 +37,7 @@
 
 use chrono::{DateTime, Utc};
 
-/// An import that can be run on demand.
+/// An import that can be run on demand, or on an interval it carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportDefinition {
     /// Stable id.
