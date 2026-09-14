@@ -42,15 +42,15 @@ and this project adheres to
   kept apart from the arguments — the name of the environment variable holding
   the credential together with the header it is sent as. Starting one spawns
   `asterism-import`, answers immediately with the **run** it opened, and lands
-  the outcome on that row. No schedule: a timer belongs on top of this and is
-  where a rate limit's stated wait finally gets a consumer. **A credential is
-  never stored.** The definition has a column for a variable's name and none a
-  value could go in, following the outbound side's `auth.secret_ref` — and
-  unlike that side's `{{secret}}` template, the resolved value never reaches the
-  child's arguments either, because an argument vector is readable by every
-  other process on the machine. It goes through the child's environment, and
-  `ps` shows the name of a header. The arguments beside it are stored verbatim
-  and readable, which is the trade an operator makes knowingly and is said where
+  the outcome on that row. No schedule in this slice: the timer is #302's, and a
+  rate limit's stated wait gets its consumer there. **A credential is never
+  stored.** The definition has a column for a variable's name and none a value
+  could go in, following the outbound side's `auth.secret_ref` — and unlike that
+  side's `{{secret}}` template, the resolved value never reaches the child's
+  arguments either, because an argument vector is readable by every other
+  process on the machine. It goes through the child's environment, and `ps`
+  shows the name of a header. The arguments beside it are stored verbatim and
+  readable, which is the trade an operator makes knowingly and is said where
   they make it. A run is **only ever a record**: whether one is going is the
   supervisor's question about its own children, not a row anybody reads, so a
   crash cannot wedge a definition — a startup sweep closes what a previous
