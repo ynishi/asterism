@@ -7,20 +7,19 @@
 //! ## What is here and what is deliberately not
 //!
 //! Running one on demand, and [`ImportRunService::start_due`] for
-//! whatever is asking on a clock. **The clock is not here**: it is
-//! [`import_scheduler`](super::import_scheduler), a sibling that calls
-//! that verb and nothing else, because every hard question — where the
-//! binary is, how a credential reaches it, what happens when a run is
-//! already going, what is left behind when nothing worked — is
-//! answerable without one, and was answered before there was one
-//! (#299, then #302).
+//! whatever is asking on a clock. **The clock is not here** — it is
+//! [`import_scheduler`](super::import_scheduler) — because every hard
+//! question, where the binary is, how a credential reaches it, what
+//! happens when a run is already going, what is left behind when
+//! nothing worked, is answerable without one, and was answered before
+//! there was one (#299, then #302).
 //!
 //! The wait a rate limit states is recorded here, as
-//! `ImportRun::retry_after_secs`, and read by
-//! [`ImportDefinitionRepository::due`] — not by the timer, which asks
-//! what is due and is told. So this layer writes that field and never
-//! reads it, which is the same division the rest of the run record
-//! has.
+//! `ImportRun::retry_after_secs`, and what acts on it is the due
+//! calculation — not the clock, which asks what is due and is told. So
+//! this layer writes that field and hands it on, and never decides
+//! anything by it, which is the same division the rest of the run
+//! record has.
 //!
 //! ## Starting is not waiting
 //!
@@ -442,13 +441,13 @@ impl ImportRunService {
                 .await
             {
                 Ok(_) => started += 1,
-                // Not a failure, and not silence either. A child that
-                // hangs inside a living process holds its slot until
-                // the process restarts, and the only outward sign is
-                // this refusal repeating every tick — so it is recorded
-                // at `debug`, which is where a minute-by-minute line
-                // belongs and is still there when somebody goes looking
-                // for why an archive stopped filling.
+                // Not a failure, and not silence either. A child
+                // that hangs inside a living process holds its slot
+                // until the process restarts; its run row says so
+                // loudest, and this is the line that says it is still
+                // happening. `debug`, because it repeats every tick —
+                // which is the point, and also why it cannot be
+                // anything louder.
                 Err(DomainError::Conflict {
                     kind: ConflictKind::Blocked,
                     ..

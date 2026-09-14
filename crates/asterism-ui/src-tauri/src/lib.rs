@@ -250,12 +250,10 @@ pub fn run() {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
 
-            // The import timer, started here for the reason
-            // `asterism_core::application::import_scheduler` gives: what
-            // starts a loop over the service graph is the same kind of
-            // decision as what binds a port, and this is the process
-            // that makes both. `init_core` starting it would hand one to
-            // every end-to-end test that only wanted a core.
+            // The import timer. Why it is started here and not in
+            // `init_core` is
+            // `asterism_core::application::import_scheduler`'s to say;
+            // this is the site that site is talking about.
             //
             // Managed rather than held in a local, because the handle
             // stops the timer when it drops and a local would drop at

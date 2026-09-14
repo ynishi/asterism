@@ -86,7 +86,8 @@ impl DefinitionRow {
             ))
         })?;
         // An interval this build cannot read is an error and not "no
-        // schedule", for the reason the arguments give one line up. A
+        // schedule", for the reason this method's doc gives about
+        // `args_json`. A
         // definition silently demoted to manual is an import that
         // quietly stops filling, which is the failure the whole slice
         // exists to prevent, and it would look exactly like one nobody
@@ -754,10 +755,10 @@ mod tests {
 
     /// Zero never reaches the column, whatever wrote it.
     ///
-    /// `ImportRunService::define` refuses one and says so in words; this
-    /// is the backstop behind that, and the reason the migration stopped
-    /// leaving the column unconstrained. A `0` here would be a
-    /// definition due at every tick for ever.
+    /// `ImportRunService::define` refuses one first and is the only one
+    /// that can say why in words; this pins the backstop behind it, and
+    /// the reason the migration stopped leaving the column
+    /// unconstrained.
     #[tokio::test]
     async fn the_column_refuses_an_interval_of_no_minutes() {
         let (repo, _driver) = repo().await;

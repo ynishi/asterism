@@ -70,6 +70,14 @@ pub struct ImportDefinition {
     /// Minutes between starts, or `None` for an import nothing starts
     /// on its own.
     ///
+    /// An interval and not a time of day. What a schedule is for here
+    /// is "keep this filling", and an interval has no timezone — so it
+    /// has no hour that happens twice a year, none that does not happen
+    /// at all, and no question about which of those a missed run
+    /// belongs to. A time of day is a different field when somebody
+    /// wants one, and it will need its own answers to exactly those
+    /// questions.
+    ///
     /// Measured from one run's **start**, so an import taking twenty
     /// minutes on a thirty-minute interval runs every thirty and not
     /// every fifty: this is a cadence, not a rest between runs.

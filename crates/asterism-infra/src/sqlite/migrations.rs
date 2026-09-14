@@ -8030,9 +8030,17 @@ CREATE UNIQUE INDEX idx_forge_send_dispatch ON forge_send(dispatch_id);
 /// every row that predates this step reads `'unknown'`, which
 /// `asset_zone` resolves to the occurrence stamp — the reading every
 /// consumer gave those rows before the source was recorded, so nothing
-/// moves. No CHECK, because `ALTER TABLE ADD COLUMN` cannot carry one;
-/// the closed set is enforced where the row is read back, the way
-/// `role` and `fold_policy` are.
+/// moves. No CHECK on this column; the closed set is enforced where the
+/// row is read back.
+///
+/// The reason once given here for that — "`ALTER TABLE ADD COLUMN`
+/// cannot carry one" — is false, and so was the example beside it:
+/// `asset.role` and `asset.fold_policy` each carry one, added by
+/// exactly that statement (V51). A column-level `CHECK` survives
+/// `ADD COLUMN`; the table-level kind V47 wanted does not. V51 is where
+/// that is measured and where it is stated. Nothing about this column
+/// changes on the strength of a corrected sentence — a constraint is
+/// simply available to whoever decides it wants one.
 ///
 /// # `time_zone`, `NULL`
 ///
@@ -8164,16 +8172,13 @@ CREATE INDEX idx_import_run_definition ON import_run(definition_id, started_at D
 /// timer should have started it — the rest of the row is what the
 /// importer is then run with.
 ///
-/// # Minutes, and not a cron expression
+/// # Minutes, and not a `schedule_json`
 ///
-/// What is being scheduled is "keep this filling", not "run at a time
-/// of day". An interval has no timezone, so there is no hour that
-/// happens twice a year and none that does not happen at all, and no
-/// question about which of those a missed run belongs to. A time of day
-/// is a different column when somebody wants one, and it will want its
-/// own answers to exactly those questions. A `schedule_json` able to
-/// hold either would buy the option at the price of making "what is
-/// due" unanswerable here.
+/// Why minutes rather than a time of day is
+/// `ImportDefinition::every_minutes`'s to say. What is this file's is
+/// the shape: an integer column rather than a blob able to hold either
+/// kind, because "what is due" is a question asked in SQL and a blob
+/// makes it unanswerable here.
 ///
 /// # Nothing here records when a definition last ran
 ///
@@ -8189,13 +8194,17 @@ CREATE INDEX idx_import_run_definition ON import_run(definition_id, started_at D
 /// who typed it is told so in words — this is the backstop behind it,
 /// for a writer that is not `define`.
 ///
-/// It is a `CHECK` on an added column, which `ALTER TABLE` accepts:
-/// SQLite's restrictions on `ADD COLUMN` are `PRIMARY KEY`, `UNIQUE`,
-/// `NOT NULL` without a default, `REFERENCES` without a `NULL` default,
-/// a non-constant default, and `STORED` generated columns. An earlier
-/// draft of this doc asserted otherwise and skipped the constraint on
-/// that reasoning; three migrations in this file already do it —
-/// `bucket.kind`, `query_group.last_refresh_status`, `asset.role`.
+/// A **column-level** `CHECK`, which is the kind that survives
+/// `ALTER TABLE ADD COLUMN`. That is V51's measurement and V51's to
+/// state; `v51_folds_are_marked_and_the_policy_is_checked` is the test
+/// that keeps it true, and every step adding a constrained column
+/// stands on it rather than on its own reading of SQLite.
+///
+/// An earlier draft of this doc skipped the constraint, on the reasoning
+/// that `ADD COLUMN` could not carry one. It can. The sentence was not
+/// arrived at independently — V110's doc, a hundred and sixty lines up
+/// in this file, says the same false thing, which is what a rule with
+/// no single site costs.
 const V113_IMPORT_SCHEDULE: &str = r#"
 ALTER TABLE import_definition ADD COLUMN every_minutes INTEGER
     CHECK (every_minutes IS NULL OR every_minutes > 0);

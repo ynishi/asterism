@@ -21,9 +21,8 @@
 //! test needs them far apart to say anything. The tick here is
 //! milliseconds because a test cannot wait out
 //! `asterism_core::application::DEFAULT_TICK`; the interval is a minute
-//! because the
-//! point of the second half is that a definition already run is *not*
-//! started again by the forty ticks that follow.
+//! because the point of the second half is that a definition already
+//! run is *not* started again by the forty ticks that follow.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -168,8 +167,8 @@ async fn an_interval_starts_an_import_and_an_absent_one_does_not() {
     corpus(&scheduled_dir, &["a.txt", "b.txt", "c.txt"]);
     corpus(&manual_dir, &["d.txt"]);
 
-    // SAFETY: this test binary runs one test, so nothing else in this
-    // process reads or writes this.
+    // SAFETY: the phases of this test run in sequence, and nothing else
+    // in this process reads or writes this.
     unsafe { std::env::set_var("ASTERISM_IMPORT", importer_binary()) };
 
     let (core, port) = boot(tmp.path()).await;
@@ -192,8 +191,8 @@ async fn an_interval_starts_an_import_and_an_absent_one_does_not() {
         .await
         .expect("a manual definition");
 
-    // An interval of zero is a typo, and reading it as "manual" would
-    // answer one by doing nothing for as long as nobody looked.
+    // Refused at the door as well as by the column, and this is the
+    // one that can say it in words.
     let refused = core
         .import_run_service
         .define(
@@ -255,10 +254,10 @@ async fn an_interval_starts_an_import_and_an_absent_one_does_not() {
 
 /// A loopback source that refuses with 429 and says how long to wait.
 ///
-/// Written by hand rather than built on a client library because what
-/// is under test is a header on the way out of a real socket: the
-/// scanner reads `Retry-After` off the wire, and a fake that handed the
-/// value over in Rust would prove the wrong half.
+/// A raw socket for the reason the SDK's own fixtures give: this crate
+/// has no HTTP server dependency, and what is wanted is something that
+/// says 429 on demand — which is the one thing a real source will not
+/// do when asked.
 async fn spawn_rate_limited_source(retry_after_secs: u64) -> u16 {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -366,6 +365,15 @@ async fn a_wait_a_source_stated_reaches_the_run_record() {
         "and the class the source's 429 earns is its own, not `source` or \
          `transient`: {:?}",
         run.ended_by_message
+    );
+    // `due` reads the pair — a wait is measured from the end of the run
+    // that earned it — so a row carrying the seconds and no end would be
+    // a row `due` ignores. It holds by construction (`run` sets both in
+    // one write) and is asserted anyway, because "by construction" is
+    // what this phase exists to stop taking on trust.
+    assert!(
+        run.ended_at.is_some(),
+        "and the run has an end for the wait to be measured from"
     );
     assert_eq!(
         run.retry_after_secs,
