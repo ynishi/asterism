@@ -22,7 +22,7 @@ use std::sync::Arc;
 use asterism_contract::command::{AddAssetCommand, OnDuplicate, RegisterPersonaCommand};
 use asterism_contract::query::GetAssetDetailQuery;
 use asterism_core::domain::attribution::AttributionContext;
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the declared
@@ -74,7 +74,7 @@ async fn a_declared_strategy_is_persisted_and_an_undeclared_one_stays_unrecorded
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -178,7 +178,7 @@ async fn an_unknown_strategy_is_refused_before_the_ingest_can_write_anything() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

@@ -1180,7 +1180,7 @@
     {
       "path": "asterism_ui::state",
       "kind": "module",
-      "docs": "`AppState` — service DI + backend initialisation.\n\nTauri's own `State` container gives us `Arc`-style sharing, so this\nstruct just holds `Arc<Service>` fields and does not wrap again. The\nheavy lifting is delegated to the shared `asterism_server::core_init`\n(`Full` mode: read-write tantivy index + job worker); this module only\nadapts the returned `CoreCtx` into `AppState` and supplies the Tauri\nprogress emitter."
+      "docs": "`AppState` — service DI + backend initialisation.\n\nTauri's own `State` container gives us `Arc`-style sharing, so this\nstruct just holds `Arc<Service>` fields and does not wrap again. The\nheavy lifting is delegated to the shared `asterism_server::core_init`\n(the writer lock and the job worker); this module only\nadapts the returned `CoreCtx` into `AppState` and supplies the Tauri\nprogress emitter."
     },
     {
       "path": "asterism_ui::state::AppState",
@@ -1200,7 +1200,7 @@
     {
       "path": "asterism_ui::state::init",
       "kind": "function",
-      "docs": "Initialises the whole backend and returns both the Tauri `AppState`\nand the HTTP [`ServerCtx`]. Invoked from the Tauri setup hook. Opens\nthe shared core in `Full` mode (this process is the single tantivy\nwriter and runs the job worker).\n\nBoth context structs are built from the same `CoreCtx` so the UI and\nthe loopback HTTP surface it serves share one service graph and one\njob worker. Neither wrapper constructs a service of its own: one\nbuilt here rather than in `init_core` would be reachable from this\ntransport only, which is how the comment thread spent four commands\nwith no HTTP route. All fields are `Arc`/`Clone`, so the bundle is\nassembled by cloning the handles before `AppState` takes ownership of\nthe originals."
+      "docs": "Initialises the whole backend and returns both the Tauri `AppState`\nand the HTTP [`ServerCtx`]. Invoked from the Tauri setup hook. Opens\nthe shared core with the job worker running (this process is the single tantivy\nwriter and runs the job worker).\n\nBoth context structs are built from the same `CoreCtx` so the UI and\nthe loopback HTTP surface it serves share one service graph and one\njob worker. Neither wrapper constructs a service of its own: one\nbuilt here rather than in `init_core` would be reachable from this\ntransport only, which is how the comment thread spent four commands\nwith no HTTP route. All fields are `Arc`/`Clone`, so the bundle is\nassembled by cloning the handles before `AppState` takes ownership of\nthe originals."
     },
     {
       "path": "asterism_ui::stored_connection",

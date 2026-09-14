@@ -24,11 +24,11 @@
 //! that script is what makes the tick count, the re-enqueue log, and
 //! the reified assets facts rather than guesses.
 //!
-//! **Why `CoreMode::ReadOnly`.** Stronger here than in the sibling
-//! file. `ReadOnly` opens the job queue without spawning a worker
+//! **Why `JobWorker::None`.** Stronger here than in the sibling
+//! file. It opens the job queue without spawning a worker
 //! `Monitor`, so the `DispatchRun` job that `DispatchService::create`
 //! enqueues sits there and the test is the only thing advancing the
-//! state machine. Under `Full` a worker would pick the same dispatch up
+//! state machine. With a worker spawned it would pick the same dispatch up
 //! and **POST to the fake a second time** — the tick count, the
 //! re-enqueue log, and the backend's own request log would all stop
 //! meaning anything.
@@ -57,7 +57,7 @@ use asterism_exporter_comfy::ComfyHttpExporter;
 use asterism_exporter_http::HttpExporter;
 use asterism_infra::dispatch::{DispatchRunEnv, ExporterRegistry, ReEnqueue, run_dispatch_run};
 use asterism_infra::sqlite;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 use serde_json::json;
 
 use fake_backend::{FakeBackend, Outcome};
@@ -84,7 +84,7 @@ const POLL_INTERVAL_MS: u64 = 1234;
 
 /// A 1×1 RGBA PNG, 67 bytes. Nothing on this route decodes pixels —
 /// the assets here are minted from locator strings, and the thumbnail /
-/// cover jobs do not run in `ReadOnly` — so a minimal header-valid
+/// cover jobs do not run without a worker — so a minimal header-valid
 /// file is the whole fixture.
 const PNG_1X1: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
@@ -174,7 +174,7 @@ async fn boot(tmp: &Path) -> CoreCtx {
     init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::ReadOnly,
+        JobWorker::None,
         Some(&tmp.join("tantivy")),
     )
     .await
@@ -372,7 +372,7 @@ async fn export_via(
         .expect("create dispatch");
 
     // `create` enqueued a `DispatchRun` job that nothing will ever
-    // pick up (no worker in `ReadOnly`); this environment is the only
+    // pick up (this core spawned none); this environment is the only
     // thing that moves the dispatch.
     let (env, reenqueue) = dispatch_env(db_path, core, exporter).await;
     let ticks = drive_to_terminal(&env, core, &dispatch.id).await;

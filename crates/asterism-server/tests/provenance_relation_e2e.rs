@@ -13,8 +13,8 @@
 //! `derived_from` edge would be the overstatement this exists to stop,
 //! and the graph would not say so anywhere.
 //!
-//! `ReadOnly` rather than `Full`: the question is what one synchronous
-//! verb writes, and the job worker would only add edges from a rebuild
+//! No worker: the question is what one synchronous
+//! verb writes, and a worker would only add edges from a rebuild
 //! that has nothing to do with it. Survival across a rebuild is the
 //! neighbouring file's subject, and `EdgeKind::Reference` is already on
 //! the non-synth side of `is_synth()` with the kind it shares that
@@ -25,7 +25,7 @@ use std::sync::Arc;
 use asterism_contract::command::{
     AddAssetCommand, DeclareProvenanceCommand, RegisterPersonaCommand,
 };
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 fn unattributed() -> asterism_core::domain::attribution::AttributionContext {
     asterism_core::domain::attribution::AttributionContext::asserted(None, None)
@@ -83,7 +83,9 @@ async fn fixture() -> Fixture {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::ReadOnly,
+        // No worker: see the module note — a rebuild adds edges this
+        // file counts, and counting them here would be counting it.
+        JobWorker::None,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -312,7 +314,9 @@ async fn declaring_provenance_keeps_the_other_notes_in_the_bag() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::ReadOnly,
+        // No worker: see the module note — a rebuild adds edges this
+        // file counts, and counting them here would be counting it.
+        JobWorker::None,
         Some(&tmp.path().join("tantivy")),
     )
     .await

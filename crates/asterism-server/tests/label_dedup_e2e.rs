@@ -20,7 +20,7 @@
 use std::sync::Arc;
 
 use asterism_contract::command::{AddAssetCommand, RegisterPersonaCommand, UpdateAssetMetaCommand};
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 fn unattributed() -> asterism_core::domain::attribution::AttributionContext {
     asterism_core::domain::attribution::AttributionContext::asserted(None, None)
@@ -95,7 +95,9 @@ async fn fixture() -> Fixture {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::ReadOnly,
+        // No worker: the question is what the two write verbs store,
+        // and a job rewriting the row would answer it for them.
+        JobWorker::None,
         Some(&tmp.path().join("tantivy")),
     )
     .await

@@ -41,7 +41,7 @@ use asterism_core::domain::forge::model::strategy::Strategy;
 use asterism_core::domain::forge::model::value::{Content, Name};
 use asterism_core::domain::forge::strategies::MainlineFirst;
 use asterism_core::domain::value::{AssetId, PersonaId};
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 
 fn who(subject: &str) -> AttributionContext {
     AttributionContext::asserted(Some(Author::Subject(subject.into())), None).expect("a subject")
@@ -55,7 +55,7 @@ async fn core(tmp: &std::path::Path) -> CoreCtx {
     init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.join("tantivy")),
     )
     .await

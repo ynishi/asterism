@@ -1,24 +1,28 @@
-//! Backend context for the standalone server. Thin wrapper over the
-//! shared [`crate::core_init::init_core`] (`ReadOnly` mode): assembles a
-//! [`ServerCtx`] from the returned `CoreCtx`.
+//! Backend context for the HTTP surface. A thin selection over the
+//! shared [`crate::core_init::init_core`]: assembles a [`ServerCtx`]
+//! from the returned `CoreCtx`.
+//!
+//! Its callers are `asterism-ui`, which serves this router in its own
+//! process, and the end-to-end tests, which build one over a tempdir
+//! core. There was a third — the `asterism-server serve` subcommand —
+//! and #300 removed it along with the `init` helper that existed only
+//! for it.
 //!
 //! The server shares the SQLite file with the Tauri UI process under
 //! WAL; the `busy_timeout = 5000` pragma is applied by `sqlite::open`.
 //! Progress updates go to stderr via `LogEmitter` — there is no UI event
 //! bus in this process.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use asterism_core::application::DispatchService;
 use asterism_core::application::{
-    AppSettingService, AssetCommentService, AssetService, ImportStateService, MaterialLayerService,
-    MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,
-    SessionService, SnapshotService, ThreadService, ThumbService,
+    AppSettingService, AssetCommentService, AssetService, ImportRunService, ImportStateService,
+    MaterialLayerService, MaterialMarkService, ModalityService, PersonaService, QueryGroupService,
+    SeriesStrategyService, SessionService, SnapshotService, ThreadService, ThumbService,
 };
 use asterism_infra::dispatch::ExporterRegistry;
-
-use crate::core_init::{CoreMode, LogEmitter, init_core};
 
 /// Bundle of services that HTTP handlers share via `axum` state.
 ///
@@ -50,6 +54,9 @@ pub struct ServerCtx {
     pub app_setting_service: Arc<AppSettingService>,
     /// Where an importer got to (`/asterism/import/state/*`).
     pub import_state_service: Arc<ImportStateService>,
+    /// Stored imports and the record of running them
+    /// (`/asterism/import/definitions*`).
+    pub import_run_service: Arc<ImportRunService>,
     /// Session 1st-class entity lifecycle. Backs the P2 HTTP
     /// CRUD (rename / metadata / delete) once those routes land; the
     /// SessionsView list path currently continues to flow through
@@ -143,6 +150,7 @@ impl ServerCtx {
             series_strategy_service: core.series_strategy_service.clone(),
             app_setting_service: core.app_setting_service.clone(),
             import_state_service: core.import_state_service.clone(),
+            import_run_service: core.import_run_service.clone(),
             session_service: core.session_service.clone(),
             asset_comment_service: core.asset_comment_service.clone(),
             material_mark_service: core.material_mark_service.clone(),
@@ -159,12 +167,4 @@ impl ServerCtx {
             observations: core.observations.clone(),
         })
     }
-}
-
-/// Initialises the backend in read-only mode and returns the shared
-/// context. The tantivy writer lock and the job worker stay with the
-/// Tauri UI process; the server only enqueues jobs and serves reads.
-pub async fn init(db_path: &Path) -> anyhow::Result<Arc<ServerCtx>> {
-    let core = init_core(db_path, Arc::new(LogEmitter), CoreMode::ReadOnly).await?;
-    Ok(ServerCtx::from_core(&core))
 }

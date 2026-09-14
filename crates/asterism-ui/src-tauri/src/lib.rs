@@ -250,11 +250,15 @@ pub fn run() {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
 
-            // HTTP serve (both modes). One core per machine: bind 127.0.0.1
-            // on the resolved port and serve the shared router. A bind
-            // failure means another core already holds the port — in
-            // windowed mode we warn and keep running as a plain UI; in
-            // headless mode serving is the only reason to exist, so we exit.
+            // HTTP serve (both modes). One core per machine: bind
+            // 127.0.0.1 on the resolved port and serve the shared
+            // router. A second core does not get this far — it dies on
+            // the Tantivy writer lock inside `init_core` — so a bind
+            // failure here is something else holding the port: another
+            // profile's core sharing dogfood's default, or a process
+            // that has nothing to do with Asterism. In windowed mode we
+            // warn and keep running as a plain UI; in headless mode
+            // serving is the only reason to exist, so we exit.
             let port = opts.port;
             let headless = opts.headless;
             tauri::async_runtime::spawn(async move {

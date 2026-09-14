@@ -19,10 +19,10 @@
 //! shares a lineage with the keeper (or was born of a dispatch) share
 //! this fixture and vary only the input the axis under test names.
 //!
-//! `Full` mode throughout, for the reason `duplicate_conflict_resolution_e2e`
-//! gives: the pipeline the caller is exercising is the one the worker
-//! actually runs, and a `ReadOnly` init would test the merge against a
-//! partial version of it.
+//! The job worker spawned throughout, for the reason
+//! `duplicate_conflict_resolution_e2e` gives: the pipeline the caller
+//! is exercising is the one the worker actually runs, and a core
+//! without one would test the merge against a partial version of it.
 
 use std::sync::Arc;
 
@@ -30,7 +30,7 @@ use asterism_contract::command::{
     AddAssetCommand, MergeAssetsCommand, RegisterPersonaCommand, TrashAssetCommand,
 };
 use asterism_contract::dto::MergeAssetsDto;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the merge, not about
@@ -114,7 +114,7 @@ impl Fixture {
         let core = init_core_with(
             &tmp.path().join("asterism.db"),
             Arc::new(LogEmitter),
-            CoreMode::Full,
+            JobWorker::Spawn,
             Some(&tmp.path().join("tantivy")),
         )
         .await

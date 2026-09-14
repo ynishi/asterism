@@ -20,7 +20,7 @@ use asterism_contract::command::{
     RegisterPersonaCommand, TrashAssetCommand,
 };
 use asterism_contract::dto::DerivedDto;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the derivation chain,
@@ -158,7 +158,7 @@ async fn a_three_hop_chain_reads_back_as_one_route() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -323,7 +323,7 @@ async fn an_n_output_export_names_its_dispatch_once_in_the_backbone() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -416,7 +416,7 @@ async fn a_sibling_export_stays_out_of_the_route() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -523,7 +523,7 @@ async fn the_backbone_outlives_its_export_copies() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

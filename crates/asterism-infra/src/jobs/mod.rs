@@ -76,8 +76,8 @@ pub struct AsterismJob {
 /// Dependencies passed in by the caller (`asterism-ui` /
 /// `asterism-server`).
 pub struct JobDeps {
-    /// Progress emitter — usually a Tauri emitter in the UI, or a log
-    /// emitter in the standalone server.
+    /// Progress emitter — a Tauri emitter in the UI, or a log emitter
+    /// where there is no event bus to emit onto.
     pub emitter: Arc<dyn ProgressEmitter>,
     /// Asset repository. Held by concrete type because handlers use the
     /// non-port helpers (`candidates_near`, `set_cover`, `set_keywords`).
@@ -769,8 +769,8 @@ pub async fn jobs_snapshot(pool: &SqlitePool) -> Result<JobsSnapshot, DomainErro
 }
 
 /// Opens the sqlx pool used by the job engine. Provided as a helper so
-/// consumers (the Tauri UI, the standalone server) do not need to import
-/// sqlx directly. The pool shares the on-disk file with the isle backend
+/// consumers (the Tauri UI, and the tests that build a core) do not
+/// need to import sqlx directly. The pool shares the on-disk file with the isle backend
 /// (they run on separate connection stacks under WAL).
 pub async fn open_job_pool(db_path: &std::path::Path) -> Result<SqlitePool, DomainError> {
     SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db_path.display()))

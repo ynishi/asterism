@@ -18,16 +18,17 @@
 //! export is driven through the real `DispatchRun` state machine with
 //! the real `FileExporter` behind it.
 //!
-//! **Why `CoreMode::ReadOnly`.** Its rustdoc is written for the
-//! standalone server sharing a database with a running UI, which reads
-//! like a mismatch here. What this test needs from it is the other
-//! half of the same property: `ReadOnly` opens the job queue without
-//! spawning a worker `Monitor`. `DispatchService::create` still
+//! **Why `JobWorker::None`.** It opens the job queue without spawning
+//! a worker `Monitor`, and that is the whole of what it asks for —
+//! which is the point of the type. Its predecessor bundled the answer
+//! with a read-only index and two skipped startup sweeps, so this note
+//! used to have to explain which part of a mode it meant.
+//! `DispatchService::create` still
 //! enqueues the `DispatchRun` job — it just sits there, because nothing
 //! drains it. That leaves the test as the only thing advancing the
 //! state machine, so the tick count and the re-enqueue log are facts
-//! about the runner rather than a race with a background worker. Under
-//! `Full` a worker would reach the same exporter concurrently and both
+//! about the runner rather than a race with a background worker. With
+//! one spawned, it would reach the same exporter concurrently and both
 //! numbers would stop meaning anything.
 //!
 //! Its own test binary because `init_core` opens a Tantivy index (one
@@ -47,7 +48,7 @@ use asterism_importer_image::ImageParser;
 use asterism_importer_sdk::{FsScanner, ImportOptions, ImportSummary, ScanMode, run_import};
 use asterism_infra::dispatch::{DispatchRunEnv, ExporterRegistry, ReEnqueue, run_dispatch_run};
 use asterism_infra::sqlite;
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 
 /// The attribution this fixture writes with: a caller that states
 /// nothing, which records nothing.
@@ -60,7 +61,7 @@ use asterism_server::state::ServerCtx;
 /// A 1×1 RGBA PNG, 67 bytes. Nothing on this route decodes pixels —
 /// the dimensions the parser reads come from the IHDR header, the
 /// `tEXt` scan finds no chunks, and the thumbnail / cover jobs do not
-/// run in `ReadOnly` — so a minimal header-valid file is the whole
+/// run with no worker — so a minimal header-valid file is the whole
 /// fixture.
 const PNG_1X1: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
@@ -126,7 +127,7 @@ async fn boot(tmp: &std::path::Path) -> (CoreCtx, u16) {
     let core = init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::ReadOnly,
+        JobWorker::None,
         Some(&tmp.join("tantivy")),
     )
     .await
@@ -329,7 +330,7 @@ async fn export_original(
         .expect("create dispatch");
 
     // `create` enqueued a `DispatchRun` job that nothing will ever
-    // pick up (no worker in `ReadOnly`); this environment is the only
+    // pick up (this core spawned none); this environment is the only
     // thing that moves the dispatch.
     let (env, reenqueue) = dispatch_env(db_path, core).await;
     let ticks = drive_to_terminal(&env, core, &dispatch.id).await;

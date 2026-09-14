@@ -13,6 +13,7 @@
 - [asterism-contract::digest](asterism_contract/digest.md): The notation a digest is written in — the `sha256:` tag, and the
 - [asterism-contract::dto](asterism_contract/dto.md): Response DTOs — outputs shared between the application services, the
 - [asterism-contract::forge](asterism_contract/forge.md): The forge's wire shapes — a line, what is on it, and what a caller
+- [asterism-contract::import_report](asterism_contract/import_report.md): What an importer run reports back to whatever started it.
 - [asterism-contract::query](asterism_contract/query.md): Query DTOs — inputs for read-side operations.
 - [asterism-contract::query_group](asterism_contract/query_group.md): Query Group `query_json` — the persisted rule of a query-backed Group.
 - [asterism-contract::sidecar](asterism_contract/sidecar.md): The shape of an exported artefact's `<file>.meta.json` sidecar.
@@ -33,6 +34,7 @@
 - [asterism-core::application::forge::line_service](asterism_core/application__forge__line_service.md): Line use cases — opening one, reading what is on it, and moving its
 - [asterism-core::application::forge::pursuit_service](asterism_core/application__forge__pursuit_service.md): Work use cases — opening a line of work, writing rounds, looking at
 - [asterism-core::application::forge::thread_service](asterism_core/application__forge__thread_service.md): Saying something about work, and correcting it.
+- [asterism-core::application::import_run_service](asterism_core/application__import_run_service.md): Defining an import, and running one without anybody typing it.
 - [asterism-core::application::import_state_service](asterism_core/application__import_state_service.md): Reading and writing where an importer got to.
 - [asterism-core::application::mapping](asterism_core/application__mapping.md): Conversion between domain types and contract DTOs.
 - [asterism-core::application::material_layer_service](asterism_core/application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
@@ -109,6 +111,7 @@
 - [asterism-core::domain::forge::threads](asterism_core/domain__forge__threads.md): Keeping what was said about work.
 - [asterism-core::domain::generator_params](asterism_core/domain__generator_params.md): `generator_params` — what an extraction concluded about the
 - [asterism-core::domain::group](asterism_core/domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
+- [asterism-core::domain::import_definition](asterism_core/domain__import_definition.md): An import somebody can run without typing it, and the record of
 - [asterism-core::domain::import_state](asterism_core/domain__import_state.md): Where an importer got to, kept so the next run does not start over.
 - [asterism-core::domain::instance](asterism_core/domain__instance.md): Instance identity — the referent behind
 - [asterism-core::domain::job](asterism_core/domain__job.md): `Job` — lifecycle model for asynchronous work.
@@ -274,6 +277,7 @@
 - [asterism-infra::forge::rows](asterism_infra/forge__rows.md): The shapes a store keeps, and the two translations either side of
 - [asterism-infra::generator_params](asterism_infra/generator_params.md): Reading generator parameters out of stored metadata rows — the
 - [asterism-infra::heads](asterism_infra/heads.md): Trained-head storage (#132 phase 2): the artifact a training run
+- [asterism-infra::import_launcher](asterism_infra/import_launcher.md): Starting `asterism-import`, and the two things that is really about.
 - [asterism-infra::jobs](asterism_infra/jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
 - [asterism-infra::jobs::chapter_ffmetadata](asterism_infra/jobs__chapter_ffmetadata.md): Reading a container's declared chapter list through an external
 - [asterism-infra::jobs::handlers](asterism_infra/jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.
@@ -313,6 +317,7 @@
 - [asterism-infra::sqlite::repo::forge](asterism_infra/sqlite__repo__forge.md): SQLite adapter for the forge's ports.
 - [asterism-infra::sqlite::repo::forge_boundary](asterism_infra/sqlite__repo__forge_boundary.md): What the forge asks of everything outside it, answered by SQLite.
 - [asterism-infra::sqlite::repo::group](asterism_infra/sqlite__repo__group.md): SQLite adapter for `GroupRepository`.
+- [asterism-infra::sqlite::repo::import_definition](asterism_infra/sqlite__repo__import_definition.md): SQLite adapter for the `ImportDefinitionRepository` port.
 - [asterism-infra::sqlite::repo::import_state](asterism_infra/sqlite__repo__import_state.md): SQLite adapter for the `ImportStateRepository` port.
 - [asterism-infra::sqlite::repo::instance](asterism_infra/sqlite__repo__instance.md): SQLite adapter for the `InstanceRepository` port.
 - [asterism-infra::sqlite::repo::material_layer](asterism_infra/sqlite__repo__material_layer.md): SQLite adapter for the `MaterialLayerRepository` port.
@@ -348,12 +353,12 @@
 
 - [asterism-server overview](asterism_server/index.md): # asterism-server — library surface.
 - [asterism-server::attribution](asterism_server/attribution.md): Turning what a remote caller said into the attribution a write
-- [asterism-server::core_init](asterism_server/core_init.md): Shared backend initialisation for both the Tauri UI and the standalone
+- [asterism-server::core_init](asterism_server/core_init.md): Backend initialisation — the whole service graph, assembled once.
 - [asterism-server::http](asterism_server/http.md): HTTP transport — axum router.
 - [asterism-server::mcp](asterism_server/mcp.md): MCP transport — the third adapter over the same application services.
 - [asterism-server::mcp_proxy](asterism_server/mcp_proxy.md): MCP stdio proxy — the lifecycle-aware entry point MCP clients spawn.
 - [asterism-server::release_dirs](asterism_server/release_dirs.md): The two registered directories the release surface uses, resolved.
-- [asterism-server::state](asterism_server/state.md): Backend context for the standalone server. Thin wrapper over the
+- [asterism-server::state](asterism_server/state.md): Backend context for the HTTP surface. A thin selection over the
 - [asterism-server::transfer_profiles](asterism_server/transfer_profiles.md): The destination profiles a send can be aimed with, listed from disk.
 
 ## asterism-teams-client 0.1.1

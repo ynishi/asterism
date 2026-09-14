@@ -35,7 +35,7 @@ use std::sync::Arc;
 use asterism_contract::command::{AddAssetCommand, AttachTagCommand, RegisterPersonaCommand};
 use asterism_contract::query::{ListAssetsQuery, RandomAssetsQuery};
 use asterism_contract::sort::{SortOrder, SortSpec, SortTarget};
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the draw, not about
@@ -139,7 +139,7 @@ async fn random_draw_is_capped_filtered_and_refuses_an_axis() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

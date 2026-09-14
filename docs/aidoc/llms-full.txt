@@ -93,6 +93,7 @@ dependency cycle.
 - [`digest`](digest.md): The notation a digest is written in — the `sha256:` tag, and the
 - [`dto`](dto.md): Response DTOs — outputs shared between the application services, the
 - [`forge`](forge.md): The forge's wire shapes — a line, what is on it, and what a caller
+- [`import_report`](import_report.md): What an importer run reports back to whatever started it.
 - [`query`](query.md): Query DTOs — inputs for read-side operations.
 - [`query_group`](query_group.md): Query Group `query_json` — the persisted rule of a query-backed Group.
 - [`sidecar`](sidecar.md): The shape of an exported artefact's `<file>.meta.json` sidecar.
@@ -138,6 +139,7 @@ convert them into domain types and surface any validation failures as
 - `DeclareAssetMetaCommand` — Records — or removes — one AlbumMeta statement on an asset.
 - `DeclareProvenanceCommand` — Declares (or repairs) the origin of an asset that is already in
 - `DeclareSourceTypeCommand` — Declares — or retracts — the asset's digital source type by hand.
+- `DefineImportCommand` — Stores an import that can be run without anybody typing it
 - `DeleteAssetCommentCommand` — Deletes an `AssetComment` by id. Idempotent.
 - `DeleteChapterMarkCommand` — Removes one section from a structure band the person owns.
 - `DeleteDirCommand` — Deletes an **empty** Dir. Rejected while the dir still contains
@@ -207,6 +209,7 @@ convert them into domain types and surface any validation failures as
 - `RestoreAssetCommand` — Returns a trashed asset to the live set. Idempotent.
 - `RestoreGroupCommand` — Returns a trashed Group to the sidebar, membership and drag order
 - `RestorePersonaCommand` — Returns a trashed persona and the assets that went to the trash with
+- `RunImportDefinitionCommand` — Runs a stored import now (`POST /asterism/import/definitions/run`).
 - `SetDefaultMaterialLayerCommand` — Chooses the band a surface shows, and the one a new mark lands in.
 - `SetPersonaProfileCommand` — Upserts the identity signal for a persona (avatar / bio /
 - `SetPersonaThemeCommand` — Sets (or clears) the wallpaper for a persona.
@@ -325,6 +328,8 @@ the domain types.
 - `GroupLinkDto` — One Group-in-Group connection (Are.na channel-in-channel). The
 - `GroupSummaryDto` — A group paired with the number of distinct assets attached, used
 - `HeadStatusDto` — Which trained head scores tags, and what stands between the
+- `ImportDefinitionDto` — A stored import, as it is read back.
+- `ImportRunDto` — What one run of an import did.
 - `ImportStateDto` — An importer's stored resumption point.
 - `JobDto` — Job status payload.
 - `JobKindSnapshotDto` — Per-kind slice of the background-jobs table (wire form of the
@@ -439,6 +444,29 @@ showing how a line got where it is.
 - `SetForgeLineStrategyCommand` — Points a line at a different rule.
 - `TransferProfileDto` — One destination profile, as the transport's own parser reads it.
 - `TransferProfileListDto` — Every destination profile this machine holds, and where they live.
+
+
+<!-- asterism_contract/import_report.md -->
+# asterism-contract::import_report
+
+What an importer run reports back to whatever started it.
+
+A machine-readable summary, written to a path the caller names, and
+the reason it exists rather than being scraped off stderr: the
+progress lines are for a person and are free to change, while this
+is a contract between two binaries. A supervisor parsing "done —
+ok=3 err=0" would break the day somebody improved the wording, and
+would break silently, reporting zero.
+
+It carries the **class** of whatever ended the run and not only its
+message. The class is what a caller acts on — three slices of this
+port went into drawing it — and it is the part a scheduler needs in
+order to know whether running again is worth anything.
+
+## Types
+
+- `ImportReport` — One run's outcome, as the importer saw it.
+- `ReportedFailure` — The failure that ended a run, flattened for the wire.
 
 
 <!-- asterism_contract/query.md -->
@@ -705,6 +733,7 @@ the private design notes.
 - [`application::forge::line_service`](application__forge__line_service.md): Line use cases — opening one, reading what is on it, and moving its
 - [`application::forge::pursuit_service`](application__forge__pursuit_service.md): Work use cases — opening a line of work, writing rounds, looking at
 - [`application::forge::thread_service`](application__forge__thread_service.md): Saying something about work, and correcting it.
+- [`application::import_run_service`](application__import_run_service.md): Defining an import, and running one without anybody typing it.
 - [`application::import_state_service`](application__import_state_service.md): Reading and writing where an importer got to.
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
@@ -781,6 +810,7 @@ the private design notes.
 - [`domain::forge::threads`](domain__forge__threads.md): Keeping what was said about work.
 - [`domain::generator_params`](domain__generator_params.md): `generator_params` — what an extraction concluded about the
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
+- [`domain::import_definition`](domain__import_definition.md): An import somebody can run without typing it, and the record of
 - [`domain::import_state`](domain__import_state.md): Where an importer got to, kept so the next run does not start over.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
 - [`domain::job`](domain__job.md): `Job` — lifecycle model for asynchronous work.
@@ -1321,6 +1351,90 @@ came out.
 
 - `Anchored` — What a caller says a thread hangs off, in ids.
 - `ThreadService` — Conversation use-case service.
+
+
+<!-- asterism_core/application__import_run_service.md -->
+# asterism-core::application::import_run_service
+
+Defining an import, and running one without anybody typing it.
+
+The half of the transport decision #295 left open. Adapters run
+themselves and push over HTTP, which settles how an import *talks*
+to Asterism and says nothing about what starts it. This starts it.
+
+## What is here and what is deliberately not
+
+Running one on demand. **No schedule**: a timer belongs on top of
+this and calls it, and every hard question — where the binary is,
+how a credential reaches it, what happens when a run is already
+going, what is left behind when nothing worked — is answerable
+without a clock. The timer is also where the wait a rate limit
+states — carried here as `ImportRun::retry_after_secs` — finally
+gets a consumer; this layer records it and has nothing to do with
+it.
+
+## Starting is not waiting
+
+[`ImportRunService::run`] answers as soon as the importer is on its
+way, with the run it just opened, and the outcome arrives on that
+row. The first shape held the answer until the child exited, which
+read well — the answer *is* the outcome — and was wrong twice over:
+an import of any size outlives an HTTP client's patience, and the
+caller this exists for is a scheduler, which wants to start things
+and not to sit with them.
+
+## The lock is this process's, not the table's
+
+Two runs of one definition would each take up from a position the
+other is about to move, so one has to be refused. The question is
+"is a child of **mine** still going", and that is about one process:
+it is true only while this process lives, and a process that died
+took its children with it.
+
+The first shape asked the table instead — a run row said `running`
+and a second run read it — which made the row a lock as well as a
+record. A crash then left a row nothing would ever close and a
+definition nothing could ever start, recoverable only by editing
+SQLite. It also raced: two callers could both read "nothing running"
+before either wrote.
+
+So the answer lives in a set held here, and
+[`ImportDefinitionRepository::abandon_running`] closes at startup
+whatever a previous process left open.
+
+**A process-local answer is only sound while one core is open over
+a given database, and that is now enforced rather than assumed.**
+The Tantivy index is opened for writing unconditionally (#300) and
+that lock is exclusive, so a second core over the same index does
+not start. The index and the database are resolved together from the
+active profile, so for the shipped app this is one core per machine;
+a test handing its own tempdir to `init_core_with` gets a pair of
+its own and a set of its own, which is the same rule applied and not
+an exception to it.
+
+A review round was spent asking which process should host this
+supervisor; the answer is that there is one, and nothing here is
+conditioned on a mode. That question existed because `CoreMode` did.
+
+## Spawning is not this layer's
+
+[`ImportLauncher`] is the port, and the reason it exists rather than
+a `Command` a few lines down is the reason every port here exists:
+this crate does not touch the machine. It also keeps the credential
+out of this layer entirely — the launcher is handed a variable
+*name* and resolves it while building the child's environment, so
+the value never enters a type anything here holds, logs, or could
+accidentally persist.
+
+## Types
+
+- `ImportRunService` — Stored imports, and running them.
+- `LaunchOutcome` — What starting one produced.
+- `LaunchSpec` — What the launcher is asked to start.
+
+## Traits
+
+- `ImportLauncher` — Starts an importer and waits for it.
 
 
 <!-- asterism_core/application__import_state_service.md -->
@@ -6231,6 +6345,53 @@ use the `Group` label — only the DB layer sees `bucket`.
 - `GroupSummary` — A group paired with the number of assets currently linked to it,
 
 
+<!-- asterism_core/domain__import_definition.md -->
+# asterism-core::domain::import_definition
+
+An import somebody can run without typing it, and the record of
+having run one.
+
+#295 gave an import a memory and #297 gave it a source that can
+refuse; neither made anything *start* one. A definition is what a
+person types once so that nothing has to type it again, and a run is
+what happened the times it went.
+
+## A definition is a stored command line
+
+Which is exactly where a credential wants to go, and the one thing
+this must be built not to hold. [`ImportDefinition::secret_ref`]
+carries the **name** of an environment variable and never its value,
+following `auth.secret_ref` on the outbound side for the reason
+stated there: a value resolved when the importer starts is in
+neither this row nor anything written down afterwards.
+
+The arguments beside it are stored verbatim and are readable by
+anything that can read the definition. That is a real trade and it
+is the operator's to make knowingly, so it is said on the field
+rather than left to be discovered.
+
+## A run is written whatever happened
+
+Including for one whose importer never started. A definition that
+looks as though it was never run, when somebody asked for it and
+something went wrong, is the failure mode a record of runs exists to
+prevent — and "the binary is not there" is the most likely first
+thing to go wrong on a machine nobody has configured yet.
+
+**And a run is only ever a record.** It is not also the lock that
+stops a second run starting: that question is "is a child of mine
+still going", which is about one process and dies with it, and
+answering it from a table made a crash wedge a definition for good.
+[`RunOutcome::Abandoned`] is what a row inherits when the process
+that wrote it did not come back.
+
+## Types
+
+- `ImportDefinition` — An import that can be run on demand.
+- `ImportRun` — What happened one time an import was run.
+- `RunOutcome` — How a run ended.
+
+
 <!-- asterism_core/domain__import_state.md -->
 # asterism-core::domain::import_state
 
@@ -7272,6 +7433,7 @@ projection instead of full `Asset` entities.
 - `DispatchRepository` — Persistence port for [`DispatchJob`].
 - `EdgeRepository` — Persistence port for [`ConstellationEdge`].
 - `GroupRepository` — Persistence port for [`Group`] and its many-to-many link with
+- `ImportDefinitionRepository` — Persistence port for stored imports and the record of running them
 - `ImportStateRepository` — Persistence port for an importer's resumption point
 - `InstanceRepository` — Persistence port for the instance identity record (`instance`
 - `JobQueue` — Port for enqueueing background jobs. The adapter wraps `apalis`
@@ -9856,8 +10018,9 @@ agent-harvest envelopes, arbitrary SQLite queries, persona-journal
 entries, tapes, image / video / audio files, and written documents.
 Every subcommand
 runs the same importer-SDK pipeline: walk the source, parse it into
-typed footprints, and push them in batches to a running
-`asterism-server` over HTTP (`--server`, default local). All imports
+typed footprints, and push them in batches over HTTP to whatever is
+serving Asterism's local API — `asterism-ui`, windowed or
+`--headless` (`--server`, default local). All imports
 are persona-scoped (`--persona-id`) and support `--dry-run`, which
 validates and reports without writing anything.
 
@@ -11955,6 +12118,7 @@ this crate.
 - [`forge::rows`](forge__rows.md): The shapes a store keeps, and the two translations either side of
 - [`generator_params`](generator_params.md): Reading generator parameters out of stored metadata rows — the
 - [`heads`](heads.md): Trained-head storage (#132 phase 2): the artifact a training run
+- [`import_launcher`](import_launcher.md): Starting `asterism-import`, and the two things that is really about.
 - [`jobs`](jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
 - [`jobs::chapter_ffmetadata`](jobs__chapter_ffmetadata.md): Reading a container's declared chapter list through an external
 - [`jobs::handlers`](jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.
@@ -11994,6 +12158,7 @@ this crate.
 - [`sqlite::repo::forge`](sqlite__repo__forge.md): SQLite adapter for the forge's ports.
 - [`sqlite::repo::forge_boundary`](sqlite__repo__forge_boundary.md): What the forge asks of everything outside it, answered by SQLite.
 - [`sqlite::repo::group`](sqlite__repo__group.md): SQLite adapter for `GroupRepository`.
+- [`sqlite::repo::import_definition`](sqlite__repo__import_definition.md): SQLite adapter for the `ImportDefinitionRepository` port.
 - [`sqlite::repo::import_state`](sqlite__repo__import_state.md): SQLite adapter for the `ImportStateRepository` port.
 - [`sqlite::repo::instance`](sqlite__repo__instance.md): SQLite adapter for the `InstanceRepository` port.
 - [`sqlite::repo::material_layer`](sqlite__repo__material_layer.md): SQLite adapter for the `MaterialLayerRepository` port.
@@ -12376,6 +12541,113 @@ pointer.
 - `CURRENT_FILE` — File name of the promotion pointer inside the heads root.
 - `HEAD_ARTIFACT_SCHEMA` — The artifact schema this module writes and reads.
 - `HEAD_FILE` — File name of the artifact inside a head's directory.
+
+
+<!-- asterism_infra/import_launcher.md -->
+# asterism-infra::import_launcher
+
+Starting `asterism-import`, and the two things that is really about.
+
+The [`ImportLauncher`] port's implementation, and the only place an
+importer is spawned. Everything above it is arranged so that this
+file is the only one on the import path that holds a credential or
+knows a process exists — the job handlers spawn `ffmpeg` on their
+own account, which is a different path with the same rule.
+
+# Where the binary is
+
+Three rungs: an explicit `$ASTERISM_IMPORT`, then a sibling of the
+running executable, then `PATH`. The first three of the ffmpeg
+sidecar's four — it also probes fixed install prefixes, which is
+right for a thing people install with a package manager and wrong
+for one shipped beside the server. They differ at the first rung
+too: ffmpeg's override is terminal, and this one falls through, so
+an override pointing at nothing is still a run that finds the
+binary.
+
+The middle rung is the one worth naming, because it is the rung a
+development build lands on: `cargo build` puts `asterism-ui` and
+`asterism-import` in one target directory, and neither is on
+anybody's `PATH`. Nothing bundles the importer today —
+`tauri.bundle.conf.json`'s `externalBin` lists the ffmpeg sidecar
+and nothing else — so a shipped app reaches an importer by the
+first rung or the third. A failure names every rung it tried,
+because "not found" without the list is a message an operator
+cannot act on.
+
+# Where the credential is, and where it is not
+
+The definition names an environment variable; this reads it and puts
+the value into the **child's environment**, under a fixed name the
+importer knows. It is therefore in: this process's environment, the
+child's environment. It is not in: the definition, the run record,
+the child's argument vector, or any message this file produces.
+
+That last exclusion is why this diverges from the outbound side's
+`{{secret}}` template, which renders a credential into the thing it
+is building. There, the thing is an HTTP header inside one process.
+Here it would be an argument vector, and an argument vector is
+readable by every other process on the machine — `ps` is not a
+privilege. So the value goes through the environment instead, and
+what `ps` shows is the *name* of a header.
+
+Loading a `.env` is the binary's job, done once at startup, for the
+reason the outbound side gives: an adapter that went looking for
+dotenv files itself would make "which file did this credential come
+from" invisible to the definition that named it.
+
+# Where the records go, and how the child is told
+
+`--server`, resolved here from the active profile. It is the same
+question the serving process asks — `asterism-ui` binds
+`active_profile().default_http_port()` — so two processes reading
+one profile meet on one port without either being handed the
+other's address.
+
+It is passed only when the definition did not say. A server
+started on `--port` is the case a profile cannot answer, and a
+definition's own `--server` is what answers it — the same argument
+a person running the importer by hand types.
+
+Omitted rather than overridden, because the importer refuses a
+repeated `--server` outright ("cannot be used multiple times")
+rather than taking the last one. That is clap's answer and not a
+choice made here, so passing both would turn every definition that
+names its own server into a run that exits 2 before it starts. The
+credential's flag goes the other way — appended after the
+definition's arguments, where a second occurrence is *also* refused,
+which is exactly the point: a definition cannot quietly substitute
+its own.
+
+Two earlier shapes failed here, in opposite directions, and both are
+worth keeping because either is easy to rebuild.
+
+The first had this file *given* an address, which meant something
+had to hand it one after binding a listener — an
+`Arc<OnceLock<String>>` filled by whoever served. Nothing filled it.
+Every shipped binary called `axum::serve` directly, the cell stayed
+empty, and every run in the product would have answered "this server
+has not finished starting" forever; the end-to-end test passed
+because the *test* filled it.
+
+The second passed nothing and claimed the child worked the address
+out for itself from `$ASTERISM_PROFILE`. It does not.
+`asterism-import` carries a literal `http://127.0.0.1:8989` default
+and does not depend on this crate, so under any profile but dogfood
+the child posted at a door with nothing behind it — silently, since
+a refused push is a failed run and not a wrong one.
+
+Both are one mistake: an address known in one process and needed in
+another, carried by a step somebody has to remember. Asking the
+profile at both ends carries nothing.
+
+## Types
+
+- `SubprocessImportLauncher` — Spawns `asterism-import` and waits for it.
+
+## Constants
+
+- `CHILD_SECRET_VAR` — The variable the child reads its credential out of.
 
 
 <!-- asterism_infra/jobs.md -->
@@ -14377,6 +14649,34 @@ Every SQL string in this module hard-codes `bucket` /
 - `SqliteGroupRepository` — SQLite adapter (writer isle).
 
 
+<!-- asterism_infra/sqlite__repo__import_definition.md -->
+# asterism-infra::sqlite::repo::import_definition
+
+SQLite adapter for the `ImportDefinitionRepository` port.
+
+Two tables behind one port, for the reason the port states: a
+definition and its runs are read and written together, so splitting
+them would make one act reach through two ports.
+
+It does not answer whether a run is going. That question belongs to
+the process holding the children — see the service — and the only
+thing left of it here is [`abandon_running`], a sweep over rows a
+previous process left open.
+
+[`abandon_running`]: asterism_core::domain::repository::ImportDefinitionRepository::abandon_running
+
+`args_json` holds the argument vector as a JSON array. A column per
+argument is not a shape a command line has, and a single
+space-joined string would have to be re-split by something that
+guessed at quoting — the one part of a command line it is genuinely
+easy to get wrong, and getting it wrong here means an importer run
+with arguments nobody wrote.
+
+## Types
+
+- `SqliteImportDefinitionRepository` — SQLite adapter for `ImportDefinitionRepository` (uses a writer isle).
+
+
 <!-- asterism_infra/sqlite__repo__import_state.md -->
 # asterism-infra::sqlite::repo::import_state
 
@@ -14948,12 +15248,12 @@ library.
 ## Modules
 
 - [`attribution`](attribution.md): Turning what a remote caller said into the attribution a write
-- [`core_init`](core_init.md): Shared backend initialisation for both the Tauri UI and the standalone
+- [`core_init`](core_init.md): Backend initialisation — the whole service graph, assembled once.
 - [`http`](http.md): HTTP transport — axum router.
 - [`mcp`](mcp.md): MCP transport — the third adapter over the same application services.
 - [`mcp_proxy`](mcp_proxy.md): MCP stdio proxy — the lifecycle-aware entry point MCP clients spawn.
 - [`release_dirs`](release_dirs.md): The two registered directories the release surface uses, resolved.
-- [`state`](state.md): Backend context for the standalone server. Thin wrapper over the
+- [`state`](state.md): Backend context for the HTTP surface. A thin selection over the
 - [`transfer_profiles`](transfer_profiles.md): The destination profiles a send can be aimed with, listed from disk.
 
 
@@ -14986,15 +15286,14 @@ surface or from authentication, never from the claim).
 <!-- asterism_server/core_init.md -->
 # asterism-server::core_init
 
-Shared backend initialisation for both the Tauri UI and the standalone
-server.
+Backend initialisation — the whole service graph, assembled once.
 
-The two processes assemble the exact same service graph. The only
-differences are (1) the progress emitter (`TauriEmitter` in the UI, the
-stderr [`LogEmitter`] in the server), (2) whether the Tantivy index is
-opened read-write or read-only, and (3) whether a job-worker `Monitor`
-is spawned. Those three axes are captured by [`CoreMode`]; everything
-else lives here so the ~160 lines of DI wiring are written once.
+Its caller in the product is `asterism-ui`; its other callers are
+the end-to-end tests, which want the same graph over a tempdir. Two
+things differ between them: the progress emitter (`TauriEmitter` in
+the UI, the stderr [`LogEmitter`] elsewhere) and whether a job-worker
+`Monitor` is spawned, which is [`JobWorker`]. Everything else lives
+here so the ~160 lines of DI wiring are written once.
 
 Callers wrap the returned [`CoreCtx`] into their own context struct
 (`ServerCtx` / `AppState`) and add nothing to it. A service assembled
@@ -15010,8 +15309,8 @@ four Tauri commands and no HTTP route.
 ## Types
 
 - `CoreCtx` — Shared service graph assembled by [`init_core`].
-- `CoreMode` — Selects how the shared core is opened for the calling process.
-- `LogEmitter` — Default [`ProgressEmitter`] for processes without a UI event bus (the
+- `JobWorker` — Whether this process runs the job worker.
+- `LogEmitter` — Default [`ProgressEmitter`] for a core with no UI event bus behind
 
 
 <!-- asterism_server/http.md -->
@@ -15270,9 +15569,15 @@ itself is a value that cannot be pointed anywhere.
 <!-- asterism_server/state.md -->
 # asterism-server::state
 
-Backend context for the standalone server. Thin wrapper over the
-shared [`crate::core_init::init_core`] (`ReadOnly` mode): assembles a
-[`ServerCtx`] from the returned `CoreCtx`.
+Backend context for the HTTP surface. A thin selection over the
+shared [`crate::core_init::init_core`]: assembles a [`ServerCtx`]
+from the returned `CoreCtx`.
+
+Its callers are `asterism-ui`, which serves this router in its own
+process, and the end-to-end tests, which build one over a tempdir
+core. There was a third — the `asterism-server serve` subcommand —
+and #300 removed it along with the `init` helper that existed only
+for it.
 
 The server shares the SQLite file with the Tauri UI process under
 WAL; the `busy_timeout = 5000` pragma is applied by `sqlite::open`.
@@ -15282,7 +15587,6 @@ bus in this process.
 ## Functions
 
 - `default_db_path` — Default DB path: active local data profile (override via
-- `init` — Initialises the backend in read-only mode and returns the shared
 
 ## Types
 
@@ -16414,7 +16718,7 @@ dependency — serving exactly one route for exactly one request.
 Tauri's own `State` container gives us `Arc`-style sharing, so this
 struct just holds `Arc<Service>` fields and does not wrap again. The
 heavy lifting is delegated to the shared `asterism_server::core_init`
-(`Full` mode: read-write tantivy index + job worker); this module only
+(the writer lock and the job worker); this module only
 adapts the returned `CoreCtx` into `AppState` and supplies the Tauri
 progress emitter.
 

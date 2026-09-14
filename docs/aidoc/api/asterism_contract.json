@@ -138,6 +138,11 @@
       "docs": "Declares — or retracts — the asset's digital source type by hand.\n\nThe hand-assertion half of the disclosure: for an artefact whose\ncontainer declares nothing, the signer states what it is, and the\nstatement is signed into the exported disclosure verbatim — their\nclaim, under their certificate. It also outranks the container when\nboth speak: correcting a container that is wrong about one's own\nwork is the signer's to do and theirs to answer for.\n\nSingle-slot like [`DeclareAssetMetaCommand`]: a second declaration\nis a correction, not a second fact."
     },
     {
+      "path": "asterism_contract::command::DefineImportCommand",
+      "kind": "struct",
+      "docs": "Stores an import that can be run without anybody typing it\n(`POST /asterism/import/definitions`).\n\nThe arguments are kept verbatim and handed to the importer as it\nreceives them, so this is a stored command line — which is exactly\nwhere a credential wants to go and must not. See\n[`secret_ref`](Self::secret_ref)."
+    },
+    {
       "path": "asterism_contract::command::DeleteAssetCommentCommand",
       "kind": "struct",
       "docs": "Deletes an `AssetComment` by id. Idempotent."
@@ -483,6 +488,11 @@
       "docs": "Returns a trashed persona and the assets that went to the trash with\nit. Assets trashed individually stay trashed."
     },
     {
+      "path": "asterism_contract::command::RunImportDefinitionCommand",
+      "kind": "struct",
+      "docs": "Runs a stored import now (`POST /asterism/import/definitions/run`).\n\nAnswers with the run as it was opened, and is refused while a run of\nthe same definition is still going. `ImportRunService::run` in\n`asterism-core` is where that rule lives and where its reason is\nwritten; this crate cannot link to it, and restating the reason here\nis how the two drift apart."
+    },
+    {
       "path": "asterism_contract::command::SetDefaultMaterialLayerCommand",
       "kind": "struct",
       "docs": "Chooses the band a surface shows, and the one a new mark lands in.\n\nOpen to every origin, unlike the write verbs: choosing to read the\nfile's own chapter list rather than one's own is not an edit to\neither. The refusal that does apply is the model's — an annotation\nband that is not the user's cannot be the default, because a new note\nwould land in a band nobody may write to.\n\nThe call changes **two** rows (the flag moves off whichever band held\nit), so a caller that displays bands re-reads the asset's list rather\nthan patching one entry."
@@ -736,6 +746,16 @@
       "path": "asterism_contract::dto::HeadStatusDto",
       "kind": "struct",
       "docs": "Which trained head scores tags, and what stands between the\nrulings on disk and the next one (#130, #132).\n\nDeliberately not part of [`VisualModelStatusDto`]: that answers\nwhich encoder this process bound — app infrastructure, bundled,\nnothing to manage — and this answers what a person manages. The\ntwo are read together and stay two reads."
+    },
+    {
+      "path": "asterism_contract::dto::ImportDefinitionDto",
+      "kind": "struct",
+      "docs": "A stored import, as it is read back.\n\nCarries the credential's *variable name* and never its value, which\nis the whole of what `secret_ref` is for."
+    },
+    {
+      "path": "asterism_contract::dto::ImportRunDto",
+      "kind": "struct",
+      "docs": "What one run of an import did.\n\nWritten whatever happened, including for a run whose child never\nstarted: a definition that looks as though it was never run is the\none thing a record of runs must not produce."
     },
     {
       "path": "asterism_contract::dto::ImportStateDto",
@@ -1141,6 +1161,21 @@
       "path": "asterism_contract::forge::TransferProfileListDto",
       "kind": "struct",
       "docs": "Every destination profile this machine holds, and where they live.\n\nThe directory travels with the list because it is the answer to the\nquestion an empty list raises. It is resolved from a registered\nsetting against the profile home, which is a thing no frontend can\nwork out for itself."
+    },
+    {
+      "path": "asterism_contract::import_report",
+      "kind": "module",
+      "docs": "What an importer run reports back to whatever started it.\n\nA machine-readable summary, written to a path the caller names, and\nthe reason it exists rather than being scraped off stderr: the\nprogress lines are for a person and are free to change, while this\nis a contract between two binaries. A supervisor parsing \"done —\nok=3 err=0\" would break the day somebody improved the wording, and\nwould break silently, reporting zero.\n\nIt carries the **class** of whatever ended the run and not only its\nmessage. The class is what a caller acts on — three slices of this\nport went into drawing it — and it is the part a scheduler needs in\norder to know whether running again is worth anything."
+    },
+    {
+      "path": "asterism_contract::import_report::ImportReport",
+      "kind": "struct",
+      "docs": "One run's outcome, as the importer saw it."
+    },
+    {
+      "path": "asterism_contract::import_report::ReportedFailure",
+      "kind": "struct",
+      "docs": "The failure that ended a run, flattened for the wire.\n\nNot `SourceError` itself: that type is the importer SDK's and the\nserver does not depend on it, which is the point of this crate\nsitting between them."
     },
     {
       "path": "asterism_contract::query",

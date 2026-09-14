@@ -50,6 +50,7 @@ dependency cycle.
 - [`digest`](digest.md): The notation a digest is written in — the `sha256:` tag, and the
 - [`dto`](dto.md): Response DTOs — outputs shared between the application services, the
 - [`forge`](forge.md): The forge's wire shapes — a line, what is on it, and what a caller
+- [`import_report`](import_report.md): What an importer run reports back to whatever started it.
 - [`query`](query.md): Query DTOs — inputs for read-side operations.
 - [`query_group`](query_group.md): Query Group `query_json` — the persisted rule of a query-backed Group.
 - [`sidecar`](sidecar.md): The shape of an exported artefact's `<file>.meta.json` sidecar.

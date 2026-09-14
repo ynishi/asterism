@@ -1,14 +1,13 @@
 # asterism-server::core_init
 
-Shared backend initialisation for both the Tauri UI and the standalone
-server.
+Backend initialisation — the whole service graph, assembled once.
 
-The two processes assemble the exact same service graph. The only
-differences are (1) the progress emitter (`TauriEmitter` in the UI, the
-stderr [`LogEmitter`] in the server), (2) whether the Tantivy index is
-opened read-write or read-only, and (3) whether a job-worker `Monitor`
-is spawned. Those three axes are captured by [`CoreMode`]; everything
-else lives here so the ~160 lines of DI wiring are written once.
+Its caller in the product is `asterism-ui`; its other callers are
+the end-to-end tests, which want the same graph over a tempdir. Two
+things differ between them: the progress emitter (`TauriEmitter` in
+the UI, the stderr [`LogEmitter`] elsewhere) and whether a job-worker
+`Monitor` is spawned, which is [`JobWorker`]. Everything else lives
+here so the ~160 lines of DI wiring are written once.
 
 Callers wrap the returned [`CoreCtx`] into their own context struct
 (`ServerCtx` / `AppState`) and add nothing to it. A service assembled
@@ -24,6 +23,6 @@ four Tauri commands and no HTTP route.
 ## Types
 
 - `CoreCtx` — Shared service graph assembled by [`init_core`].
-- `CoreMode` — Selects how the shared core is opened for the calling process.
-- `LogEmitter` — Default [`ProgressEmitter`] for processes without a UI event bus (the
+- `JobWorker` — Whether this process runs the job worker.
+- `LogEmitter` — Default [`ProgressEmitter`] for a core with no UI event bus behind
 

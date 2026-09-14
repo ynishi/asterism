@@ -2591,3 +2591,73 @@ pub struct ImportStateDto {
     /// When this point was last written, RFC 3339.
     pub updated_at: String,
 }
+
+/// A stored import, as it is read back.
+///
+/// Carries the credential's *variable name* and never its value, which
+/// is the whole of what `secret_ref` is for.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportDefinitionDto {
+    /// Stable id.
+    pub id: String,
+    /// Persona the records land in.
+    pub persona_id: String,
+    /// What this import is called.
+    pub name: String,
+    /// Importer subcommand.
+    pub subcommand: String,
+    /// Arguments as the importer receives them.
+    pub args: Vec<String>,
+    /// Name of the environment variable holding the credential, if any.
+    pub secret_ref: Option<String>,
+    /// Header the credential is sent as, when there is one.
+    pub secret_header: Option<String>,
+}
+
+/// What one run of an import did.
+///
+/// Written whatever happened, including for a run whose child never
+/// started: a definition that looks as though it was never run is the
+/// one thing a record of runs must not produce.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportRunDto {
+    /// Stable id.
+    pub id: String,
+    /// Definition this was a run of.
+    pub definition_id: String,
+    /// When it started, RFC 3339.
+    pub started_at: String,
+    /// When it ended, RFC 3339. Absent while it is still going.
+    pub ended_at: Option<String>,
+    /// How it ended: `running` while it is going, then `ok`, `failed`,
+    /// `unstarted` for one whose importer could not be launched at all,
+    /// or `abandoned` for one the process that started it did not
+    /// outlive.
+    pub outcome: String,
+    /// Records the importer landed.
+    pub imported: u64,
+    /// Records that did not land.
+    pub failed: u64,
+    /// What ended the run early. The tokens are
+    /// [`ReportedFailure::class`](crate::import_report::ReportedFailure)'s.
+    ///
+    /// Usually the importer's own classification, carried off its
+    /// report. One case is not: a child that ran and left no report is
+    /// recorded as `source` by the service, which knows only that
+    /// something ran and said nothing — the child's words are in
+    /// `ended_by_message`, and that is where the reason actually is.
+    ///
+    /// Absent when nothing ended it early — a run that read its source
+    /// to the end, and equally a run that never started, where nothing
+    /// classified anything because nothing ran.
+    pub ended_by_class: Option<String>,
+    /// What the failure said, for a person.
+    pub ended_by_message: Option<String>,
+    /// How long the source asked us to wait, in seconds, when it said.
+    ///
+    /// Recorded because the run that produced it is the only moment it
+    /// exists: a source states the wait once, in the reply that refused
+    /// the request, and whoever eventually waits it out is not the
+    /// process that heard it.
+    pub retry_after_secs: Option<u64>,
+}

@@ -101,6 +101,23 @@ const ROUTES_WITHOUT_COMMAND: &[(&str, &str)] = &[
         "an importer's own bookkeeping: a person never asks where an adapter got to",
     ),
     (
+        "define_import",
+        "an importer's own plumbing: the desktop has no surface for a stored \
+         command line, and the scheduler that will run one is not a person",
+    ),
+    (
+        "list_import_definitions",
+        "an importer's own plumbing: nothing in the app lists stored imports",
+    ),
+    (
+        "run_import_definition",
+        "an importer's own plumbing: not a verb a person reaches for in the app",
+    ),
+    (
+        "list_import_runs",
+        "an importer's own plumbing: diagnostics about runs the app does not show",
+    ),
+    (
         "write_import_state",
         "an importer's own bookkeeping: a person never says where an adapter got to",
     ),

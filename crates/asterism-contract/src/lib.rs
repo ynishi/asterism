@@ -48,6 +48,7 @@ pub mod command;
 pub mod digest;
 pub mod dto;
 pub mod forge;
+pub mod import_report;
 pub mod query;
 pub mod query_group;
 pub mod sidecar;

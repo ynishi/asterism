@@ -544,6 +544,8 @@ name = "asterism-importer"
 version = "0.1.1"
 dependencies = [
  "anyhow",
+ "asterism-contract",
+ "asterism-core",
  "asterism-importer-audio",
  "asterism-importer-cc",
  "asterism-importer-image",
@@ -552,9 +554,12 @@ dependencies = [
  "asterism-importer-tape",
  "asterism-importer-text",
  "asterism-importer-video",
+ "asterism-server",
+ "axum",
  "chrono",
  "clap",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

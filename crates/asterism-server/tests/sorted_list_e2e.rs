@@ -34,7 +34,7 @@ use asterism_contract::command::{
 };
 use asterism_contract::query::ListAssetsQuery;
 use asterism_contract::sort::{SortOrder, SortSpec, SortTarget};
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about ordering, not about
@@ -119,7 +119,7 @@ async fn list_orders_by_the_axis_the_caller_named() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -289,7 +289,7 @@ async fn rating_axis_and_band_are_answerable_over_the_wire() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -502,7 +502,7 @@ async fn index_and_list_agree_on_every_axis() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -683,7 +683,7 @@ async fn modification_stamp_and_axis_close_the_sync_loop() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -957,7 +957,7 @@ async fn duration_and_size_axes_are_answerable_over_the_wire() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

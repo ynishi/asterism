@@ -2285,3 +2285,82 @@ pub struct WriteImportStateCommand {
     /// about.
     pub offset_json: String,
 }
+
+/// Stores an import that can be run without anybody typing it
+/// (`POST /asterism/import/definitions`).
+///
+/// The arguments are kept verbatim and handed to the importer as it
+/// receives them, so this is a stored command line — which is exactly
+/// where a credential wants to go and must not. See
+/// [`secret_ref`](Self::secret_ref).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefineImportCommand {
+    /// Persona the records land in.
+    pub persona_id: String,
+    /// What to call this import when reporting on it. Unique inside a
+    /// persona, so what a run is reported under is a name a person
+    /// chose. A run is *started* by the definition's id — see
+    /// [`RunImportDefinitionCommand`] — and the name never resolves
+    /// one.
+    pub name: String,
+    /// Importer subcommand: `http`, `text`, `sqlite`, and the rest.
+    pub subcommand: String,
+    /// Arguments, exactly as the importer receives them.
+    ///
+    /// **Stored and readable.** Anything that can read this definition
+    /// can read these, so a credential written into one is a credential
+    /// in the database — the same trade the outbound side states about
+    /// its params blob, one surface along.
+    /// [`secret_ref`](Self::secret_ref) is the way out.
+    pub args: Vec<String>,
+    /// Name of the environment variable holding this import's
+    /// credential, or `None` for a source that needs none.
+    ///
+    /// A **name, never a value**, following `auth.secret_ref` on the
+    /// outbound side for the reason stated there: the value is resolved
+    /// when the importer is started, and is in neither this row nor
+    /// anything written down afterwards.
+    ///
+    /// It does not reach the child's *arguments* either, which is where
+    /// this diverges from the outbound side's `{{secret}}` template.
+    /// That one renders into an HTTP header inside a single process;
+    /// this would render into an argument vector every other process on
+    /// the machine can read. The importer is handed the value through
+    /// its environment instead.
+    ///
+    /// Meaningless without [`secret_header`](Self::secret_header), and
+    /// refused without it: a credential named with nowhere to go is
+    /// resolved, handed to a child that reads it nowhere, and spent on
+    /// a request that goes out unauthenticated. The two are a pair.
+    pub secret_ref: Option<String>,
+    /// Header the credential is sent as — `Authorization`, `X-Api-Key`.
+    ///
+    /// Here rather than written into [`args`](Self::args) as
+    /// `--header-secret Authorization`, which is what the importer
+    /// actually receives. Two reasons, and the second is the one that
+    /// made this a field.
+    ///
+    /// A pair that can only be half-filled is a pair somebody
+    /// half-fills. When the destination lived in the arguments, this
+    /// end could only check for it by looking for a flag string — which
+    /// is guessing at another binary's command line, and would go quiet
+    /// the day that flag was renamed.
+    ///
+    /// And the flag is the launcher's business. What a definition
+    /// states is *where the credential goes*; which argument carries
+    /// that to `asterism-import` is a detail of how it is started.
+    pub secret_header: Option<String>,
+}
+
+/// Runs a stored import now (`POST /asterism/import/definitions/run`).
+///
+/// Answers with the run as it was opened, and is refused while a run of
+/// the same definition is still going. `ImportRunService::run` in
+/// `asterism-core` is where that rule lives and where its reason is
+/// written; this crate cannot link to it, and restating the reason here
+/// is how the two drift apart.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunImportDefinitionCommand {
+    /// Which definition to run.
+    pub id: String,
+}

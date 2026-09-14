@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use asterism_contract::command::{AddAssetCommand, RegisterPersonaCommand};
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution this fixture writes with: a caller that states
 /// nothing, which records nothing.
@@ -35,7 +35,7 @@ async fn an_unresolvable_claim_still_lands_the_artefact_and_says_why() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

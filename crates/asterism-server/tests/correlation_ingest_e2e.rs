@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use asterism_contract::command::{AddAssetCommand, RegisterPersonaCommand};
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the provenance claim,
@@ -85,7 +85,7 @@ async fn a_declared_parent_becomes_an_edge_that_outlives_the_rebuild() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

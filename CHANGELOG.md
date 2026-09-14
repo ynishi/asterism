@@ -10,6 +10,36 @@ and this project adheres to
 
 ### Added
 
+- **An import runs without anybody typing it** (#299). #295 gave an import a
+  memory and #297 gave it a source that can refuse, and nothing started one: a
+  person typed a command line, and when they stopped the archive stopped
+  filling. A **definition** is a persona, a subcommand, the arguments, and —
+  kept apart from the arguments — the name of the environment variable holding
+  the credential together with the header it is sent as. Starting one spawns
+  `asterism-import`, answers immediately with the **run** it opened, and lands
+  the outcome on that row. No schedule: a timer belongs on top of this and is
+  where a rate limit's stated wait finally gets a consumer. **A credential is
+  never stored.** The definition has a column for a variable's name and none a
+  value could go in, following the outbound side's `auth.secret_ref` — and
+  unlike that side's `{{secret}}` template, the resolved value never reaches the
+  child's arguments either, because an argument vector is readable by every
+  other process on the machine. It goes through the child's environment, and
+  `ps` shows the name of a header. The arguments beside it are stored verbatim
+  and readable, which is the trade an operator makes knowingly and is said where
+  they make it. A run is **only ever a record**: whether one is going is the
+  supervisor's question about its own children, not a row anybody reads, so a
+  crash cannot wedge a definition — a startup sweep closes what a previous
+  process left open. A run that could not start at all is kept apart from one
+  that ran and failed, because one means the machine and the other means the
+  source; a missing binary names every place it looked. Where the records go is
+  resolved from the active profile — the same question the serving process asks
+  when it binds — so no address is carried from one process to the other and
+  none can be left unset; a server on a port of its own is named in the
+  definition's own arguments, exactly as somebody running the importer by hand
+  would. What the importer reported survives into the record, class of failure
+  included, carried as a file the child writes rather than a log line somebody
+  parses.
+
 - **Imports can read a paginated HTTP source** (#297). `HttpScanner` is the
   third bundled scanner, and it takes a URL, a path to the records and a path to
   the next-page token the way `SqliteScanner` takes a `SELECT` and a column map
@@ -600,6 +630,22 @@ and this project adheres to
   before #229. Each now reads a login from the roster already loaded to draw the
   row its button sits on, or a team's name from the same list the drawer's own
   rail already reads, falling back to the id where neither has an answer.
+
+### Removed
+
+- **`asterism-server serve`** (#300). The subcommand that bound a second HTTP
+  port. It opened one from a process holding no Tantivy writer lock and draining
+  no job queue, so anything it enqueued waited for the desktop to run it —
+  useful only alongside the process that was already serving the same router,
+  and nothing in the repository ever invoked it. The HTTP API is served by
+  `asterism-ui`, in its own process, windowed or `--headless`; `README.md` said
+  otherwise and now does not. The `asterism-server` binary keeps what it is
+  actually for: bridging MCP over stdio, and creating or migrating the database.
+  Removing it also removed the only production caller of `CoreMode::ReadOnly`,
+  which is what let `CoreMode` be taken apart — three of its four bundled
+  decisions stopped being questions once one process opened a core, and the
+  fourth, whether to run the job worker, is now an argument named for what it
+  decides.
 
 ## [0.1.1] - 2026-09-06
 

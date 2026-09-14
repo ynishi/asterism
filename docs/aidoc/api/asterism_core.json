@@ -148,6 +148,31 @@
       "docs": "Conversation use-case service."
     },
     {
+      "path": "asterism_core::application::import_run_service",
+      "kind": "module",
+      "docs": "Defining an import, and running one without anybody typing it.\n\nThe half of the transport decision #295 left open. Adapters run\nthemselves and push over HTTP, which settles how an import *talks*\nto Asterism and says nothing about what starts it. This starts it.\n\n## What is here and what is deliberately not\n\nRunning one on demand. **No schedule**: a timer belongs on top of\nthis and calls it, and every hard question — where the binary is,\nhow a credential reaches it, what happens when a run is already\ngoing, what is left behind when nothing worked — is answerable\nwithout a clock. The timer is also where the wait a rate limit\nstates — carried here as `ImportRun::retry_after_secs` — finally\ngets a consumer; this layer records it and has nothing to do with\nit.\n\n## Starting is not waiting\n\n[`ImportRunService::run`] answers as soon as the importer is on its\nway, with the run it just opened, and the outcome arrives on that\nrow. The first shape held the answer until the child exited, which\nread well — the answer *is* the outcome — and was wrong twice over:\nan import of any size outlives an HTTP client's patience, and the\ncaller this exists for is a scheduler, which wants to start things\nand not to sit with them.\n\n## The lock is this process's, not the table's\n\nTwo runs of one definition would each take up from a position the\nother is about to move, so one has to be refused. The question is\n\"is a child of **mine** still going\", and that is about one process:\nit is true only while this process lives, and a process that died\ntook its children with it.\n\nThe first shape asked the table instead — a run row said `running`\nand a second run read it — which made the row a lock as well as a\nrecord. A crash then left a row nothing would ever close and a\ndefinition nothing could ever start, recoverable only by editing\nSQLite. It also raced: two callers could both read \"nothing running\"\nbefore either wrote.\n\nSo the answer lives in a set held here, and\n[`ImportDefinitionRepository::abandon_running`] closes at startup\nwhatever a previous process left open.\n\n**A process-local answer is only sound while one core is open over\na given database, and that is now enforced rather than assumed.**\nThe Tantivy index is opened for writing unconditionally (#300) and\nthat lock is exclusive, so a second core over the same index does\nnot start. The index and the database are resolved together from the\nactive profile, so for the shipped app this is one core per machine;\na test handing its own tempdir to `init_core_with` gets a pair of\nits own and a set of its own, which is the same rule applied and not\nan exception to it.\n\nA review round was spent asking which process should host this\nsupervisor; the answer is that there is one, and nothing here is\nconditioned on a mode. That question existed because `CoreMode` did.\n\n## Spawning is not this layer's\n\n[`ImportLauncher`] is the port, and the reason it exists rather than\na `Command` a few lines down is the reason every port here exists:\nthis crate does not touch the machine. It also keeps the credential\nout of this layer entirely — the launcher is handed a variable\n*name* and resolves it while building the child's environment, so\nthe value never enters a type anything here holds, logs, or could\naccidentally persist."
+    },
+    {
+      "path": "asterism_core::application::import_run_service::ImportLauncher",
+      "kind": "trait",
+      "docs": "Starts an importer and waits for it.\n\nImplemented in the infrastructure layer, which is where a process\nmay be spawned and where an environment may be read."
+    },
+    {
+      "path": "asterism_core::application::import_run_service::ImportRunService",
+      "kind": "struct",
+      "docs": "Stored imports, and running them."
+    },
+    {
+      "path": "asterism_core::application::import_run_service::LaunchOutcome",
+      "kind": "struct",
+      "docs": "What starting one produced."
+    },
+    {
+      "path": "asterism_core::application::import_run_service::LaunchSpec",
+      "kind": "struct",
+      "docs": "What the launcher is asked to start.\n\nCarries `secret_ref` rather than a secret: see the module doc."
+    },
+    {
       "path": "asterism_core::application::import_state_service",
       "kind": "module",
       "docs": "Reading and writing where an importer got to.\n\nThin on purpose, and the thinness is the design. Every judgement\nabout a resumption point is made in the importer, which is the only\nplace that can make one. This service is the other end of the wire:\nit stores what it is given and hands back what it stored.\n\nTwo things it deliberately does not do. It does not validate the\noffset — see [`import_state`](crate::domain::import_state) for that\nrule. And it does not check whether the persona exists: a write\narrives from an import that has been posting assets to that persona\nall along, so the check would repeat one the asset path has already\nmade; and a read arrives before anything has been posted, where the\nhonest answer to an unknown persona is the same as to a known one\nwith nothing stored — nothing."
@@ -2198,6 +2223,26 @@
       "docs": "A group paired with the number of assets currently linked to it,\nused to render the sidebar Groups section and chip count badges."
     },
     {
+      "path": "asterism_core::domain::import_definition",
+      "kind": "module",
+      "docs": "An import somebody can run without typing it, and the record of\nhaving run one.\n\n#295 gave an import a memory and #297 gave it a source that can\nrefuse; neither made anything *start* one. A definition is what a\nperson types once so that nothing has to type it again, and a run is\nwhat happened the times it went.\n\n## A definition is a stored command line\n\nWhich is exactly where a credential wants to go, and the one thing\nthis must be built not to hold. [`ImportDefinition::secret_ref`]\ncarries the **name** of an environment variable and never its value,\nfollowing `auth.secret_ref` on the outbound side for the reason\nstated there: a value resolved when the importer starts is in\nneither this row nor anything written down afterwards.\n\nThe arguments beside it are stored verbatim and are readable by\nanything that can read the definition. That is a real trade and it\nis the operator's to make knowingly, so it is said on the field\nrather than left to be discovered.\n\n## A run is written whatever happened\n\nIncluding for one whose importer never started. A definition that\nlooks as though it was never run, when somebody asked for it and\nsomething went wrong, is the failure mode a record of runs exists to\nprevent — and \"the binary is not there\" is the most likely first\nthing to go wrong on a machine nobody has configured yet.\n\n**And a run is only ever a record.** It is not also the lock that\nstops a second run starting: that question is \"is a child of mine\nstill going\", which is about one process and dies with it, and\nanswering it from a table made a crash wedge a definition for good.\n[`RunOutcome::Abandoned`] is what a row inherits when the process\nthat wrote it did not come back."
+    },
+    {
+      "path": "asterism_core::domain::import_definition::ImportDefinition",
+      "kind": "struct",
+      "docs": "An import that can be run on demand."
+    },
+    {
+      "path": "asterism_core::domain::import_definition::ImportRun",
+      "kind": "struct",
+      "docs": "What happened one time an import was run."
+    },
+    {
+      "path": "asterism_core::domain::import_definition::RunOutcome",
+      "kind": "enum",
+      "docs": "How a run ended."
+    },
+    {
       "path": "asterism_core::domain::import_state",
       "kind": "module",
       "docs": "Where an importer got to, kept so the next run does not start over.\n\nAn importer scans a source and hands records to the server. #293 gave\nit a way to say where it stopped — a checkpoint on the scan's own\nstream, carried out of a run that earned one — and no way to keep\nthat anywhere. This is the place it is kept, and the whole of what\nthis layer does with it is store it and hand it back.\n\n## The one rule\n\n**The offset is opaque here.** It belongs to the adapter that wrote\nit, and nothing on this side parses, validates, migrates or compares\nit. That rule is stated in the inbound port's own vocabulary\n(`asterism-importer-sdk`'s `SyncState`), and this is the layer where\nbreaking it would be easiest and least visible: a column tempting\nsomebody to index, a service tempted to \"fix up\" a shape it\nrecognises. It is carried as text for that reason as much as for the\nbindings — text has nothing to be clever about.\n\nThe **key** is not opaque, because a store that could not compare\nkeys could not find anything. It is a persona and a partition, and\nboth halves are load-bearing. The persona, because the same source\nimported into two personas has two independent positions and one\nbeing ahead says nothing about the other. The partition, because it\nis the adapter's own statement of what it is scanning — and the\nadapter names it fully, its own kind included, so two adapters cannot\ncollide inside one persona by both calling something `root=/photos`.\nThat is also why the key is a pair and not a triple with the kind\nbeside it: the adapter owns the encoding, the way it owns the\noffset's."
@@ -2738,6 +2783,11 @@
       "docs": "Persistence port for [`Group`] and its many-to-many link with\nassets. Unlike [`TagRepository`], `create` is caller-driven\n(there is no auto-materialisation) — a group only comes into\nbeing when the user says so."
     },
     {
+      "path": "asterism_core::domain::repository::ImportDefinitionRepository",
+      "kind": "trait",
+      "docs": "Persistence port for stored imports and the record of running them\n(`import_definition` / `import_run` tables).\n\nOne port for two tables because a definition and its runs are read\nand written together, and splitting them would make the common case\n— run this, record what it did — reach through two ports for one\nact.\n\nIt does **not** answer \"is a run of this going\". That is a question\nabout one process's own children, it dies with that process, and\nasking a table made a crash wedge a definition until somebody edited\nSQLite. [`abandon_running`](Self::abandon_running) is what is left\nof it: a sweep at startup, over rows nothing is coming back for."
+    },
+    {
       "path": "asterism_core::domain::repository::ImportStateRepository",
       "kind": "trait",
       "docs": "Persistence port for an importer's resumption point\n(`import_state` table).\n\nNo list, because nothing asks \"what is every importer's position\" —\na run knows its own key and asks for that one. No delete, because a\npartition that changes simply leaves a row nothing will ask for\nagain, and forgetting a position is a request nobody has made."
@@ -2810,7 +2860,7 @@
     {
       "path": "asterism_core::domain::repository::ProgressEmitter",
       "kind": "trait",
-      "docs": "Port for pushing job progress to the UI. In Tauri, the adapter emits\n`job:progress:{id}` events; in the standalone server it logs."
+      "docs": "Port for pushing job progress to the UI. In Tauri, the adapter emits\n`job:progress:{id}` events; where there is no event bus, the log\nemitter writes them to stderr."
     },
     {
       "path": "asterism_core::domain::repository::QueryGroupRepository",

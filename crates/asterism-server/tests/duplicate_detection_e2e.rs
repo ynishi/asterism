@@ -17,7 +17,7 @@ use std::time::Duration;
 use asterism_contract::command::{AddAssetCommand, RegisterPersonaCommand};
 use asterism_contract::dto::DuplicateAxis;
 use asterism_contract::query::GetAssetDetailQuery;
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about content hashing, not
@@ -104,7 +104,7 @@ async fn identical_originals_surface_as_one_duplicate_group() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -260,7 +260,7 @@ async fn one_picture_in_two_files_is_a_group_on_the_content_axis_only() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -423,7 +423,7 @@ async fn the_second_copy_leaves_a_question_and_a_recorded_match() {
     let core = init_core_with(
         &db_path,
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

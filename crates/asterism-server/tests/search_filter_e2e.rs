@@ -1,7 +1,7 @@
 //! End-to-end guard for the search read path's filter surface.
 //!
 //! Wires the real service graph through
-//! [`asterism_server::core_init::init_core`] in [`CoreMode::Full`] — real
+//! [`asterism_server::core_init::init_core`] in [`JobWorker::Spawn`] — real
 //! SQLite, real Tantivy, real job worker — and asserts that a text search
 //! honours the grid's filter chips.
 //!
@@ -26,7 +26,7 @@ use std::time::Duration;
 use asterism_contract::command::{AddAssetCommand, RegisterPersonaCommand, UpdateAssetMetaCommand};
 use asterism_contract::query::{ListAssetsQuery, SearchAssetsQuery};
 use asterism_contract::sort::{SortOrder, SortSpec, SortTarget};
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the search filter, not
@@ -166,7 +166,7 @@ async fn search_honours_the_active_filter_chips() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -550,7 +550,7 @@ async fn search_ids_returns_rank_order_and_reports_the_net() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await
@@ -764,7 +764,7 @@ async fn metric_bands_narrow_the_text_search() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        JobWorker::Spawn,
         Some(&tmp.path().join("tantivy")),
     )
     .await

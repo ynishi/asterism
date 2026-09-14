@@ -35,6 +35,7 @@ use crate::domain::dispatch::DispatchJob;
 use crate::domain::duplicate_conflict::{ConflictResolution, DuplicateAxis, DuplicateConflict};
 use crate::domain::edge::{ConstellationEdge, EdgeKind, IncidentEdge};
 use crate::domain::group::{Group, GroupLink, GroupSummary};
+use crate::domain::import_definition::{ImportDefinition, ImportRun};
 use crate::domain::import_state::{ImportState, ImportStateKey};
 use crate::domain::instance::InstanceIdentity;
 use crate::domain::job::JobKind;
@@ -3387,7 +3388,8 @@ pub trait JobQueue: Send + Sync {
 }
 
 /// Port for pushing job progress to the UI. In Tauri, the adapter emits
-/// `job:progress:{id}` events; in the standalone server it logs.
+/// `job:progress:{id}` events; where there is no event bus, the log
+/// emitter writes them to stderr.
 #[async_trait]
 pub trait ProgressEmitter: Send + Sync {
     /// Pushes a single progress payload. Emitter failures should not tear
@@ -4328,4 +4330,59 @@ pub trait ImportStateRepository: Send + Sync {
     /// checkpoint. A check here would be a second opinion on one
     /// question.
     async fn upsert(&self, state: &ImportState) -> Result<(), DomainError>;
+}
+
+/// Persistence port for stored imports and the record of running them
+/// (`import_definition` / `import_run` tables).
+///
+/// One port for two tables because a definition and its runs are read
+/// and written together, and splitting them would make the common case
+/// — run this, record what it did — reach through two ports for one
+/// act.
+///
+/// It does **not** answer "is a run of this going". That is a question
+/// about one process's own children, it dies with that process, and
+/// asking a table made a crash wedge a definition until somebody edited
+/// SQLite. [`abandon_running`](Self::abandon_running) is what is left
+/// of it: a sweep at startup, over rows nothing is coming back for.
+#[async_trait]
+pub trait ImportDefinitionRepository: Send + Sync {
+    /// Inserts or replaces a definition.
+    async fn upsert(&self, definition: &ImportDefinition) -> Result<(), DomainError>;
+
+    /// One definition by id, or `None`.
+    async fn find(&self, id: &str) -> Result<Option<ImportDefinition>, DomainError>;
+
+    /// Every definition, oldest first.
+    async fn list(&self) -> Result<Vec<ImportDefinition>, DomainError>;
+
+    /// Marks every run still saying `running` as abandoned, and answers
+    /// how many there were.
+    ///
+    /// Called once at startup. A run is a child of the process that
+    /// spawned it, so a row still open when a process starts belongs to
+    /// one that is gone — nothing is going to finish it, and leaving it
+    /// says a run is in progress that is not.
+    ///
+    /// Unscoped, which is only correct because one core is open over
+    /// this database: the Tantivy writer lock beside it is taken
+    /// unconditionally and is exclusive, so a second core does not
+    /// start. `import_run_service`'s module doc is where that argument
+    /// lives. Before #300 a second one could, and this sweep would have
+    /// rewritten a live run's row.
+    async fn abandon_running(&self) -> Result<u64, DomainError>;
+
+    /// Records a run, inserting it or replacing what it said before.
+    ///
+    /// One verb for "it started" and "it ended", because they are the
+    /// same row: a run that was inserted at its start and updated at
+    /// its end is a run that cannot be lost between the two.
+    async fn record_run(&self, run: &ImportRun) -> Result<(), DomainError>;
+
+    /// Runs of one definition, newest first, capped at `limit`.
+    async fn runs_for(
+        &self,
+        definition_id: &str,
+        limit: u32,
+    ) -> Result<Vec<ImportRun>, DomainError>;
 }

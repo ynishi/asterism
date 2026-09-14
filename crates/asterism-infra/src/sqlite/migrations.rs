@@ -8092,6 +8092,70 @@ CREATE TABLE import_state (
 ) STRICT;
 "#;
 
+/// V112 — an import somebody can run without typing it, and the record
+/// of having run one.
+///
+/// What the rows mean is `asterism_core::domain::import_definition`.
+/// Three things about the shape are this file's to say.
+///
+/// # `secret_ref` is a column for a *name*, `secret_header` for a
+/// destination
+///
+/// Neither holds a credential, and the pair is why there is a column
+/// for the destination at all: a name with nowhere to go is a
+/// credential resolved and spent on a request that went out without it.
+/// The schema cannot stop an operator pasting a token into either
+/// column or into `args_json` — nothing here validates text — so what
+/// it does instead is make the route that does not require that
+/// obvious and complete.
+///
+/// # `outcome` admits a state no process is backing
+///
+/// `running` is one of the states the `CHECK` allows, and a row can sit
+/// in it with nothing alive behind it: the process that wrote it is
+/// gone. That is why `abandoned` is there — a startup sweep writes it
+/// over whatever a previous process left open. Which process is
+/// allowed to decide that, and why the row is not the lock that stops a
+/// second run, is `asterism_core::application::import_run_service`'s to
+/// say.
+///
+/// # No foreign key from `import_run` to `import_definition`
+///
+/// Deliberate, and the opposite of the usual call: the record of what
+/// an import did is worth keeping after somebody deletes the import.
+/// "This ran for a month and then the definition went away" is a real
+/// question, and a cascade would answer it with silence.
+const V112_IMPORT_DEFINITION: &str = r#"
+CREATE TABLE import_definition (
+    id          TEXT PRIMARY KEY,
+    persona_id  TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    subcommand  TEXT NOT NULL,
+    args_json     TEXT NOT NULL,
+    secret_ref    TEXT,
+    secret_header TEXT,
+    created_at    INTEGER NOT NULL
+) STRICT;
+
+CREATE UNIQUE INDEX idx_import_definition_name ON import_definition(persona_id, name);
+
+CREATE TABLE import_run (
+    id                TEXT PRIMARY KEY,
+    definition_id     TEXT NOT NULL,
+    started_at        INTEGER NOT NULL,
+    ended_at          INTEGER,
+    outcome           TEXT NOT NULL
+        CHECK (outcome IN ('running', 'ok', 'failed', 'unstarted', 'abandoned')),
+    imported          INTEGER NOT NULL DEFAULT 0,
+    failed            INTEGER NOT NULL DEFAULT 0,
+    ended_by_class    TEXT,
+    ended_by_message  TEXT,
+    retry_after_secs  INTEGER
+) STRICT;
+
+CREATE INDEX idx_import_run_definition ON import_run(definition_id, started_at DESC);
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -8206,6 +8270,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V109_FORGE_SEND),
     Step::Sql(V110_ASSET_ZONE),
     Step::Sql(V111_IMPORT_STATE),
+    Step::Sql(V112_IMPORT_DEFINITION),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -12245,6 +12310,98 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored, r#"{"after_id":9,"zz":"a"}"#);
+    }
+
+    /// V112 gives an import a definition and a record of running one.
+    ///
+    /// Two shapes worth pinning: the name is unique inside a persona,
+    /// and a run survives the definition being deleted. The const's own
+    /// doc says why there is no foreign key.
+    #[test]
+    fn v112_keeps_a_definition_and_the_runs_of_it() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 111).unwrap();
+        let table = |conn: &Connection, name: &str| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                params![name],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(table(&conn, "import_definition"), 0);
+
+        migrate(&mut conn).unwrap();
+        assert_eq!(table(&conn, "import_definition"), 1);
+        assert_eq!(table(&conn, "import_run"), 1);
+
+        let define = |id: &str, persona: &str, name: &str| {
+            conn.execute(
+                "INSERT INTO import_definition \
+                     (id, persona_id, name, subcommand, args_json, secret_ref, \
+                      secret_header, created_at) \
+                 VALUES (?1, ?2, ?3, 'text', '[]', NULL, NULL, 0)",
+                params![id, persona, name],
+            )
+        };
+        define("d1", "p1", "notes").unwrap();
+        // The same name in another persona is another import.
+        define("d2", "p2", "notes").unwrap();
+        let err = define("d3", "p1", "notes")
+            .expect_err("one persona cannot hold two imports called the same thing");
+        assert!(
+            matches!(
+                err,
+                rusqlite::Error::SqliteFailure(e, _)
+                    if e.code == rusqlite::ErrorCode::ConstraintViolation
+            ),
+            "{err}"
+        );
+
+        conn.execute(
+            "INSERT INTO import_run \
+                 (id, definition_id, started_at, ended_at, outcome, imported, failed) \
+             VALUES ('r1', 'd1', 0, 1, 'ok', 3, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM import_definition WHERE id = 'd1'", [])
+            .unwrap();
+        let surviving: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM import_run WHERE definition_id = 'd1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            surviving, 1,
+            "what an import did outlives the import, on purpose"
+        );
+
+        // `abandoned` is a state the CHECK admits, because a row can
+        // sit in `running` with nothing alive behind it and a startup
+        // sweep has to be able to close it.
+        conn.execute(
+            "INSERT INTO import_run (id, definition_id, started_at, outcome) \
+             VALUES ('r2', 'd2', 0, 'running')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE import_run SET outcome = 'abandoned' WHERE outcome = 'running'",
+            [],
+        )
+        .unwrap();
+        let refused = conn.execute(
+            "INSERT INTO import_run (id, definition_id, started_at, outcome) \
+             VALUES ('r3', 'd2', 0, 'no-such-state')",
+            [],
+        );
+        assert!(
+            refused.is_err(),
+            "and the CHECK admits those five and nothing else"
+        );
     }
 
     /// The marker a pre-probe import left on the content axis of a JPEG,

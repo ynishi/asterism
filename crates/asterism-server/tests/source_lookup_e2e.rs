@@ -24,7 +24,7 @@ use std::sync::Arc;
 use asterism_contract::command::{
     AddAssetCommand, MergeAssetsCommand, OnDuplicate, RegisterPersonaCommand,
 };
-use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about which arrivals mint a
@@ -94,7 +94,7 @@ impl Fixture {
         let core = init_core_with(
             &tmp.path().join("asterism.db"),
             Arc::new(LogEmitter),
-            CoreMode::Full,
+            JobWorker::Spawn,
             Some(&tmp.path().join("tantivy")),
         )
         .await
