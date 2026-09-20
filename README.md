@@ -98,8 +98,11 @@ manifest half, which is a different statement from the skip that means no
 certificate is configured.
 
 Nothing here makes a manifest _trusted_. That needs a certificate authority on
-the C2PA trust list, and a self-issued one validates as
-`signingCredential.untrusted` while C2PA's own validation state stays `Valid`.
+the C2PA trust list, and a self-issued one carrying an organisation validates as
+`signingCredential.untrusted` while C2PA's own validation state stays `Valid`. A
+self-issued certificate carrying none reports `claimSignature.mismatch` beside
+that, which is an upstream defect rather than a statement about the file;
+`asterism-infra`'s disclosure tests pin both answers.
 
 From the repository root, use `just dev` for the isolated Dev app,
 `just dogfood` to build and launch the production-shaped Dogfood app, and

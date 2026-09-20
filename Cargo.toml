@@ -426,6 +426,14 @@ rand_chacha = "0.9"
 #
 # `file_io` is what `create_signer::from_files` needs — the certificate
 # and key arrive as paths from settings.
+#
+# Held at 0.90 deliberately, and moving off is not a version bump:
+# 0.91.0-rc.3 was measured needing rustc 1.96, moving `SigningAlg` out of
+# `c2pa::crypto::raw_signature`, and refusing at signing time a manifest
+# this build writes today. What it reports for a certificate carrying no
+# organisation, and how that was run, is on
+# `what_the_sdk_reports_for_this_builds_own_signatures` in
+# `asterism-infra`; this is a pointer to it and not a second record.
 c2pa = { version = "0.90", default-features = false, features = [
     "rust_native_crypto",
     "file_io",

@@ -264,8 +264,17 @@ pub const TRUST_FAILURES: &[&str] = &["signingCredential.untrusted"];
 /// no `organizationName`: `c2pa` 0.90.12 fetches the organisation for
 /// display *after* the signature has already verified and turns its
 /// absence into an error, which is then folded into this one code
-/// (contentauth/c2pa-rs#2262, accepted upstream, fix unmerged; the C2PA
-/// specification requires no such attribute).
+/// (contentauth/c2pa-rs#2262; the C2PA specification requires no such
+/// attribute).
+///
+/// Upstream merged a change for it on 2026-09-04
+/// (contentauth/c2pa-rs#2540), and that was not the day this paragraph
+/// expired: the version resolved here did not move, and
+/// `what_the_sdk_reports_for_this_builds_own_signatures` went on
+/// passing. Which is the arrangement to keep. That test pins both
+/// certificates' failure lists exactly, so it is what notices when the
+/// dependency's answer changes — this prose is not, and a reader who
+/// finds the merge and assumes the tree has it should run the test.
 ///
 /// Nothing in a validation report separates the two. One field outside
 /// it does: the manifest's signature issuer, which is absent exactly
@@ -275,12 +284,18 @@ pub const TRUST_FAILURES: &[&str] = &["signingCredential.untrusted"];
 /// signed files by
 /// `what_the_sdk_reports_for_this_builds_own_signatures` in
 /// `asterism-infra`, which pins both certificates' failure lists so
-/// that this reasoning fails loudly when the upstream fix lands.
+/// that this reasoning fails loudly when the pin reaches the fix.
 ///
 /// A named signer therefore rules the upstream defect out and the code
 /// means what it says. An unnamed one rules nothing in, and the honest
 /// answer is that the question cannot be settled — see
 /// [`Mark::Undetermined`].
+///
+/// When the resolved version stops emitting this code for the defect,
+/// `signer_named` stops carrying that question and starts weakening the
+/// answer: an unnamed signer's mismatch would be an ordinary forgery
+/// reported as [`Mark::Undetermined`]. Removing the input belongs to
+/// moving the pin, not to a cleanup before it.
 pub const SIGNATURE_MISMATCH: &str = "claimSignature.mismatch";
 
 /// The integrity verdict for a manifest, from the failure codes a
@@ -415,6 +430,27 @@ mod tests {
         assert!(!mark.stands());
         assert!(mark.present());
         assert_ne!(mark, Mark::Intact, "and never reads as a standing file");
+    }
+
+    /// The input a repaired SDK produces for that same certificate, and
+    /// the reason this mapping needs no second branch for it: what
+    /// arrives is the untrusted code alone from a signer with no name,
+    /// and a standing file is the right reading. Why that is what
+    /// arrives, and how it was measured, is recorded on
+    /// `what_the_sdk_reports_for_this_builds_own_signatures` in
+    /// `asterism-infra`.
+    ///
+    /// The `UNNAMED` half of `an_untrusted_signer_leaves_the_mark_standing`,
+    /// and idle until the pin moves: under the version resolved today
+    /// an unnamed signer never reaches this input without a mismatch
+    /// beside it. [`SIGNATURE_MISMATCH`] says what to do with the flag
+    /// on the day it does.
+    #[test]
+    fn the_fixed_sdks_answer_for_an_unnamed_signer_stands() {
+        assert_eq!(
+            integrity_of(["signingCredential.untrusted"], UNNAMED),
+            Mark::Intact
+        );
     }
 
     /// Trust is still its own axis beside an unsettled signature: the

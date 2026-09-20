@@ -390,7 +390,11 @@ const ACCEPTED_SIGNING_EKUS: &[&str] = &[
 ///
 /// **Warnings** are reasons a certificate would not be *listed*, which
 /// is a question about a trust list rather than about whether the bytes
-/// can sign. The specification's own guidance describes a private
+/// can sign — with one exception, the missing-organisation warning,
+/// which is about what a validator reports rather than about listing,
+/// and sits here because [`Strictness`] gives the two the same two
+/// readings and there is no third. The specification's own guidance
+/// describes a private
 /// credential store — a certificate trusted by the parties who imported
 /// it and nobody else — and self-issued credentials for exactly that
 /// use. Refusing those would close a door the specification holds open.
@@ -422,7 +426,8 @@ pub struct CertificateVerdict {
     /// Findings that make the certificate unusable for signing at all.
     pub refusals: Vec<String>,
     /// Findings that keep it off a trust list without stopping it
-    /// signing for a reader who has imported it.
+    /// signing for a reader who has imported it — and one that is not
+    /// about a trust list at all, named in this type's own doc.
     pub warnings: Vec<String>,
 }
 
@@ -626,7 +631,8 @@ impl SigningIdentity {
                 return Err(DisclosureError::Identity(format!(
                     "strict signing refuses this certificate: {}. It can sign — this is \
                      what a publicly issued one would carry and this one does not — so an \
-                     installation that does not publish can use it with strict signing off",
+                     installation that does not publish can use it with strict signing \
+                     off, and each item above says what that costs",
                     refusals.join("; ")
                 )));
             }
@@ -1053,15 +1059,26 @@ pub fn inspect_certificate(pem: &[u8]) -> CertificateVerdict {
         ));
     }
 
+    // The read `c2pa` itself makes, attribute for attribute
+    // (`crypto/cose/verifier.rs`): the *last* organisation attribute,
+    // where a value that will not decode counts the same as no attribute
+    // at all. Matching it is what lets the warning below name a
+    // consequence rather than a cosmetic absence. The predicate it
+    // replaced took the first attribute and tested it for emptiness,
+    // which warned about `O=""` — signed and read back without
+    // complaint — and said nothing about a non-UTF-8 `O=`, which is the
+    // value that does fail.
     if certificate
         .subject()
         .iter_organization()
-        .next()
-        .is_none_or(|organisation| organisation.as_str().is_ok_and(str::is_empty))
+        .last()
+        .is_none_or(|organisation| organisation.as_str().is_err())
     {
         verdict.warnings.push(
-            "its subject names no organisation, and a validator that displays a signer's \
-             name reads that field"
+            "its subject names no organisation, and a file this build signs with it \
+             comes back with its claim signature reported mismatched — an upstream \
+             defect (contentauth/c2pa-rs#2262) rather than a statement about that \
+             file's bytes"
                 .into(),
         );
     }
@@ -1710,6 +1727,13 @@ mod tests {
 
     /// A self-signed certificate and its key, both PEM.
     fn self_signed_pair() -> (Vec<u8>, Vec<u8>) {
+        self_signed_pair_with_organisation(None)
+    }
+
+    /// The same pair, with an organisation attribute of the caller's
+    /// choosing — including an empty one, which is the value
+    /// [`inspect_certificate`]'s predicate used to treat as absent.
+    fn self_signed_pair_with_organisation(organisation: Option<&str>) -> (Vec<u8>, Vec<u8>) {
         let key = rcgen::KeyPair::generate().expect("a P-256 key pair");
         let mut params = rcgen::CertificateParams::new(vec!["asterism.invalid".to_string()])
             .expect("certificate parameters");
@@ -1744,6 +1768,11 @@ mod tests {
         params.key_usages = vec![rcgen::KeyUsagePurpose::DigitalSignature];
         params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::EmailProtection];
         params.use_authority_key_identifier_extension = true;
+        if let Some(organisation) = organisation {
+            params
+                .distinguished_name
+                .push(rcgen::DnType::OrganizationName, organisation);
+        }
         let cert = params.self_signed(&key).expect("a self-signed certificate");
         (cert.pem().into_bytes(), key.serialize_pem().into_bytes())
     }
@@ -2702,7 +2731,9 @@ mod tests {
     ///
     /// Every sentence about `claimSignature.mismatch` in
     /// `asterism_core::domain::disclosure::carried` follows from this
-    /// table, and two rounds of that prose were written from a reading
+    /// test — the table for the version resolved, the paragraph below
+    /// it for the one that repairs the defect — and two rounds of that
+    /// prose were written instead from a reading
     /// of the c2pa source instead — one of them said an untrusted
     /// certificate always produces the code, which this shows it does
     /// not.
@@ -2712,9 +2743,35 @@ mod tests {
     /// | with `organizationName` | (this test says) | named |
     /// | without | (this test says) | none |
     ///
-    /// Pinned so that the day the answer moves — the upstream fix
-    /// merging, or the pin advancing past it — this fails rather than
-    /// the domain's reasoning going quietly false.
+    /// Pinned so that the day the answer moves, this fails rather than
+    /// the domain's reasoning going quietly false. Upstream merging the
+    /// fix was not that day — it merged and this went on passing — which
+    /// is why the guard is an exact failure list rather than a version
+    /// comparison: the list answers for the version actually resolved,
+    /// however it arrived.
+    ///
+    /// What the repaired version answers for the second row, measured
+    /// 2026-09-21 against `c2pa` 0.91.0-rc.3 (tag
+    /// `c2pa-rc-v0.91.0-rc.3`): `signingCredential.untrusted` alone,
+    /// issuer still absent. It does not reclassify
+    /// `claimSignature.mismatch` into another code — it stops emitting
+    /// it — so what the domain's mapping then receives is the trust code
+    /// by itself. The first row was *not* measured: that certificate
+    /// carries a second usage and an appended issuer, and the probe
+    /// varied only the organisation on [`self_signed_pair`]'s shape.
+    /// Neither was `validation_state`, which nothing here reads and this
+    /// test would not notice changing.
+    ///
+    /// Measured out of tree because this workspace cannot build that
+    /// version, and what stopped it is what moving the pin costs: rustc
+    /// 1.96, `SigningAlg` gone from `c2pa::crypto::raw_signature`, and
+    /// signing that verifies its own output — which refuses, at signing
+    /// time, the manifest this build writes for a record that
+    /// established no digital source type. That manifest carries no
+    /// actions assertion at all (`manifest::definition` in
+    /// `asterism-disclosure-format`, named in text because rustdoc does
+    /// not resolve a link from a `#[cfg(test)]` doc), and 0.90 signs it
+    /// and leaves the complaint to the read-back.
     #[test]
     fn what_the_sdk_reports_for_this_builds_own_signatures() {
         let (cert, key) = issued_shaped_pair();
@@ -2755,6 +2812,38 @@ mod tests {
             without_org_issuer, None,
             "and the missing issuer name is the only field that separates that from a \
              real forgery, which is why the domain's mapping takes it"
+        );
+    }
+
+    /// The value the predicate in [`inspect_certificate`] used to call
+    /// absent, measured rather than read out of the SDK's source.
+    ///
+    /// That predicate took the first organisation attribute and warned
+    /// when it was empty; `c2pa` takes the last and fails when it will
+    /// not decode. An empty one decodes. This is what says so, and it
+    /// is the reason the predicate changed — the prose in this module
+    /// has twice been written from a reading of that source and twice
+    /// been wrong, so the read is not evidence on its own.
+    #[test]
+    fn an_empty_organisation_is_not_what_the_sdk_fails_on() {
+        let (cert, key) = self_signed_pair_with_organisation(Some(""));
+        assert!(
+            inspect_certificate(&cert)
+                .warnings
+                .iter()
+                .all(|warning| !warning.contains("organisation")),
+            "an empty organisation is a value, not an absence"
+        );
+
+        let identity =
+            SigningIdentity::from_bytes(cert, key, "es256", None, Strictness::Permissive)
+                .expect("an empty organisation is not a refusal");
+        let (codes, _issuer) = signed_readback(identity);
+        assert_eq!(
+            codes,
+            ["signingCredential.untrusted"],
+            "and the file it signs carries no mismatch, so warning about it would \
+             have promised a consequence that does not arrive"
         );
     }
 
