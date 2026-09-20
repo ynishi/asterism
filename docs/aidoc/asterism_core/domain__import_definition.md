@@ -39,7 +39,7 @@ that wrote it did not come back.
 
 ## Types
 
-- `ImportDefinition` — An import that can be run on demand.
+- `ImportDefinition` — An import that can be run on demand, or on an interval it carries.
 - `ImportRun` — What happened one time an import was run.
 - `RunOutcome` — How a run ended.
 

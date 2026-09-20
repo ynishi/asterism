@@ -10,6 +10,31 @@ and this project adheres to
 
 ### Added
 
+- **An import keeps running, on an interval, with nobody watching** (#302). #299
+  stored a command line and gave it a supervisor, and said in its own doc what
+  it left out: a timer belongs on top of this and calls it. A definition now
+  carries minutes between starts — absent for one only a person starts, which is
+  what every existing definition stays after the migration. Minutes and not a
+  time of day: an interval has no timezone, so it has no hour that happens twice
+  a year and none that does not happen at all. The interval runs from one run's
+  **start**, so an import taking twenty minutes on a thirty-minute schedule runs
+  every thirty and not every fifty, and one that has never run is due at once —
+  setting a schedule is asking for the archive to start filling. **A wait the
+  source stated wins.** `retry_after_secs`, recorded since #297 and read by
+  nothing, is now what holds the next start back when a source answered 429 and
+  said how long; a thirty-minute interval does not override an hour the source
+  asked for. Nothing else backs off: a source that is simply down is tried again
+  on the interval, because an invented backoff is a second policy with its own
+  failure modes. **And nothing catches up.** A machine asleep for a day performs
+  one run and not forty-eight — because an import resumes (#293, #295), a missed
+  window costs latency and never costs records, which is what makes that correct
+  rather than merely convenient. The timer holds nothing at all: when a
+  definition is due is derived from rows, so it can be killed and started again
+  with no state to carry. It is started by the process that serves, beside the
+  listener it already binds, and not by `init_core` — a timer assembled with the
+  service graph would hand one to every test that only wanted a core, which is
+  the bundling #300 took apart.
+
 - **An import runs without anybody typing it** (#299). #295 gave an import a
   memory and #297 gave it a source that can refuse, and nothing started one: a
   person typed a command line, and when they stopped the archive stopped
@@ -17,15 +42,15 @@ and this project adheres to
   kept apart from the arguments — the name of the environment variable holding
   the credential together with the header it is sent as. Starting one spawns
   `asterism-import`, answers immediately with the **run** it opened, and lands
-  the outcome on that row. No schedule: a timer belongs on top of this and is
-  where a rate limit's stated wait finally gets a consumer. **A credential is
-  never stored.** The definition has a column for a variable's name and none a
-  value could go in, following the outbound side's `auth.secret_ref` — and
-  unlike that side's `{{secret}}` template, the resolved value never reaches the
-  child's arguments either, because an argument vector is readable by every
-  other process on the machine. It goes through the child's environment, and
-  `ps` shows the name of a header. The arguments beside it are stored verbatim
-  and readable, which is the trade an operator makes knowingly and is said where
+  the outcome on that row. No schedule in this slice: the timer is #302's, and a
+  rate limit's stated wait gets its consumer there. **A credential is never
+  stored.** The definition has a column for a variable's name and none a value
+  could go in, following the outbound side's `auth.secret_ref` — and unlike that
+  side's `{{secret}}` template, the resolved value never reaches the child's
+  arguments either, because an argument vector is readable by every other
+  process on the machine. It goes through the child's environment, and `ps`
+  shows the name of a header. The arguments beside it are stored verbatim and
+  readable, which is the trade an operator makes knowingly and is said where
   they make it. A run is **only ever a record**: whether one is going is the
   supervisor's question about its own children, not a row anybody reads, so a
   crash cannot wedge a definition — a startup sweep closes what a previous

@@ -63,6 +63,7 @@ the private design notes.
 - [`application::forge::pursuit_service`](application__forge__pursuit_service.md): Work use cases — opening a line of work, writing rounds, looking at
 - [`application::forge::thread_service`](application__forge__thread_service.md): Saying something about work, and correcting it.
 - [`application::import_run_service`](application__import_run_service.md): Defining an import, and running one without anybody typing it.
+- [`application::import_scheduler`](application__import_scheduler.md): The timer #299 said belonged on top of the supervisor.
 - [`application::import_state_service`](application__import_state_service.md): Reading and writing where an importer got to.
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's

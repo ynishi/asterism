@@ -8030,9 +8030,17 @@ CREATE UNIQUE INDEX idx_forge_send_dispatch ON forge_send(dispatch_id);
 /// every row that predates this step reads `'unknown'`, which
 /// `asset_zone` resolves to the occurrence stamp — the reading every
 /// consumer gave those rows before the source was recorded, so nothing
-/// moves. No CHECK, because `ALTER TABLE ADD COLUMN` cannot carry one;
-/// the closed set is enforced where the row is read back, the way
-/// `role` and `fold_policy` are.
+/// moves. No CHECK on this column; the closed set is enforced where the
+/// row is read back.
+///
+/// The reason once given here for that — "`ALTER TABLE ADD COLUMN`
+/// cannot carry one" — is false, and so was the example beside it:
+/// `asset.role` (V37) and `asset.fold_policy` (V51) each carry one,
+/// added by exactly that statement. A column-level `CHECK` survives
+/// `ADD COLUMN`; the table-level kind V47 wanted does not. V51 is where
+/// that is measured and where it is stated. Nothing about this column
+/// changes on the strength of a corrected sentence — a constraint is
+/// simply available to whoever decides it wants one.
 ///
 /// # `time_zone`, `NULL`
 ///
@@ -8156,6 +8164,48 @@ CREATE TABLE import_run (
 CREATE INDEX idx_import_run_definition ON import_run(definition_id, started_at DESC);
 "#;
 
+/// V113 — how often an import should run, when it should run at all.
+///
+/// One nullable column. `NULL` is every definition V112 could hold: a
+/// stored command line somebody starts. A number is minutes between
+/// starts, and it is the only thing on this row that decides whether a
+/// timer should have started it — the rest of the row is what the
+/// importer is then run with.
+///
+/// # Minutes, and not a `schedule_json`
+///
+/// Why minutes rather than a time of day is
+/// `ImportDefinition::every_minutes`'s to say. What is this file's is
+/// the shape: an integer column rather than a blob able to hold either
+/// kind, because "what is due" is a question asked in SQL and a blob
+/// makes it unanswerable here.
+///
+/// # Nothing here records when a definition last ran
+///
+/// That is `import_run.started_at`, and turning the two into a due time
+/// is `ImportDefinitionRepository::due`'s, which is also where the rule
+/// for doing so is written. This column is minutes and nothing else.
+///
+/// # Zero is refused here as well as above
+///
+/// A schedule of no minutes is not a schedule, and a `0` in this column
+/// is a definition due at every tick for ever.
+/// `ImportRunService::define` refuses one, and that is where a person
+/// who typed it is told so in words — this is the backstop behind it,
+/// for a writer that is not `define`.
+///
+/// A **column-level** `CHECK`, which is the kind that survives
+/// `ALTER TABLE ADD COLUMN`. V51 is where that is measured and stated
+/// (`v51_folds_are_marked_and_the_policy_is_checked`); nothing about it
+/// is this step's to restate.
+///
+/// An earlier draft of this doc skipped the constraint, on the reasoning
+/// that `ADD COLUMN` could not carry one. It can.
+const V113_IMPORT_SCHEDULE: &str = r#"
+ALTER TABLE import_definition ADD COLUMN every_minutes INTEGER
+    CHECK (every_minutes IS NULL OR every_minutes > 0);
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -8271,6 +8321,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V110_ASSET_ZONE),
     Step::Sql(V111_IMPORT_STATE),
     Step::Sql(V112_IMPORT_DEFINITION),
+    Step::Sql(V113_IMPORT_SCHEDULE),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -12402,6 +12453,60 @@ mod tests {
             refused.is_err(),
             "and the CHECK admits those five and nothing else"
         );
+    }
+
+    /// V113 gives a definition an interval, and gives every definition
+    /// that already existed none.
+    ///
+    /// The second half is the one worth a test. A schedule column that
+    /// arrived with a default would turn every stored import into one
+    /// that runs by itself, on a machine where somebody chose each time
+    /// it ran — which is a behaviour change nobody asked for delivered
+    /// by a migration.
+    #[test]
+    fn v113_adds_an_interval_and_leaves_existing_imports_manual() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 112).unwrap();
+        conn.execute(
+            "INSERT INTO import_definition \
+                 (id, persona_id, name, subcommand, args_json, secret_ref, \
+                  secret_header, created_at) \
+             VALUES ('d1', 'p1', 'notes', 'text', '[]', NULL, NULL, 0)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        let inherited: Option<i64> = conn
+            .query_row(
+                "SELECT every_minutes FROM import_definition WHERE id = 'd1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            inherited, None,
+            "an import that was nobody's to start but a person's stays that way"
+        );
+
+        // And a number is what a scheduled one carries.
+        conn.execute(
+            "INSERT INTO import_definition \
+                 (id, persona_id, name, subcommand, args_json, secret_ref, \
+                  secret_header, created_at, every_minutes) \
+             VALUES ('d2', 'p1', 'hourly', 'text', '[]', NULL, NULL, 0, 60)",
+            [],
+        )
+        .unwrap();
+        let stored: Option<i64> = conn
+            .query_row(
+                "SELECT every_minutes FROM import_definition WHERE id = 'd2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, Some(60));
     }
 
     /// The marker a pre-probe import left on the content axis of a JPEG,

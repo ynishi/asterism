@@ -6,14 +6,20 @@
 //!
 //! ## What is here and what is deliberately not
 //!
-//! Running one on demand. **No schedule**: a timer belongs on top of
-//! this and calls it, and every hard question — where the binary is,
-//! how a credential reaches it, what happens when a run is already
-//! going, what is left behind when nothing worked — is answerable
-//! without a clock. The timer is also where the wait a rate limit
-//! states — carried here as `ImportRun::retry_after_secs` — finally
-//! gets a consumer; this layer records it and has nothing to do with
-//! it.
+//! Running one on demand, and [`ImportRunService::start_due`] for
+//! whatever is asking on a clock. **The clock is not here** — it is
+//! [`import_scheduler`](super::import_scheduler) — because every hard
+//! question, where the binary is, how a credential reaches it, what
+//! happens when a run is already going, what is left behind when
+//! nothing worked, is answerable without one, and was answered before
+//! there was one (#299, then #302).
+//!
+//! The wait a rate limit states is recorded here, as
+//! `ImportRun::retry_after_secs`, and what acts on it is the due
+//! calculation — not the clock, which asks what is due and is told. So
+//! this layer writes that field and hands it on, and never decides
+//! anything by it, which is the same division the rest of the run
+//! record has.
 //!
 //! ## Starting is not waiting
 //!
@@ -74,7 +80,7 @@ use std::sync::{Arc, Mutex};
 use asterism_contract::command::{DefineImportCommand, RunImportDefinitionCommand};
 use asterism_contract::dto::{ImportDefinitionDto, ImportRunDto};
 use asterism_contract::import_report::ImportReport;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::domain::attribution::AttributionContext;
@@ -249,6 +255,23 @@ impl ImportRunService {
                     .into(),
             ));
         }
+        // Zero minutes is the typo this catches. Read as "manual" it
+        // would answer a mistyped schedule by doing nothing, for as
+        // long as nobody thought to look — and an import that quietly
+        // stops filling is the one failure the schedule exists to
+        // prevent.
+        //
+        // The column has a `CHECK` for the same value. This is the one
+        // that runs first and the only one that can say it in words;
+        // the constraint is what answers a writer that is not this
+        // verb.
+        if command.every_minutes == Some(0) {
+            return Err(DomainError::Validation(
+                "an interval of zero minutes is not a schedule: leave it unset for \
+                 an import nothing starts on its own"
+                    .into(),
+            ));
+        }
         let definition = ImportDefinition {
             id: Uuid::now_v7().to_string(),
             persona_id: command.persona_id,
@@ -257,6 +280,7 @@ impl ImportRunService {
             args: command.args,
             secret_ref: command.secret_ref,
             secret_header: command.secret_header,
+            every_minutes: command.every_minutes,
         };
         self.repo.upsert(&definition).await?;
         Ok(to_definition_dto(definition))
@@ -382,6 +406,69 @@ impl ImportRunService {
         Ok(to_run_dto(run))
     }
 
+    /// Starts every import whose interval says it is due, and answers
+    /// how many were started.
+    ///
+    /// The verb a timer calls, and everything hard about it is already
+    /// somewhere else: when a definition is due is
+    /// [`ImportDefinitionRepository::due`]'s, and whether one is
+    /// already going is [`run`](Self::run)'s.
+    ///
+    /// **A refusal is not a failure here.** A definition due while its
+    /// own run is still going comes back from `due` and is refused by
+    /// `run`; that is the two answering correctly, not something to
+    /// report. Anything else that goes wrong is logged against the
+    /// definition it happened to and does not stop the others — a
+    /// caller on a timer has nobody to return an error to, and one
+    /// unreachable definition must not cost the rest their turn.
+    ///
+    /// [`ImportDefinitionRepository::due`]: crate::domain::repository::ImportDefinitionRepository::due
+    pub async fn start_due(
+        self: &Arc<Self>,
+        now: DateTime<Utc>,
+        by: &AttributionContext,
+    ) -> Result<u64, DomainError> {
+        let due = self.repo.due(now).await?;
+        let mut started = 0;
+        for definition in due {
+            match self
+                .run(
+                    RunImportDefinitionCommand {
+                        id: definition.id.clone(),
+                    },
+                    by,
+                )
+                .await
+            {
+                Ok(_) => started += 1,
+                // Not a failure, and not silence either. A child
+                // that hangs inside a living process holds its slot
+                // until the process restarts; its run row says so
+                // loudest, and this is the line that says it is still
+                // happening. `debug`, because it repeats every tick —
+                // which is the point, and also why it cannot be
+                // anything louder.
+                Err(DomainError::Conflict {
+                    kind: ConflictKind::Blocked,
+                    ..
+                }) => tracing::debug!(
+                    event = "diag.import_schedule.still_running",
+                    definition = %definition.id,
+                    name = %definition.name,
+                    "a scheduled import came due while its own run was still going"
+                ),
+                Err(err) => tracing::warn!(
+                    event = "diag.import_schedule.start_failed",
+                    definition = %definition.id,
+                    name = %definition.name,
+                    error = %err,
+                    "a scheduled import would not start"
+                ),
+            }
+        }
+        Ok(started)
+    }
+
     /// Recent runs of one import, newest first.
     pub async fn runs(
         &self,
@@ -441,6 +528,7 @@ fn to_definition_dto(definition: ImportDefinition) -> ImportDefinitionDto {
         args: definition.args,
         secret_ref: definition.secret_ref,
         secret_header: definition.secret_header,
+        every_minutes: definition.every_minutes,
     }
 }
 

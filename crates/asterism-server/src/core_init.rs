@@ -1099,9 +1099,8 @@ pub async fn init_core_with(
     // when the clock passes a trash stamp's expiry.
     //
     // The observation sweep rides the same trigger for the same
-    // reason: both expire rows on a clock the application does not
-    // otherwise consult, and startup is the one moment a desktop app
-    // reliably reaches.
+    // reason: both expire rows on a clock, and startup is the one
+    // moment a desktop app reliably reaches.
     {
         use asterism_core::domain::job::JobKind;
         use asterism_core::domain::repository::JobQueue as _;

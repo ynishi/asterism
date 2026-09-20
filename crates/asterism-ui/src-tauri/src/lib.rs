@@ -250,6 +250,20 @@ pub fn run() {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
 
+            // The import timer. Why it is started here and not in
+            // `init_core` is
+            // `asterism_core::application::import_scheduler`'s to say;
+            // this is the site that site is talking about.
+            //
+            // Managed rather than held in a local, because the handle
+            // stops the timer when it drops and a local would drop at
+            // the end of `setup`. Tauri's state outlives the process's
+            // useful life, which is exactly the timer's.
+            app.manage(asterism_core::application::ImportSchedule::spawn(
+                server_ctx.import_run_service.clone(),
+                asterism_core::application::DEFAULT_TICK,
+            ));
+
             // HTTP serve (both modes). One core per machine: bind
             // 127.0.0.1 on the resolved port and serve the shared
             // router. A second core does not get this far — it dies on

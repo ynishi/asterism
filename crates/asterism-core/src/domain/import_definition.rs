@@ -37,7 +37,7 @@
 
 use chrono::{DateTime, Utc};
 
-/// An import that can be run on demand.
+/// An import that can be run on demand, or on an interval it carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportDefinition {
     /// Stable id.
@@ -67,6 +67,35 @@ pub struct ImportDefinition {
     /// another binary's flag by name. A pair the type keeps together
     /// cannot be half-filled.
     pub secret_header: Option<String>,
+    /// Minutes between starts, or `None` for an import nothing starts
+    /// on its own.
+    ///
+    /// An interval and not a time of day. What a schedule is for here
+    /// is "keep this filling", and an interval has no timezone — so it
+    /// has no hour that happens twice a year, none that does not happen
+    /// at all, and no question about which of those a missed run
+    /// belongs to. A time of day is a different field when somebody
+    /// wants one, and it will need its own answers to exactly those
+    /// questions.
+    ///
+    /// Measured from one run's **start**, so an import taking twenty
+    /// minutes on a thirty-minute interval runs every thirty and not
+    /// every fifty: this is a cadence, not a rest between runs.
+    ///
+    /// A definition that has never run and carries one is due at once.
+    /// Somebody setting an interval is asking for the archive to start
+    /// filling, not to start filling an interval from now.
+    ///
+    /// It is not the only thing that decides when the next run starts.
+    /// A `retry_after_secs` on the last run is a wait the *source*
+    /// stated, and it wins when it lands later — see
+    /// [`ImportDefinitionRepository::due`]. Nothing else backs off: a
+    /// source that is simply down is tried again on the interval,
+    /// because an invented backoff is a second policy with its own
+    /// failure modes and belongs to whoever asks for it.
+    ///
+    /// [`ImportDefinitionRepository::due`]: crate::domain::repository::ImportDefinitionRepository::due
+    pub every_minutes: Option<u32>,
 }
 
 /// How a run ended.
