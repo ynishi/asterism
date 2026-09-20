@@ -549,6 +549,20 @@ and this project adheres to
 
 ### Fixed
 
+- **The organisation warning covers every subject a validator has no name to
+  show for** (found while working on #179, which this does not close). The
+  warning asks whether a signing certificate gives a validator a signer name to
+  display, and two subjects that give none were passing it: one whose
+  organisation attribute is written in a string type this build cannot read back
+  — `x509-parser` decodes NumericString, PrintableString, Utf8String and
+  IA5String and errs on the rest, so an ordinary `O=` written as a BMPString
+  arrives as nothing — and one carrying two attributes, which was judged on the
+  first where a validator shows the last. An empty attribute was already warned
+  about and stays so; what is new is that its measurement is in the suite, which
+  also pins that such a certificate signs and reads back with nothing but the
+  trust code. The warning's own wording names all three conditions now, and that
+  wording is what strict signing turns into the refusal an operator reads at
+  startup.
 - **A ComfyUI dispatch collects what was saved, not what was previewed** (#289).
   #285's harvest fetched every image the history named, and ComfyUI's
   `PreviewImage` is a `SaveImage` that writes to the temp directory and reports
