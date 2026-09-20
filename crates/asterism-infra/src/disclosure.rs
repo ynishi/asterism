@@ -2756,28 +2756,26 @@ mod tests {
     /// comparison: the list answers for the version actually resolved,
     /// however it arrived.
     ///
-    /// What the repaired version answers for the second row, measured
-    /// 2026-09-21 against `c2pa` 0.91.0-rc.3 (tag
-    /// `c2pa-rc-v0.91.0-rc.3`): `signingCredential.untrusted` alone,
-    /// issuer still absent. It does not reclassify
-    /// `claimSignature.mismatch` into another code — it stops emitting
-    /// it — so what the domain's mapping then receives is the trust code
-    /// by itself. The first row was *not* measured: that certificate
-    /// carries a second usage and an appended issuer, and the probe
-    /// varied only the organisation on [`self_signed_pair`]'s shape.
-    /// Neither was `validation_state`, which nothing here reads and this
-    /// test would not notice changing.
+    /// What the repaired version answers, measured 2026-09-21 by
+    /// running this test against `c2pa` 0.91.0-rc.3 (tag
+    /// `c2pa-rc-v0.91.0-rc.3`) — both rows, these fixtures, this
+    /// writer, not a probe standing in for them:
     ///
-    /// Measured out of tree because this workspace cannot build that
-    /// version, and what stopped it is what moving the pin costs: rustc
-    /// 1.96, `SigningAlg` gone from `c2pa::crypto::raw_signature`, and
-    /// signing that verifies its own output — which refuses, at signing
-    /// time, the manifest this build writes for a record that
-    /// established no digital source type. That manifest carries no
-    /// actions assertion at all (`manifest::definition` in
-    /// `asterism-disclosure-format`, named in text because rustdoc does
-    /// not resolve a link from a `#[cfg(test)]` doc), and 0.90 signs it
-    /// and leaves the complaint to the read-back.
+    /// | certificate | failures | issuer |
+    /// |---|---|---|
+    /// | with `organizationName` | unchanged | named |
+    /// | without | `signingCredential.untrusted` alone | none |
+    ///
+    /// The repair does not reclassify `claimSignature.mismatch` into
+    /// another code, it stops emitting it, and the second row is the
+    /// only thing in this test that moves. So the edit this test needs
+    /// on the day the pin moves is dropping that one string from the
+    /// second assertion below, and the mapping in `asterism-core`
+    /// reads the result correctly with no change at all.
+    ///
+    /// `validation_state` is not a column because nothing here reads
+    /// it. It was `Valid` on both certificates under both versions when
+    /// asked directly, and this test would not notice it changing.
     #[test]
     fn what_the_sdk_reports_for_this_builds_own_signatures() {
         let (cert, key) = issued_shaped_pair();
@@ -2818,6 +2816,73 @@ mod tests {
             without_org_issuer, None,
             "and the missing issuer name is the only field that separates that from a \
              real forgery, which is why the domain's mapping takes it"
+        );
+    }
+
+    /// What a signed writer does with a record that established no
+    /// digital source type, which is the one signing path no test
+    /// reached and the one the pin move changes.
+    ///
+    /// `manifest::definition` writes the actions assertion only when a
+    /// source type was established, so this record's manifest carries
+    /// no action at all — and a C2PA claim has to open with
+    /// `c2pa.created` or `c2pa.opened`. The resolved version signs it
+    /// anyway and leaves the complaint to whoever reads the file back,
+    /// which is what this pins.
+    ///
+    /// It is a characterisation test, not an endorsement: a manifest no
+    /// validator accepts is a worse answer than no manifest. The
+    /// version that repairs #179's defect verifies as it signs and
+    /// refuses this outright — measured 2026-09-21 by running this test
+    /// against 0.91.0-rc.3, where the half comes back
+    /// `Failed("…assertion.action.malformed: first action must be
+    /// created or opened")` and the file is left untouched. That is the
+    /// better of the two answers, so the day the pin moves this test
+    /// flips to expect it rather than anything else changing.
+    ///
+    /// What stays open is whether the writer should decline before
+    /// signing instead, with a skip reason of its own: the record may
+    /// still disclose a system or a prompt, so
+    /// [`Skipped::NothingToDisclose`] would be a false reason and a new
+    /// variant reaches the release row's SQL and the release view. That
+    /// is a decision, not a cleanup, and this test is here to put it in
+    /// front of whoever moves the pin.
+    #[test]
+    fn a_record_with_no_source_type_is_signed_into_a_claim_that_opens_with_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shot.png");
+        std::fs::write(&path, png_fixture()).unwrap();
+
+        let outcome = DisclosureWriter::signed_with(throwaway_identity())
+            .apply(&path, &DisclosureRecord::for_asset("asset-1"))
+            .expect("the writer does not raise on this record");
+        assert_eq!(
+            outcome.manifest,
+            Half::Written,
+            "the resolved version signs it: {outcome:?}"
+        );
+
+        let (codes, _) = read_manifest("image/png", std::fs::read(&path).unwrap())
+            .map(|reader| {
+                let codes: Vec<String> = reader
+                    .validation_results()
+                    .and_then(|results| results.active_manifest())
+                    .map(|statuses| {
+                        statuses
+                            .failure()
+                            .iter()
+                            .map(|status| status.code().to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (codes, ())
+            })
+            .expect("a manifest was written over these bytes");
+        assert!(
+            codes
+                .iter()
+                .any(|code| code == "assertion.action.malformed"),
+            "and what it signed is a claim that opens with nothing: {codes:?}"
         );
     }
 

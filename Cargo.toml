@@ -427,13 +427,29 @@ rand_chacha = "0.9"
 # `file_io` is what `create_signer::from_files` needs — the certificate
 # and key arrive as paths from settings.
 #
-# Held at 0.90 deliberately, and moving off is not a version bump:
-# 0.91.0-rc.3 was measured needing rustc 1.96, moving `SigningAlg` out of
-# `c2pa::crypto::raw_signature`, and refusing at signing time a manifest
-# this build writes today. What it reports for a certificate carrying no
-# organisation, and how that was run, is on
+# Held at 0.90 because the repair for contentauth/c2pa-rs#2262 is in no
+# published version, not because moving is hard. The move was run:
+# 2026-09-21 this workspace built and tested against 0.91.0-rc.3, and
+# `asterism-core` and `asterism-infra` pass entire apart from the two
+# characterisation tests that exist to fail on exactly this. What it
+# takes, in full:
+#
+#   1. `cargo update base64@0.23.0` — 0.91 requires `base64 ^0.23.1`
+#      where the lockfile holds 0.23.0 through `rmcp`, and without this
+#      resolution fails before anything compiles.
+#   2. The two characterisation tests' expectations. Each says in its
+#      own doc what it becomes.
+#   3. `just licences`, for the lockfile rows that move.
+#
+# What is *not* on that list was checked and taken off it: rustc, whose
+# 1.96 requirement stable passed long ago; the `SigningAlg` path, now
+# named from the crate root where both versions carry it; and the
+# manifest written for a record with no digital source type, which 0.91
+# refuses to sign — the better answer, since what 0.90 signs there is a
+# claim no validator accepts.
+#
 # `what_the_sdk_reports_for_this_builds_own_signatures` in
-# `asterism-infra`; this is a pointer to it and not a second record.
+# `asterism-infra` holds the measurements; this is a pointer to them.
 c2pa = { version = "0.90", default-features = false, features = [
     "rust_native_crypto",
     "file_io",
