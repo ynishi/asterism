@@ -562,18 +562,26 @@ and this project adheres to
   warned about and signs and reads back cleanly, and a non-UTF-8 `O=` was the
   value that fails and nothing was said about it. Both read the way the SDK does
   now.
-- **What the repaired SDK answers is measured and recorded, and the pin is not
-  moved** (#179). Upstream merged a repair on 2026-09-04
-  (contentauth/c2pa-rs#2540) that no version this workspace resolves to carries,
-  and the merge is easy to mistake for the tree having it. Measured against
-  0.91.0-rc.3 out of tree, because this workspace cannot build that version: the
-  repair stops emitting `claimSignature.mismatch` rather than reclassifying it,
-  so the mapping in `asterism-core` needs no second branch, and the case that
-  will need one — a real forgery under an unnamed signer — is written down and
-  deferred to the day the pin moves. What moving it costs is recorded at the
-  pin. `README.md`'s statement that a self-issued certificate validates as
-  untrusted with the validation state intact is scoped to one carrying an
-  organisation, which is what it was always true of.
+- **The move to the repaired SDK is run and recorded, and the pin stays where it
+  is** (#179). Upstream merged a repair on 2026-09-04 (contentauth/c2pa-rs#2540)
+  that no published version carries, and the merge is easy to mistake for this
+  tree having it. Rather than wait to find out on the day, the whole workspace
+  was built and tested against 0.91.0-rc.3: `asterism-core` and `asterism-infra`
+  pass entire apart from the two characterisation tests that exist to fail on
+  exactly this, and each now says in its own doc what it becomes. The repair
+  stops emitting `claimSignature.mismatch` rather than reclassifying it, so the
+  mapping in `asterism-core` needs no change at all; the case that will need one
+  — a real forgery under an unnamed signer — is written down and deferred to the
+  pin move. Three of the things that looked like costs are gone: `SigningAlg` is
+  named from the crate root, which both versions carry; rustc's 1.96 requirement
+  was met by stable long ago; and the manifest signed for a record that
+  established no digital source type, which 0.91 refuses outright, is the better
+  answer, because what this build signs there today is a claim no validator
+  accepts. What remains is one lockfile bump, two test expectations, and a
+  notice regeneration, listed at the pin. `README.md`'s statement that a
+  self-issued certificate validates as untrusted with the validation state
+  intact is scoped to one carrying an organisation, which is what it was always
+  true of.
 - **A ComfyUI dispatch collects what was saved, not what was previewed** (#289).
   #285's harvest fetched every image the history named, and ComfyUI's
   `PreviewImage` is a `SaveImage` that writes to the temp directory and reports
