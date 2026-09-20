@@ -629,9 +629,10 @@ impl SigningIdentity {
             }
             if !refusals.is_empty() {
                 return Err(DisclosureError::Identity(format!(
-                    "strict signing refuses this certificate: {}. It can sign — this is \
-                     what a publicly issued one would carry and this one does not — so an \
-                     installation that does not publish can use it with strict signing off",
+                    "strict signing refuses this certificate: {}. It can sign — every item \
+                     above is something a trust list or this build's own reader wanted and \
+                     did not get, not a reason the bytes will not sign — so an installation \
+                     that does not publish can use it with strict signing off",
                     refusals.join("; ")
                 )));
             }
@@ -1058,25 +1059,34 @@ pub fn inspect_certificate(pem: &[u8]) -> CertificateVerdict {
         ));
     }
 
-    // Whether there is a name for a validator to show, which is the
-    // question every other item in this list asks in its own way. Three
-    // subjects have none: one with no organisation attribute, one whose
-    // attribute is empty, and one whose attribute is encoded in a
-    // string type this build cannot read back — `x509-parser`'s
-    // `as_str` takes NumericString, PrintableString, Utf8String and
-    // IA5String and errs on the rest, so a perfectly good `O=` written
-    // as a BMPString arrives as nothing (`src/x509.rs`).
+    // Whether there is a name for a validator to show — the one item
+    // here that asks about display rather than about what the
+    // certificate may sign or be listed under. Three subjects give
+    // none: one with no organisation attribute, one whose attribute is
+    // empty, and one whose attribute is written in a string type this
+    // build cannot read back, where `x509-parser`'s `as_str` errs on
+    // every tag outside its accept-list (`src/x509.rs`) and an ordinary
+    // `O=` written as a BMPString therefore arrives as nothing.
     //
     // The third was silently accepted before, because the predicate
     // asked `is_ok_and(is_empty)` and an unreadable value is neither.
     // The *last* attribute rather than the first: it is the one `c2pa`
-    // puts in `issuer_org`, so it is the one a validator displays.
+    // 0.90.12 puts in `issuer_org`, which is the field a validator
+    // showing a signer's name reads.
     //
-    // This is not `c2pa`'s own read, and deliberately. That read decides
-    // whether a signature verifies, and what it decides is answered
-    // where the consequence lives — `integrity_of` in `asterism-core`,
-    // which takes whether the signature carried an issuer name. This
-    // item is about listing, like the rest of `warnings`.
+    // Two of the three conditions are `c2pa`'s own read — same end of
+    // the same iterator, same accept-list. The divergence is the empty
+    // value, which `c2pa` returns as `Some("")` and is content with and
+    // this warns about, because a blank is a blank to whoever reads it.
+    // What that read costs when it fails is not decided here and not
+    // restated here: it happens after the signature has already
+    // verified, and `SIGNATURE_MISMATCH` in `asterism-core` is where
+    // that is written down and pinned by a test.
+    //
+    // Which leaves this item filed among reasons a certificate would
+    // not be *listed* while asking a different question. That is the
+    // placement as settled, recorded so the tension is visible rather
+    // than discovered.
     if certificate
         .subject()
         .iter_organization()
@@ -1743,9 +1753,9 @@ mod tests {
     /// builds.
     ///
     /// A [`rcgen::DnValue`] rather than a string, because the string
-    /// *type* is half of what [`inspect_certificate`] asks about: a
-    /// readable name written as a BMPString is a name this build cannot
-    /// read back, and a `&str` cannot express one.
+    /// *type* is one of the three things [`inspect_certificate`] asks
+    /// about: a readable name written as a BMPString is a name this
+    /// build cannot read back, and a `&str` cannot express one.
     fn self_signed_pair_with_organisation(
         organisation: Option<rcgen::DnValue>,
     ) -> (Vec<u8>, Vec<u8>) {
@@ -2843,13 +2853,12 @@ mod tests {
     /// A perfectly good organisation name that this build cannot read.
     ///
     /// The condition this item gained, and the one that used to pass in
-    /// silence: `x509-parser`'s `as_str` decodes NumericString,
-    /// PrintableString, Utf8String and IA5String and errs on the rest,
-    /// so `O=Contoso Ltd` written as a BMPString — a legal
-    /// `DirectoryString` choice — arrives as nothing at all. The old
-    /// predicate asked `is_ok_and(is_empty)`, which an unreadable value
-    /// is neither, so it said nothing about a certificate no validator
-    /// here can name the signer of.
+    /// silence. BMPString is a legal `DirectoryString` choice, so this
+    /// certificate is ordinary everywhere but here; which tags arrive as
+    /// nothing, and why, is on the predicate in [`inspect_certificate`].
+    /// The old one asked `is_ok_and(is_empty)`, which an unreadable
+    /// value is neither, so it said nothing about a certificate no
+    /// validator here can name the signer of.
     #[test]
     fn an_organisation_written_in_a_type_this_build_cannot_read_is_warned_about() {
         let organisation = rcgen::DnValue::BmpString(
