@@ -549,6 +549,31 @@ and this project adheres to
 
 ### Fixed
 
+- **The warning about a certificate with no organisation says what it costs, and
+  the check under it reads the field the way `c2pa` does** (#179). A subject
+  carrying no `organizationName` produces manifests whose claim signature `c2pa`
+  reports as mismatched, and the warning called that a display consequence —
+  that a validator showing a signer's name reads that field. It now says what a
+  file signed with such a certificate comes back as, and the strict refusal
+  beside it stops closing with advice that reads as costless. The predicate
+  under it was wrong in the direction the old wording made harmless: it took the
+  _first_ organisation attribute and warned when the value was empty, where
+  `c2pa` takes the last and fails when the value will not decode. So `O=""` was
+  warned about and signs and reads back cleanly, and a non-UTF-8 `O=` was the
+  value that fails and nothing was said about it. Both read the way the SDK does
+  now.
+- **What the repaired SDK answers is measured and recorded, and the pin is not
+  moved** (#179). Upstream merged a repair on 2026-09-04
+  (contentauth/c2pa-rs#2540) that no version this workspace resolves to carries,
+  and the merge is easy to mistake for the tree having it. Measured against
+  0.91.0-rc.3 out of tree, because this workspace cannot build that version: the
+  repair stops emitting `claimSignature.mismatch` rather than reclassifying it,
+  so the mapping in `asterism-core` needs no second branch, and the case that
+  will need one — a real forgery under an unnamed signer — is written down and
+  deferred to the day the pin moves. What moving it costs is recorded at the
+  pin. `README.md`'s statement that a self-issued certificate validates as
+  untrusted with the validation state intact is scoped to one carrying an
+  organisation, which is what it was always true of.
 - **A ComfyUI dispatch collects what was saved, not what was previewed** (#289).
   #285's harvest fetched every image the history named, and ComfyUI's
   `PreviewImage` is a `SaveImage` that writes to the temp directory and reports
