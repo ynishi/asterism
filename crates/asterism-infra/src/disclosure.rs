@@ -1740,9 +1740,15 @@ mod tests {
     }
 
     /// The same pair, carrying the organisation attribute the caller
-    /// names — including an empty one, which is the value the predicate
-    /// in [`inspect_certificate`] used to read as an absence.
-    fn self_signed_pair_with_organisation(organisation: Option<&str>) -> (Vec<u8>, Vec<u8>) {
+    /// builds.
+    ///
+    /// A [`rcgen::DnValue`] rather than a string, because the string
+    /// *type* is half of what [`inspect_certificate`] asks about: a
+    /// readable name written as a BMPString is a name this build cannot
+    /// read back, and a `&str` cannot express one.
+    fn self_signed_pair_with_organisation(
+        organisation: Option<rcgen::DnValue>,
+    ) -> (Vec<u8>, Vec<u8>) {
         let key = rcgen::KeyPair::generate().expect("a P-256 key pair");
         let mut params = rcgen::CertificateParams::new(vec!["asterism.invalid".to_string()])
             .expect("certificate parameters");
@@ -2809,7 +2815,7 @@ mod tests {
     /// returns is only settled by running one.
     #[test]
     fn an_empty_organisation_is_warned_about_and_still_signs() {
-        let (cert, key) = self_signed_pair_with_organisation(Some(""));
+        let (cert, key) = self_signed_pair_with_organisation(Some("".into()));
         assert!(
             inspect_certificate(&cert)
                 .warnings
@@ -2831,6 +2837,31 @@ mod tests {
             issuer.as_deref(),
             Some(""),
             "with the blank itself in the field a validator would show"
+        );
+    }
+
+    /// A perfectly good organisation name that this build cannot read.
+    ///
+    /// The condition this item gained, and the one that used to pass in
+    /// silence: `x509-parser`'s `as_str` decodes NumericString,
+    /// PrintableString, Utf8String and IA5String and errs on the rest,
+    /// so `O=Contoso Ltd` written as a BMPString — a legal
+    /// `DirectoryString` choice — arrives as nothing at all. The old
+    /// predicate asked `is_ok_and(is_empty)`, which an unreadable value
+    /// is neither, so it said nothing about a certificate no validator
+    /// here can name the signer of.
+    #[test]
+    fn an_organisation_written_in_a_type_this_build_cannot_read_is_warned_about() {
+        let organisation = rcgen::DnValue::BmpString(
+            rcgen::string::BmpString::try_from("Contoso Ltd").expect("a UCS-2 name"),
+        );
+        let (cert, _key) = self_signed_pair_with_organisation(Some(organisation));
+        assert!(
+            inspect_certificate(&cert)
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("no signer name to display")),
+            "a name nothing here can decode is no name to display"
         );
     }
 
