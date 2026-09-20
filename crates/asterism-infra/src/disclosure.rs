@@ -282,7 +282,13 @@ pub enum DisclosureError {
 pub struct SigningIdentity {
     cert_chain: Vec<u8>,
     key: KeyMaterial,
-    alg: c2pa::crypto::raw_signature::SigningAlg,
+    /// Named from the crate root rather than through
+    /// `c2pa::crypto::raw_signature`, which is where 0.90 defines it and
+    /// 0.91 does not: the raw-crypto half moved to its own crate there
+    /// and the type is re-exported at the root. Both versions carry the
+    /// root name, so this one path compiles against either and the pin
+    /// can move without touching a call site.
+    alg: c2pa::SigningAlg,
     tsa_url: Option<String>,
 }
 
@@ -565,7 +571,7 @@ impl SigningIdentity {
         cert_chain: &[u8],
         alg: &str,
         strictness: Strictness,
-    ) -> Result<c2pa::crypto::raw_signature::SigningAlg, DisclosureError> {
+    ) -> Result<c2pa::SigningAlg, DisclosureError> {
         if names_a_test_certificate(cert_chain) {
             return Err(DisclosureError::Identity(
                 "this is a C2PA test certificate: a manifest signed with it validates as \
@@ -576,7 +582,7 @@ impl SigningIdentity {
             ));
         }
         let alg = alg
-            .parse::<c2pa::crypto::raw_signature::SigningAlg>()
+            .parse::<c2pa::SigningAlg>()
             .map_err(|e| DisclosureError::Identity(format!("unknown signing algorithm: {e}")))?;
 
         // What the certificate says about itself, after what it is
@@ -695,7 +701,7 @@ impl SigningIdentity {
 /// they are public material and go into every manifest anyway.
 #[cfg(target_os = "macos")]
 mod keychain {
-    use c2pa::crypto::raw_signature::SigningAlg;
+    use c2pa::SigningAlg;
     use security_framework::item::{ItemSearchOptions, KeyClass, Reference, SearchResult};
     use security_framework::key::{Algorithm, SecKey};
 
