@@ -282,7 +282,12 @@ pub enum DisclosureError {
 pub struct SigningIdentity {
     cert_chain: Vec<u8>,
     key: KeyMaterial,
-    alg: c2pa::crypto::raw_signature::SigningAlg,
+    /// Named from the crate root, which is where `c2pa` re-exports it
+    /// (`lib.rs`), rather than through `c2pa::crypto::raw_signature`.
+    /// That module is `pub`, which is why reaching through it compiles,
+    /// and it is `#[doc(hidden)]`, which is the crate saying it is an
+    /// arrangement rather than an interface.
+    alg: c2pa::SigningAlg,
     tsa_url: Option<String>,
 }
 
@@ -560,7 +565,7 @@ impl SigningIdentity {
         cert_chain: &[u8],
         alg: &str,
         strictness: Strictness,
-    ) -> Result<c2pa::crypto::raw_signature::SigningAlg, DisclosureError> {
+    ) -> Result<c2pa::SigningAlg, DisclosureError> {
         if names_a_test_certificate(cert_chain) {
             return Err(DisclosureError::Identity(
                 "this is a C2PA test certificate: a manifest signed with it validates as \
@@ -571,7 +576,7 @@ impl SigningIdentity {
             ));
         }
         let alg = alg
-            .parse::<c2pa::crypto::raw_signature::SigningAlg>()
+            .parse::<c2pa::SigningAlg>()
             .map_err(|e| DisclosureError::Identity(format!("unknown signing algorithm: {e}")))?;
 
         // What the certificate says about itself, after what it is
@@ -624,9 +629,10 @@ impl SigningIdentity {
             }
             if !refusals.is_empty() {
                 return Err(DisclosureError::Identity(format!(
-                    "strict signing refuses this certificate: {}. It can sign — this is \
-                     what a publicly issued one would carry and this one does not — so an \
-                     installation that does not publish can use it with strict signing off",
+                    "strict signing refuses this certificate: {}. It can sign — every item \
+                     above is something a trust list or this build's own reader wanted and \
+                     did not get, not a reason the bytes will not sign — so an installation \
+                     that does not publish can use it with strict signing off",
                     refusals.join("; ")
                 )));
             }
@@ -689,7 +695,7 @@ impl SigningIdentity {
 /// they are public material and go into every manifest anyway.
 #[cfg(target_os = "macos")]
 mod keychain {
-    use c2pa::crypto::raw_signature::SigningAlg;
+    use c2pa::SigningAlg;
     use security_framework::item::{ItemSearchOptions, KeyClass, Reference, SearchResult};
     use security_framework::key::{Algorithm, SecKey};
 
@@ -1053,15 +1059,45 @@ pub fn inspect_certificate(pem: &[u8]) -> CertificateVerdict {
         ));
     }
 
+    // Whether there is a name for a validator to show — the one item
+    // here that asks about display rather than about what the
+    // certificate may sign or be listed under. Three subjects give
+    // none: one with no organisation attribute, one whose attribute is
+    // empty, and one whose attribute is written in a string type this
+    // build cannot read back, where `x509-parser`'s `as_str` errs on
+    // every tag outside its accept-list (`src/x509.rs`) and an ordinary
+    // `O=` written as a BMPString therefore arrives as nothing.
+    //
+    // The third was silently accepted before, because the predicate
+    // asked `is_ok_and(is_empty)` and an unreadable value is neither.
+    // The *last* attribute rather than the first: it is the one `c2pa`
+    // 0.90.12 puts in `issuer_org`, which is the field a validator
+    // showing a signer's name reads.
+    //
+    // Two of the three conditions are `c2pa`'s own read — same end of
+    // the same iterator, same accept-list. The divergence is the empty
+    // value, which `c2pa` returns as `Some("")` and is content with and
+    // this warns about, because a blank is a blank to whoever reads it.
+    // What that read costs when it fails is not decided here and not
+    // restated here: it happens after the signature has already
+    // verified, and `SIGNATURE_MISMATCH` in `asterism-core` is where
+    // that is written down and pinned by a test.
+    //
+    // Which leaves this item filed among reasons a certificate would
+    // not be *listed* while asking a different question. That is the
+    // placement as settled, recorded so the tension is visible rather
+    // than discovered.
     if certificate
         .subject()
         .iter_organization()
-        .next()
-        .is_none_or(|organisation| organisation.as_str().is_ok_and(str::is_empty))
+        .last()
+        .and_then(|organisation| organisation.as_str().ok())
+        .is_none_or(str::is_empty)
     {
         verdict.warnings.push(
-            "its subject names no organisation, and a validator that displays a signer's \
-             name reads that field"
+            "its subject gives a validator no signer name to display — the organisation \
+             attribute is absent, empty, or written in a string type this build does not \
+             read — and a validator that displays a signer's name reads that field"
                 .into(),
         );
     }
@@ -1710,6 +1746,19 @@ mod tests {
 
     /// A self-signed certificate and its key, both PEM.
     fn self_signed_pair() -> (Vec<u8>, Vec<u8>) {
+        self_signed_pair_with_organisation(None)
+    }
+
+    /// The same pair, carrying the organisation attribute the caller
+    /// builds.
+    ///
+    /// A [`rcgen::DnValue`] rather than a string, because the string
+    /// *type* is one of the three things [`inspect_certificate`] asks
+    /// about: a readable name written as a BMPString is a name this
+    /// build cannot read back, and a `&str` cannot express one.
+    fn self_signed_pair_with_organisation(
+        organisation: Option<rcgen::DnValue>,
+    ) -> (Vec<u8>, Vec<u8>) {
         let key = rcgen::KeyPair::generate().expect("a P-256 key pair");
         let mut params = rcgen::CertificateParams::new(vec!["asterism.invalid".to_string()])
             .expect("certificate parameters");
@@ -1744,6 +1793,11 @@ mod tests {
         params.key_usages = vec![rcgen::KeyUsagePurpose::DigitalSignature];
         params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::EmailProtection];
         params.use_authority_key_identifier_extension = true;
+        if let Some(organisation) = organisation {
+            params
+                .distinguished_name
+                .push(rcgen::DnType::OrganizationName, organisation);
+        }
         let cert = params.self_signed(&key).expect("a self-signed certificate");
         (cert.pem().into_bytes(), key.serialize_pem().into_bytes())
     }
@@ -2755,6 +2809,68 @@ mod tests {
             without_org_issuer, None,
             "and the missing issuer name is the only field that separates that from a \
              real forgery, which is why the domain's mapping takes it"
+        );
+    }
+
+    /// An empty organisation is warned about, and signs perfectly well.
+    ///
+    /// The pair that says what this warning is for. An attribute
+    /// carrying nothing leaves a validator the same blank a missing one
+    /// does, so the item fires — and the file it signs comes back with
+    /// the trust code alone and an issuer field carrying that blank, so
+    /// the item is not about whether the signature is good.
+    ///
+    /// Measured rather than reasoned about, because the reading that
+    /// says `c2pa` accepts this value is a reading, and what a reader
+    /// returns is only settled by running one.
+    #[test]
+    fn an_empty_organisation_is_warned_about_and_still_signs() {
+        let (cert, key) = self_signed_pair_with_organisation(Some("".into()));
+        assert!(
+            inspect_certificate(&cert)
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("no signer name to display")),
+            "an attribute carrying nothing displays as nothing"
+        );
+
+        let identity =
+            SigningIdentity::from_bytes(cert, key, "es256", None, Strictness::Permissive)
+                .expect("an empty organisation is not a refusal");
+        let (codes, issuer) = signed_readback(identity);
+        assert_eq!(
+            codes,
+            ["signingCredential.untrusted"],
+            "and a file signed with it comes back with the trust code alone"
+        );
+        assert_eq!(
+            issuer.as_deref(),
+            Some(""),
+            "with the blank itself in the field a validator would show"
+        );
+    }
+
+    /// A perfectly good organisation name that this build cannot read.
+    ///
+    /// The condition this item gained, and the one that used to pass in
+    /// silence. BMPString is a legal `DirectoryString` choice, so this
+    /// certificate is ordinary everywhere but here; which tags arrive as
+    /// nothing, and why, is on the predicate in [`inspect_certificate`].
+    /// The old one asked `is_ok_and(is_empty)`, which an unreadable
+    /// value is neither, so it said nothing about a certificate no
+    /// validator here can name the signer of.
+    #[test]
+    fn an_organisation_written_in_a_type_this_build_cannot_read_is_warned_about() {
+        let organisation = rcgen::DnValue::BmpString(
+            rcgen::string::BmpString::try_from("Contoso Ltd").expect("a UCS-2 name"),
+        );
+        let (cert, _key) = self_signed_pair_with_organisation(Some(organisation));
+        assert!(
+            inspect_certificate(&cert)
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("no signer name to display")),
+            "a name nothing here can decode is no name to display"
         );
     }
 
