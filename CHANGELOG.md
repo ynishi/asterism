@@ -13,16 +13,17 @@ and this project adheres to
 - **Every pull request is checked on Windows as well as macOS** (part of #306).
   Code that only compiles on Windows, or anywhere but macOS, was compiled by no
   automation here, since CI and the release build both ran only on macOS.
-  `check.yml` now has a Windows job that runs every gate the macOS one does
-  except the Rust tests, so formatting, clippy and the frontend checks answer
-  for that code in the pull request that changes it. The tests stay with the
-  macOS job: parts of the suite fail on Windows, some because the tests assume
-  unix and some because the production code under them does, and they would fail
-  on every `main` run and on any pull request reaching those crates, whatever it
-  changed. #306's Open 4 comment anticipated that as the first way to narrow the
-  job; making the code and the tests portable is what brings them back. The
-  `Justfile` runs its recipes under Git for Windows' bash there. `docs/aidoc/`
-  stays with the macOS job, and the Windows run says so rather than checking it.
+  `check.yml` now has a Windows job that runs the same gates as the macOS one,
+  Rust tests included, so formatting, clippy, the frontend checks and the tests
+  answer for that code in the pull request that changes it. For a while it left
+  the tests to the macOS job, because parts of the suite failed on Windows
+  whatever a change touched — #306's Open 4 comment records that — and they came
+  back with #309's fixes, with a Chocolatey ffmpeg for the tests that spawn one.
+  They came back before a Windows run had shown the suite green: three targets
+  that timed out waiting on the job worker have no cause found yet. That ffmpeg
+  is a GPL build and ships nowhere; nothing leaves the job. The `Justfile` runs
+  its recipes under Git for Windows' bash there. `docs/aidoc/` stays with the
+  macOS job, and the Windows run says so rather than checking it.
 
 - **The video jobs find, start and encode with ffmpeg the way Windows needs**
   (part of #306). The first slice of a Windows build, and the part that does not
@@ -579,6 +580,24 @@ and this project adheres to
   happen before anything can carry it.
 
 ### Fixed
+
+- **Exports, disclosure stamps, file:// sends and team blobs work on Windows**
+  (#309). Four things assumed unix. The file exporter took "absolute" to mean
+  "starts with `/`" and refused every local directory on Windows; it now asks
+  the platform, and joins a `~` path onto `$HOME` the same way. Writing a
+  disclosure into a file and storing a team blob both fsync the directory after
+  the rename by opening it as a file, which Windows refuses, so every stamp and
+  every blob upload failed there; on Windows that step is now skipped, which is
+  weaker than on unix — the data is still flushed before the rename, but the
+  renamed entry is not promised to be on disk when the call returns, and the doc
+  comments say so. A `file://` endpoint written from a Windows path put the
+  drive where the host goes; `file_endpoint` now spells one as `file:///C:/...`
+  and the endpoint reader turns that back into the directory. And asking for the
+  original file of an asset whose locator is a directory answered 500 on
+  Windows, where a directory cannot be opened, instead of the 409 unix gives. On
+  macOS the behaviour is the same, except that the export directory error no
+  longer says "(starts with '/')" and a `~` followed by several separators joins
+  onto `$HOME` once instead of leaving `//`.
 
 - **The organisation warning covers a subject whose name this build cannot
   read** (found while working on #179, which this does not close). The warning
