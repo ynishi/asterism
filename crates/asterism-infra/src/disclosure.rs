@@ -1609,7 +1609,7 @@ fn stage(path: &Path) -> std::io::Result<tempfile::NamedTempFile> {
     Ok(temporary)
 }
 
-/// Moves a finished temporary over its target, durably.
+/// Moves a finished temporary over its target, durably on unix.
 ///
 /// The temporary removes itself when dropped, so the failure path needs
 /// no cleanup of its own — which is the part the hand-rolled version

@@ -337,7 +337,8 @@ impl StagingWrite {
             })
     }
 
-    /// Finishes the write: verify → fsync → rename → fsync parents.
+    /// Finishes the write: verify → fsync → rename → fsync parents
+    /// (not on Windows).
     ///
     /// The computed digest is spelled `sha256:` + hex here — the
     /// hasher side of the shared notation; running it through
