@@ -28,8 +28,8 @@
 // shapes are the ones that must succeed, so there the drive forms point
 // at a real directory under the repo and are expected to finish; the
 // UNC form names a host that does not resolve and is only asked to
-// reach the exporter. That branch is written for the Windows build and
-// has not run anywhere yet.
+// reach the exporter. Those expectations are what the Windows build
+// owes; macOS cannot exercise them.
 //
 // A relative path is refused on every platform, and the exporter's
 // message is what the user reads. A unix absolute path under the repo
@@ -51,7 +51,7 @@
 //
 // # Environment
 //
-// The three constraints `card-trash.spec.ts` documents hold here: every
+// The constraints `card-trash.spec.ts` documents hold here: every
 // element command pays the window-focus tax, so every read and click is
 // one untaxed `execute`; nothing inside an in-page callback carries a
 // name; and every wait is bounded and names itself. The helpers are
@@ -350,7 +350,7 @@ async function openCardMenu(trail: string[], label: string, assetId: string): Pr
 
 /** Clicks the menu's "Copy to…" entry. Returns why it could not, or
  *  `null` when it did. The entry is disabled while a dispatch is still
- *  being polled, which is a state the caller waits out beforehand. */
+ *  being polled, so the caller retries until it is not. */
 async function clickCopyTo(): Promise<string | null> {
   return browser
     .execute(() => {

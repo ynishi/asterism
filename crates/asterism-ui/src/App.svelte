@@ -4019,7 +4019,7 @@
     }
     const outputDir = await customPrompt(
       "Copy selection to which directory?",
-      "an absolute path, or one under ~",
+      "an absolute path",
       "",
     );
     if (!outputDir || !outputDir.trim()) return;
