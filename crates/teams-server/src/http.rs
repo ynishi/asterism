@@ -1733,7 +1733,9 @@ async fn events_for_subject(
 /// Ordering (#83 §3): the bytes are durable in the CAS *before* the
 /// link row + `blob-copy completed` event commit in one transaction
 /// (the #89 write API). A failure between the two leaves an orphan
-/// blob — harmless, swept later — and never a dangling link. A digest
+/// blob — harmless, swept later — and never a dangling link (on unix;
+/// the blob store's `StagingWrite::commit` says what Windows leaves
+/// weaker). A digest
 /// mismatch is a `409` carrying declared and computed, with no blob,
 /// no link and no event behind it. A duplicate link (this team already
 /// holds the digest) is the #89 repository's refusal, surfaced as the

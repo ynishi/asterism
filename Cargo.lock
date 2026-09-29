@@ -682,6 +682,7 @@ dependencies = [
  "chrono-tz",
  "color-thief",
  "crc32fast",
+ "futures",
  "image",
  "kamadak-exif",
  "lindera",
@@ -779,6 +780,7 @@ dependencies = [
  "tokio-util",
  "tower",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

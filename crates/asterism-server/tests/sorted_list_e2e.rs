@@ -674,6 +674,15 @@ async fn index_and_list_agree_on_every_axis() {
 /// `update_meta` stamps `Utc::now()`, so without them two edits can land
 /// in one millisecond and the ordering claim becomes a coin flip. The
 /// preconditions below assert the separation actually happened.
+///
+/// No job worker runs. Enrichment jobs the ingest enqueues — `auto_tag`,
+/// `cover_gen` — write the row and move its `updated_at`, which is right
+/// for a sync consumer and wrong for this fixture: `beta` stops being
+/// the untouched row whenever one lands before the reads. Runs on macOS
+/// have read first; the Windows run in #309 logged both jobs finishing
+/// and read `beta` 389 ms past its ingest stamp. Nothing asserted here
+/// reads anything a job produces, so the fixture holds by construction
+/// rather than by timing.
 #[tokio::test(flavor = "multi_thread")]
 async fn modification_stamp_and_axis_close_the_sync_loop() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -683,7 +692,7 @@ async fn modification_stamp_and_axis_close_the_sync_loop() {
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
-        JobWorker::Spawn,
+        JobWorker::None,
         Some(&tmp.path().join("tantivy")),
     )
     .await

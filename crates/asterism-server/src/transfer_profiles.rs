@@ -253,7 +253,11 @@ mod tests {
 
     /// The shape `e2e/forge-release.spec.ts` writes before it drives
     /// the app: a `file://` destination, one sidecar column, and no
-    /// `auth` or `host_key` at all.
+    /// `auth` or `host_key` at all. The spec spells the endpoint as
+    /// `file://` plus the native path and this test uses
+    /// [`file_endpoint`](asterism_exporter_transfer::file_endpoint);
+    /// the two agree on unix only, since on Windows `file_endpoint`
+    /// writes `file:///C:/...` with forward slashes.
     ///
     /// Pinned here because that spec cannot say why a profile was
     /// refused any faster than a whole `ui-e2e` run, and a profile it
@@ -262,12 +266,12 @@ mod tests {
     #[test]
     fn the_shape_the_release_e2e_writes_is_usable() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let destination = tmp.path().join("e2e-sent/1789");
+        let destination = tmp.path().join("e2e-sent").join("1789");
         write(
             tmp.path(),
             "e2e-file-destination.json",
             &serde_json::json!({
-                "endpoint": format!("file://{}", destination.display()),
+                "endpoint": asterism_exporter_transfer::file_endpoint(&destination),
                 "sidecar": {
                     "filename": "metadata.csv",
                     "columns": [
@@ -283,9 +287,11 @@ mod tests {
         assert_eq!(profile.error, None, "{:?}", profile.error);
         assert_eq!(profile.scheme.as_deref(), Some("file"));
         assert_eq!(profile.host.as_deref(), Some(""));
+        // Compared as paths: on Windows the endpoint spells the
+        // separators as `/`, which name the same directory.
         assert_eq!(
-            profile.directory.as_deref(),
-            Some(destination.display().to_string().as_str())
+            profile.directory.as_deref().map(std::path::Path::new),
+            Some(destination.as_path())
         );
     }
 

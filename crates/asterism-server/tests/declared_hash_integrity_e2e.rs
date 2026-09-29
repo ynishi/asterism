@@ -31,7 +31,9 @@ use asterism_contract::query::GetAssetDetailQuery;
 use asterism_core::application::AssetService;
 use asterism_core::domain::attribution::AttributionContext;
 use asterism_core::domain::content_hash;
-use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
+use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
+
+mod support;
 
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about the declared digest,
@@ -97,19 +99,22 @@ fn declared_hash_note(detail: &AssetDetailDto) -> Option<serde_json::Value> {
 /// than on the digest is what keeps the assertions from racing the
 /// worker.
 async fn wait_for(
-    service: &AssetService,
+    core: &CoreCtx,
     asset_id: &str,
     what: &str,
     ready: impl Fn(&AssetDetailDto) -> bool,
 ) -> AssetDetailDto {
     for _ in 0..120 {
-        let detail = detail_of(service, asset_id).await;
+        let detail = detail_of(&core.asset_service, asset_id).await;
         if ready(&detail) {
             return detail;
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    panic!("{what} did not happen within 30s");
+    panic!(
+        "{what} did not happen within 30s; queue: {}",
+        support::queue_state(core).await
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -130,6 +135,7 @@ async fn a_declared_digest_the_bytes_disagree_with_is_recorded_and_costs_the_ass
         "the fixture only means something if they differ"
     );
 
+    support::trace_jobs();
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
@@ -160,7 +166,7 @@ async fn a_declared_digest_the_bytes_disagree_with_is_recorded_and_costs_the_ass
         .expect("a declaration is a claim, and a claim is never a reason to refuse the file");
 
     let settled = wait_for(
-        &core.asset_service,
+        &core,
         &registered.id,
         "the declared digest was checked",
         |detail| {
@@ -229,6 +235,7 @@ async fn a_declared_digest_the_bytes_agree_with_is_recorded_as_agreement() {
     std::fs::write(&file, bytes).expect("write corpus file");
     let digest = content_hash::of_bytes(bytes);
 
+    support::trace_jobs();
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
@@ -268,7 +275,7 @@ async fn a_declared_digest_the_bytes_agree_with_is_recorded_as_agreement() {
     }
 
     let settled = wait_for(
-        &core.asset_service,
+        &core,
         &registered.id,
         "the declared digest was checked",
         |detail| {
@@ -305,6 +312,7 @@ async fn an_undeclared_registration_is_hashed_exactly_as_before() {
     let file = corpus.join("silent.png");
     std::fs::write(&file, bytes).expect("write corpus file");
 
+    support::trace_jobs();
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
@@ -336,7 +344,7 @@ async fn an_undeclared_registration_is_hashed_exactly_as_before() {
         .expect("add");
 
     let settled = wait_for(
-        &core.asset_service,
+        &core,
         &registered.id,
         "the file was fingerprinted",
         |detail| detail.asset.content_hash.is_some(),
@@ -373,6 +381,7 @@ async fn a_declared_digest_nothing_can_ever_check_is_refused_before_anything_is_
     std::fs::write(&file, b"bytes\n").expect("write corpus file");
     let path = file.to_str().unwrap().to_string();
 
+    support::trace_jobs();
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),

@@ -13,14 +13,13 @@ and this project adheres to
 - **Every pull request is checked on Windows as well as macOS** (part of #306).
   Code that only compiles on Windows, or anywhere but macOS, was compiled by no
   automation here, since CI and the release build both ran only on macOS.
-  `check.yml` now has a Windows job that runs every gate the macOS one does
-  except the Rust tests, so formatting, clippy and the frontend checks answer
-  for that code in the pull request that changes it. The tests stay with the
-  macOS job: parts of the suite fail on Windows, some because the tests assume
-  unix and some because the production code under them does, and they would fail
-  on every `main` run and on any pull request reaching those crates, whatever it
-  changed. #306's Open 4 comment anticipated that as the first way to narrow the
-  job; making the code and the tests portable is what brings them back. The
+  `check.yml` now has a Windows job that runs the same gates as the macOS one,
+  Rust tests included, so formatting, clippy, the frontend checks and the tests
+  answer for that code in the pull request that changes it. For a while it left
+  the tests to the macOS job, because parts of the suite failed on Windows
+  whatever a change touched — #306's Open 4 comment records that — and they came
+  back with #309's fixes, with a Chocolatey ffmpeg for the tests that spawn one.
+  That ffmpeg is a GPL build and ships nowhere; nothing leaves the job. The
   `Justfile` runs its recipes under Git for Windows' bash there. `docs/aidoc/`
   stays with the macOS job, and the Windows run says so rather than checking it.
 
@@ -579,6 +578,40 @@ and this project adheres to
   happen before anything can carry it.
 
 ### Fixed
+
+- **The file exporter, disclosure stamps, file:// sends and team blobs work on
+  Windows** (#309). Four things assumed unix. The file exporter took "absolute"
+  to mean "starts with `/`" and refused every local directory on Windows; it now
+  asks the platform, and joins a `~` path onto `$HOME` the same way. The app's
+  copy-selection prompt still applies its own leading-`/` check before the
+  request reaches the exporter, so a Windows path typed there is refused by the
+  app, not the exporter. Writing a disclosure into a file and storing a team
+  blob both fsync the directory after the rename by opening it as a file, which
+  Windows refuses, so every stamp and every blob upload failed there; on Windows
+  that step is now skipped, which is weaker than on unix — the data is still
+  flushed before the rename, but the renamed entry is not promised to be on disk
+  when the call returns, and the doc comments say so. A `file://` endpoint
+  written from a Windows path put the drive where the host goes; `file_endpoint`
+  now spells one as `file:///C:/...` and the endpoint reader turns that back
+  into the directory. And asking for the original file of an asset whose locator
+  is a directory answered 500 on Windows, where a directory cannot be opened,
+  instead of the 409 unix gives. On macOS the behaviour is the same, except that
+  the export directory error no longer says "(starts with '/')" and a `~`
+  followed by several separators joins onto `$HOME` once instead of leaving
+  `//`.
+
+- **One locked-database poll no longer stops background jobs for good** (#309).
+  When the job worker's claim met a database another writer held longer than the
+  busy timeout, the queue's poll ended at that one error while the worker went
+  on looking alive, so no job ran again until the app restarted — thumbnails,
+  hashes, indexing and duplicate detection all waited. On any platform a slow or
+  virus-scanned disk could do it; a Windows CI runner did. The worker now
+  reopens its poll a second later, and records itself as alive first, since a
+  claim is refused until it has been. The job queue's connections also wait 30 s
+  on a locked database instead of 5 s, which makes the failure rarer but is not
+  what recovers from it. Each failed poll logs two warnings:
+  `diag.jobs.worker_error`, which now names the database's own error, then
+  `diag.jobs.poll_restarted`.
 
 - **The organisation warning covers a subject whose name this build cannot
   read** (found while working on #179, which this does not close). The warning

@@ -153,6 +153,11 @@
       "docs": "What went wrong."
     },
     {
+      "path": "asterism_exporter_transfer::transport::file_endpoint",
+      "kind": "function",
+      "docs": "Spells an absolute directory on this machine as a `file://`\nendpoint that [`read_endpoint`] reads back as the same directory.\nA relative path has no `file://` spelling, and what this returns\nfor one is refused or misread.\n\nOn unix that is `file://` followed by the path, which already starts\nwith the `/` that leaves the authority empty. A Windows path starts\nwith a drive, so written the same way the drive lands where the host\ngoes and the endpoint is refused (#309); the URL form puts a `/`\nbefore the drive and spells the separators as `/` —\n`C:\\out` is `file:///C:/out`. Nothing is percent-encoded, because\n[`read_endpoint`] decodes nothing."
+    },
+    {
       "path": "asterism_exporter_transfer::transport::read_endpoint",
       "kind": "function",
       "docs": "Reads a profile's endpoint into a [`Target`].\n\nThe grammar is a URL's, narrowed to what a destination needs:\n`<scheme>://[host][:port][/dir]`. Credentials in the authority are\nrefused rather than parsed — a password in an endpoint would be\nwritten into the params blob, which is persisted unedited and handed\nback on every read of the dispatch, and the profile's `auth` block is\nthe way that does not do that."

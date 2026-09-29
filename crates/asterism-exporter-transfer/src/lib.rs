@@ -163,7 +163,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub use transport::{
-    Connector, Credentials, HostKey, Scheme, Target, Transport, TransportError, read_endpoint,
+    Connector, Credentials, HostKey, Scheme, Target, Transport, TransportError, file_endpoint,
+    read_endpoint,
 };
 
 /// Slug the registry uses for this exporter.
@@ -207,7 +208,8 @@ pub struct ProfileFacts {
     /// The host the bytes go to. Empty for [`Scheme::File`], which
     /// names no host.
     pub host: String,
-    /// The directory they land in, as the endpoint's path.
+    /// The directory they land in: [`Target::dir`], which says where it
+    /// differs from the endpoint's path.
     pub directory: String,
 }
 

@@ -26,8 +26,10 @@
 //!   app's lifecycle (launch on access, `app_status` / `app_restart`).
 //!   It starts with no backend and connects lazily, so the MCP client's
 //!   session never depends on the app's start order (see `mcp_proxy`).
-//! - **The database**: one SQLite file under WAL, using
-//!   `busy_timeout = 5000`. This binary creates and migrates it; the
+//! - **The database**: one SQLite file under WAL; `sqlite::open` gives
+//!   the catalogue connections `busy_timeout = 5000`, and the job pool
+//!   sets its own (`jobs::JOB_POOL_BUSY_TIMEOUT`). This binary creates
+//!   and migrates it; the
 //!   process that serves opens it. The default path is selected by the
 //!   local data profile (override with `$ASTERISM_HOME`); resolution is
 //!   shared with `asterism-ui` via `asterism_infra::paths`.

@@ -8,12 +8,6 @@
 # silently not be picked up. `just` names the recipe that failed in its own
 # error line, so a failing gate is still identifiable without the split.
 #
-# The Windows job is the one partial composition here: its two gate steps
-# name `check-shared` and the clippy gate and leave the Rust tests off,
-# for the reason that job's comment gives. That makes those two steps a
-# list of their own, and `check`'s comment in the Justfile is where the
-# lists to edit together are named.
-#
 # Recipes are named here rather than cited by line. Every line number
 # this file used to carry had drifted off its target by the time anyone
 # followed it — `Justfile:279`, offered as the definition of green,
@@ -166,10 +160,10 @@ permissions:
 jobs:
   check:
     # All of `check` on macOS: the simple answer and the expensive one.
-    # (The Windows job below is not the split weighed here. It runs
-    # every gate but the Rust tests a second time, for the `cfg` code
-    # this job never compiles, rather than moving any of them off
-    # macOS.) The workspace is not uniformly portable —
+    # (The Windows job below is not the split weighed here. It runs the
+    # same gates a second time, for the `cfg` code this job never
+    # compiles, rather than moving any of them off macOS.) The workspace
+    # is not uniformly portable —
     # `crates/asterism-ui/src-tauri` wants a webview toolkit, and the two
     # recipes above want macOS outright — so the alternative is a Linux
     # job for the portable crates plus a macOS job for the rest. That is
@@ -550,62 +544,48 @@ jobs:
         if: github.event_name != 'pull_request'
         run: just check
 
-  # Every gate but the Rust tests, on Windows, so that code behind
-  # `cfg(not(target_os = "macos"))` and `cfg(windows)` is compiled and
-  # linted by the pull request that changes it. #306's "Open 4" comment
-  # is the decision, and it names the ways to narrow this job, in order,
-  # if what it costs turns out to be more than it is worth.
+  # The same gates on Windows, so that code behind
+  # `cfg(not(target_os = "macos"))` and `cfg(windows)` is compiled, linted
+  # and tested by the pull request that changes it. #306's "Open 4"
+  # comment is the decision, and it names the ways to narrow this job, in
+  # order, if what it costs turns out to be more than it is worth.
   #
-  # This job is on the first of those: it compiles and lints, and the
-  # Rust test suite does not run here. Parts of it fail on Windows, some
-  # because the tests assume unix and some because the production code
-  # they exercise does: paths split and joined on `/`, "absolute" read
-  # as a leading `/`, `file://` endpoints built from native paths, a
-  # directory opened as a file so it can be fsynced. Those failures do
-  # not depend on the change. They fail on every `main` run, and on any
-  # pull request that edits a crate they sit in or touches a path the
-  # sentinel covers — `rust-test-changed` runs only the changed members'
-  # tests otherwise, and the whole workspace then. A Windows test step
-  # would answer nothing about the change in front of it, and making the
-  # code and the tests portable is work of its own. The tests answer in
-  # the macOS job; `rust-test` joins this one as a change to it, made
-  # once the suite passes on Windows. That change owes the job an ffmpeg
-  # as well: the tests that spawn one panic without it, as the macOS
-  # job's install step says.
+  # The tests were off this job once, under the first of those, because
+  # parts of the suite failed on Windows whatever a change touched: some
+  # tests assumed unix, and some production code did — paths joined on
+  # `/`, "absolute" read as a leading `/`, `file://` endpoints built from
+  # native paths, a directory opened as a file to fsync it. #309 fixed
+  # those and brought the tests back. A test that fails here because it
+  # assumes unix is a defect in the test or in the code under it, to be
+  # fixed in one of those two places, not a reason to take the step away
+  # again.
   #
   # A job of its own rather than a matrix over the one above, the shape
   # `release.yml` asks for too: the macOS job regenerates and pushes
   # `docs/aidoc/`, installs a nightly for it, and needs `contents: write`
   # to do so, and none of that belongs here.
   #
-  # It names recipes and never calls cargo, for the rule at the top of
-  # this file: a Windows step that called cargo directly would be a
-  # second definition of green. What it names is `check-changed` and
-  # `check` with `rust-test-changed` and `rust-test` left off —
-  # `check-shared` plus `rust-clippy-changed` on a pull request,
-  # `check-shared` plus `rust-clippy` everywhere else — so a gate added
-  # to `check-shared` reaches this job as it reaches the macOS one.
-  # There is no recipe for that pair: it is this job's narrowing, not a
-  # definition of green anybody runs by hand, and a recipe for it would
-  # be one more composition in the Justfile for `check`'s comment to
-  # keep in step. `check-shared`'s comment in the Justfile says how a
-  # gate that means nothing on Windows behaves there. `aidoc-guard` is
-  # that case, and what it leaves out is this job's to say: nothing here
-  # installs `cargo-aidoc` or its nightly, and nothing here regenerates
-  # the artifacts. The macOS job in the same run is where they are
-  # checked.
+  # It runs the same recipe the macOS job runs, `check-changed` on a pull
+  # request and `check` everywhere else, and not a narrower one. The rule
+  # at the top of this file is why: a Windows step that called cargo
+  # directly would be a second definition of green. `check-shared`'s
+  # comment in the Justfile says how a gate that means nothing on Windows
+  # behaves there. `aidoc-guard` is that case, and what it leaves out is
+  # this job's to say: nothing here installs `cargo-aidoc` or its
+  # nightly, and nothing here regenerates the artifacts. The macOS job in
+  # the same run is where they are checked.
   #
   # `collation-jsc` is not in `check` and so not here either; the top of
   # this file says why it stays out of CI altogether.
   windows:
     runs-on: windows-latest
-    # Set against a measurement. In run 36512441186, cold and with no
-    # cache to restore, every step before the tests — `check-shared` and
-    # the workspace clippy included — finished 13 minutes after the job
-    # started. A cache is saved only by a run that succeeds, so a cold
-    # run is the one to leave room for; this is several of them, and far
-    # short of the six hours a hung step would otherwise hold a runner.
-    timeout-minutes: 60
+    # Set against a measurement. Run 36512441186 was cold, with no cache
+    # to restore, and ran the whole Rust suite: the job finished 39
+    # minutes after it started, 16 of them the test build. A cache is
+    # saved only by a run that succeeds, so a cold run is the one to leave
+    # room for. This is more than twice the cold run, and far short of
+    # the six hours a hung step would otherwise hold a runner.
+    timeout-minutes: 90
     # Read-only. The write permission at the top of this file is for the
     # macOS job's `docs/aidoc/` push, and this job pushes nothing.
     permissions:
@@ -622,15 +602,8 @@ jobs:
       # mode makes the default UTF-8 without the scripts learning about
       # Windows.
       PYTHONUTF8: '1'
-      # The same two as the macOS job, so that what this job costs is
-      # measured on the same terms as that one. The reason that job's
-      # comment gives is its test build, which does not happen here:
-      # every cargo call this job makes is `cargo check` or `cargo
-      # clippy`, which build every target under `dev`, so
-      # `CARGO_PROFILE_TEST_DEBUG` reaches nothing until `rust-test` joins
-      # the job. It stays because `Swatinem/rust-cache` hashes every
-      # `CARGO*` variable into its key, as the macOS job's comment says,
-      # and taking it out would cost a cold run and buy nothing.
+      # The same two as the macOS job, whose comment gives the reason, so
+      # that what this job costs is measured on the same terms as that one.
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
@@ -644,7 +617,7 @@ jobs:
       # every markdown file, and worse, `changed-packages` reads each
       # workspace member as a path ending in a carriage return, finds no
       # manifest under it, and reports that no member changed — which
-      # skips clippy and reads as green.
+      # skips clippy and the tests and reads as green.
       #
       # Symlinks: without `core.symlinks` a tracked symlink is written as
       # a small file holding its target's path. `.claude/CLAUDE.md` is one,
@@ -664,12 +637,10 @@ jobs:
       # including after the macOS job pushes its regeneration.
       # This job pushes nothing, so it needs no branch to push to. On a
       # fork's pull request the macOS job tests the merge commit instead,
-      # for the reason its checkout gives; this job still checks the head.
+      # for the reason its checkout gives; this job still tests the head.
       #
       # Full history for the reason the macOS job's checkout gives:
-      # `rust-clippy-changed` asks `changed-packages` which members the
-      # branch touched, and that answer comes from the merge base with
-      # `origin/main`.
+      # `check-changed` diffs against the merge base with `origin/main`.
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || '' }}
@@ -690,6 +661,17 @@ jobs:
       - name: Fetch every platform's dependencies
         run: cargo fetch --locked
 
+      # The tests that need ffmpeg, for the reason the macOS job's step
+      # gives, from Chocolatey, which the runner image carries. Its
+      # package is a GPL build, and that is acceptable here because
+      # nothing leaves this job: no bundle is built from it, and the
+      # sidecar a bundle carries is built separately, under the LGPL
+      # (`FFMPEG-NOTICE.md`). It lands on `PATH`, so the tests find it
+      # through the same `PATH` lookup a user's own ffmpeg goes through,
+      # `.exe` suffix included, rather than through `$ASTERISM_FFMPEG`.
+      - name: Install ffmpeg
+        run: choco install ffmpeg --no-progress -y
+
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -706,8 +688,8 @@ jobs:
       # missing one fails in seconds rather than after the minutes of
       # gates that ran before the first one needing it. `bash` is the
       # linewise recipes' shell, `cygpath` and `env` are how a shebang
-      # recipe starts, `python` runs the check scripts, and every gate
-      # runs through `just`, `cargo` or `npm`.
+      # recipe starts, `python` runs the check scripts, the tests spawn
+      # `ffmpeg`, and every gate runs through `just`, `cargo` or `npm`.
       # `HOME` is read when the Justfile loads, so every recipe needs it.
       # And the checkout is held to the first step's two settings: a file
       # committed with LF must not be CRLF on disk, and a tracked symlink
@@ -715,7 +697,7 @@ jobs:
       - name: Check the checkout and the tools the gates reach for
         run: |
           failed=0
-          for tool in bash cygpath env python just cargo npm; do
+          for tool in bash cygpath env python ffmpeg just cargo npm; do
             if path=$(command -v "$tool"); then
               echo "$tool: $path"
             else
@@ -741,13 +723,12 @@ jobs:
           done < <(git ls-files -s | awk '$1 == "120000" { print $4 }')
           exit "$failed"
 
-      # The macOS job's last two steps without their test gate, and the
-      # same choice between them; its comment gives the reasons, and the
-      # comment on this job says why the tests are left off.
-      - name: just check-shared rust-clippy-changed
+      # The same two steps as the macOS job's last two, and the same
+      # choice between them; its comment gives the reasons.
+      - name: just check-changed
         if: github.event_name == 'pull_request'
-        run: just check-shared rust-clippy-changed
+        run: just check-changed
 
-      - name: just check-shared rust-clippy
+      - name: just check
         if: github.event_name != 'pull_request'
-        run: just check-shared rust-clippy
+        run: just check

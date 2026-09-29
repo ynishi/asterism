@@ -35,6 +35,8 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
+mod support;
+
 /// The rule V73 seeds, at the id the migration froze. It selects the
 /// `vdsl` chunk's `script`, so every fixture below carries one — it is
 /// the *other* rule every assertion about "this rule's rows" is measured
@@ -210,6 +212,7 @@ async fn library(
     std::fs::create_dir_all(&corpus).expect("corpus dir");
     let db_path = tmp.join("asterism.db");
 
+    support::trace_jobs();
     let core = init_core_with(
         &db_path,
         Arc::new(LogEmitter),
@@ -270,7 +273,7 @@ async fn library(
 /// gives. Failed rows do not count towards either — which matters here,
 /// since these fixtures are PNG headers with no decodable image data and
 /// every `thumb_gen` over them fails.
-async fn drain(router: &Router, what: &str) {
+async fn drain(core: &CoreCtx, router: &Router, what: &str) {
     for _ in 0..600 {
         let (status, depth) = call(router, get("/asterism/jobs/depth")).await;
         assert_eq!(status, StatusCode::OK, "{depth}");
@@ -281,7 +284,10 @@ async fn drain(router: &Router, what: &str) {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    panic!("{what}: the queue never drained");
+    panic!(
+        "{what}: the queue never drained; queue: {}",
+        support::queue_state(core).await
+    );
 }
 
 /// The rows one rule has filed, oldest material first — read over a
@@ -383,8 +389,8 @@ async fn a_registered_rule_derives_keys_and_editing_it_re_derives_only_its_own()
         export("phase8_hires.lua", 1_001),
         export("phase9_portrait.lua", 2_000),
     ];
-    let (_core, router, db) = library(tmp.path(), "series-edit", &exports).await;
-    drain(&router, "the import").await;
+    let (core, router, db) = library(tmp.path(), "series-edit", &exports).await;
+    drain(&core, &router, "the import").await;
 
     // The seeded rule answering all three is how this file knows the
     // chunks were walked into `meta_kv` at all — everything below reads
@@ -409,7 +415,7 @@ async fn a_registered_rule_derives_keys_and_editing_it_re_derives_only_its_own()
         }),
     )
     .await;
-    drain(&router, "the walk a registration asks for").await;
+    drain(&core, &router, "the walk a registration asks for").await;
 
     let first = rows_of(&db, &id).await;
     assert_eq!(
@@ -442,7 +448,7 @@ async fn a_registered_rule_derives_keys_and_editing_it_re_derives_only_its_own()
     .await;
     assert_eq!(status, StatusCode::OK, "{dto}");
     assert_eq!(dto["include"], serde_json::json!([["gen", "seed"]]));
-    drain(&router, "the walk the edit asks for").await;
+    drain(&core, &router, "the walk the edit asks for").await;
 
     let second = rows_of(&db, &id).await;
     assert_eq!(second.len(), 3, "{second:#?}");
@@ -491,7 +497,7 @@ async fn a_registered_rule_derives_keys_and_editing_it_re_derives_only_its_own()
         serde_json::json!([["gen", "seed"]]),
         "an omitted field is left alone"
     );
-    drain(&router, "whatever the rename asked for").await;
+    drain(&core, &router, "whatever the rename asked for").await;
 
     assert_eq!(
         rows_of(&db, &id).await,
@@ -535,7 +541,7 @@ async fn deleting_a_rule_cascades_and_a_seeded_rule_is_editable() {
         export("phase8_hires.lua", 1_000),
         export("phase9.lua", 2_000),
     ];
-    let (_core, router, db) = library(tmp.path(), "series-delete", &exports).await;
+    let (core, router, db) = library(tmp.path(), "series-delete", &exports).await;
 
     let id = register(
         &router,
@@ -547,7 +553,7 @@ async fn deleting_a_rule_cascades_and_a_seeded_rule_is_editable() {
         }),
     )
     .await;
-    drain(&router, "the import and the walk it asked for").await;
+    drain(&core, &router, "the import and the walk it asked for").await;
     assert_eq!(rows_of(&db, &id).await.len(), 2, "the rule derived");
     let seeded = rows_of(&db, SEEDED_VDSL_RULE).await;
     assert_eq!(seeded.len(), 2, "and so did the seeded one");
@@ -617,7 +623,7 @@ async fn deleting_a_rule_cascades_and_a_seeded_rule_is_editable() {
         "the deleted rule is gone and the seeded one is not: {ids:?}"
     );
 
-    drain(&router, "anything the delete asked for").await;
+    drain(&core, &router, "anything the delete asked for").await;
     assert!(
         rows_of(&db, &id).await.is_empty(),
         "the deleted rule's keys did not go with it"

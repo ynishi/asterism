@@ -338,6 +338,11 @@
       "docs": "Queue payload — the job-kind slug (see [`JobKind::as_str`]) plus a\nkind-specific JSON payload.\n\nApalis' typed storage holds one Rust type per queue, so the kind is a\nslug field rather than an enum variant. This maps 1:1 to the\n`(JobKind, Value)` input of the [`JobQueue`] port."
     },
     {
+      "path": "asterism_infra::jobs::JOB_POOL_BUSY_TIMEOUT",
+      "kind": "constant",
+      "docs": "How long a job-pool connection waits on a locked database before\nits statement fails with `SQLITE_BUSY`.\n\nLonger than the catalogue connections' timeout (`sqlite::open`)\nbecause the two share one file, and SQLite has one write lock per\nfile: every claim, ack and enqueue here queues behind whatever\ncatalogue transaction a handler or a request is holding, and behind\nthe other process's writes too. This pool used to take sqlx's\ndefault of 5 s, and a Windows CI runner exceeded it — the claim\n`UPDATE Jobs … RETURNING *` waited 5.5 s and failed (#309, run\n36533184789). A statement that waits is cheap; one that fails costs\nmore here than elsewhere: a failed ack leaves a finished job\n`Running` under a worker whose heartbeat keeps it out of the orphan\nsweep, so it runs again only after the process restarts, and a\nfailed claim ends the poll stream ([`RestartingPoll`] is what\nreopens it). Raising this makes a failure rarer; it does not make\none survivable, which is why the restart exists regardless.\n\nGiving the queue a file of its own would remove the contention\nrather than wait it out, but it moves `Jobs` out from under every\nprofile that already has rows in it, which is a migration and not a\ntimeout."
+    },
+    {
       "path": "asterism_infra::jobs::JobDeps",
       "kind": "struct",
       "docs": "Dependencies passed in by the caller (`asterism-ui` /\n`asterism-server`)."
@@ -545,7 +550,7 @@
     {
       "path": "asterism_infra::jobs::open_job_pool",
       "kind": "function",
-      "docs": "Opens the sqlx pool used by the job engine. Provided as a helper so\nconsumers (the Tauri UI, and the tests that build a core) do not\nneed to import sqlx directly. The pool shares the on-disk file with the isle backend\n(they run on separate connection stacks under WAL)."
+      "docs": "Opens the sqlx pool used by the job engine. Provided as a helper so\nconsumers (the Tauri UI, and the tests that build a core) do not\nneed to import sqlx directly. The pool shares the on-disk file with the isle backend\n(they run on separate connection stacks under WAL), and waits\n[`JOB_POOL_BUSY_TIMEOUT`] on a locked database."
     },
     {
       "path": "asterism_infra::jobs::open_queue",
