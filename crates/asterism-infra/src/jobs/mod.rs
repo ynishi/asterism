@@ -855,7 +855,42 @@ pub fn start_workers(queue: SqliteJobQueue, deps: JobDeps, concurrency: Option<u
         .data(Arc::new(env))
         .backend(storage)
         .build_fn(handle_asterism_job);
-    tokio::spawn(Monitor::new().register(worker).run());
+    tokio::spawn(
+        Monitor::new()
+            .on_event(log_worker_event)
+            .register(worker)
+            .run(),
+    );
+}
+
+/// Says out loud what the worker otherwise tells nobody.
+///
+/// apalis reports a failed poll, heartbeat, orphan sweep or ack as an
+/// [`Event::Error`] and nothing else, and with no handler registered
+/// that is the whole of it. One of those is worse than it looks: the
+/// SQLite backend's poll stream ends at its first query error, while
+/// the heartbeat beside it keeps the worker's row fresh, so the process
+/// goes on looking alive and never claims another job. This line is the
+/// only trace that leaves.
+///
+/// `Start`, `Engage` and `Idle` are left out: `Idle` fires on every
+/// empty poll, ten times a second.
+fn log_worker_event(worker: Worker<Event>) {
+    match worker.inner() {
+        Event::Error(error) => tracing::warn!(
+            event = "diag.jobs.worker_error",
+            worker = %worker.id(),
+            error = %error,
+            "job worker reported an error"
+        ),
+        Event::Stop | Event::Exit => tracing::warn!(
+            event = "diag.jobs.worker_stopped",
+            worker = %worker.id(),
+            what = %worker,
+            "job worker stopped"
+        ),
+        Event::Start | Event::Engage(_) | Event::Idle | Event::Custom(_) => {}
+    }
 }
 
 /// Starts the job engine: opens the queue ([`open_queue`]) and spawns a
