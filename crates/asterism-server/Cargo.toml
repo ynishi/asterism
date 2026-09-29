@@ -54,6 +54,11 @@ asterism-importer-image = { path = "../asterism-importer-image" }
 # same db file) whether a delete left orphan links — both HTTP reads join
 # through `tag`, so they cannot see an orphan once the tag row is gone.
 rusqlite = { workspace = true }
+# The e2e files that wait on the job worker route `tracing` into the
+# test's captured output (`tests/support`), so a wait that runs out
+# shows what the worker and each job run reported — nothing else
+# records it in a test process.
+tracing-subscriber = { workspace = true }
 
 [dependencies]
 asterism-core              = { path = "../asterism-core" }

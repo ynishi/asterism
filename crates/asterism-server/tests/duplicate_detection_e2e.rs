@@ -19,6 +19,8 @@ use asterism_contract::dto::DuplicateAxis;
 use asterism_contract::query::GetAssetDetailQuery;
 use asterism_server::core_init::{JobWorker, LogEmitter, init_core_with};
 
+mod support;
+
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing. They are about content hashing, not
 /// about who ingested the row.
@@ -101,6 +103,7 @@ async fn identical_originals_surface_as_one_duplicate_group() {
     std::fs::write(&copy, bytes).expect("write copy");
     std::fs::write(&other, b"a different photograph\n").expect("write other");
 
+    support::trace_jobs();
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
@@ -154,7 +157,12 @@ async fn identical_originals_surface_as_one_duplicate_group() {
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    let report = report.expect("the duplicate pair is reported within 30s");
+    let Some(report) = report else {
+        panic!(
+            "the duplicate pair is reported within 30s; queue: {}",
+            support::queue_state(&core).await
+        );
+    };
 
     assert_eq!(report.groups.len(), 1, "one pair, one group");
     let group = &report.groups[0];
@@ -257,6 +265,7 @@ async fn one_picture_in_two_files_is_a_group_on_the_content_axis_only() {
     std::fs::write(&twin_a, png(twin_pixels, None)).expect("write the original");
     std::fs::write(&twin_b, png(twin_pixels, None)).expect("write the copy");
 
+    support::trace_jobs();
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
@@ -317,7 +326,12 @@ async fn one_picture_in_two_files_is_a_group_on_the_content_axis_only() {
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    let (file, content) = settled.expect("both axes answer within 30s");
+    let Some((file, content)) = settled else {
+        panic!(
+            "both axes answer within 30s; queue: {}",
+            support::queue_state(&core).await
+        );
+    };
 
     // The artefact axis sees the copy and not the pair of exports —
     // which is the behaviour this build already had, and has to keep.
@@ -420,6 +434,7 @@ async fn the_second_copy_leaves_a_question_and_a_recorded_match() {
     std::fs::write(&unrelated, b"a different photograph\n").expect("write other");
 
     let db_path = tmp.path().join("asterism.db");
+    support::trace_jobs();
     let core = init_core_with(
         &db_path,
         Arc::new(LogEmitter),
@@ -469,7 +484,11 @@ async fn the_second_copy_leaves_a_question_and_a_recorded_match() {
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    assert!(hashed, "the incumbent was fingerprinted within 30s");
+    assert!(
+        hashed,
+        "the incumbent was fingerprinted within 30s; queue: {}",
+        support::queue_state(&core).await
+    );
 
     // An unrelated file in the same wave: whatever the queue ends up
     // holding, it is not "everything that was imported".

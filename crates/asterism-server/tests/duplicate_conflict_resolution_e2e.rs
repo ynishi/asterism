@@ -28,6 +28,8 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
+mod support;
+
 /// Same bytes for every copy — what makes them one question.
 const BYTES: &[u8] = b"the same photograph, byte for byte\n";
 
@@ -102,6 +104,7 @@ impl Fixture {
         std::fs::write(corpus.join("copy.png"), BYTES).expect("write copy");
         std::fs::write(corpus.join("other.png"), b"a different photograph\n").expect("write other");
 
+        support::trace_jobs();
         let core = init_core_with(
             &tmp.path().join("asterism.db"),
             Arc::new(LogEmitter),
@@ -153,7 +156,11 @@ impl Fixture {
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
-        assert!(hashed, "the incumbent was fingerprinted within 30s");
+        assert!(
+            hashed,
+            "the incumbent was fingerprinted within 30s; queue: {}",
+            support::queue_state(&core).await
+        );
 
         // An unrelated file in the same wave: whatever ends up on the
         // queue, it is not "everything that was imported".
@@ -213,7 +220,10 @@ impl Fixture {
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
-        panic!("no question reached the panel within 30s");
+        panic!(
+            "no question reached the panel within 30s; queue: {}",
+            support::queue_state(&self.core).await
+        );
     }
 
     /// Registers another copy of the same bytes under a new path.
@@ -299,7 +309,10 @@ impl Fixture {
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
-        panic!("the queued fold did not run within 30s");
+        panic!(
+            "the queued fold did not run within 30s; queue: {}",
+            support::queue_state(&self.core).await
+        );
     }
 }
 

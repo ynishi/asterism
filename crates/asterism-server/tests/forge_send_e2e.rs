@@ -389,6 +389,20 @@ async fn a_send_puts_the_stamped_set_and_its_sidecar_on_the_far_side() {
     let release_id = release["id"].as_str().expect("a release id").to_string();
     let far = tmp.path().join("agency").join("incoming");
 
+    // What a send carries is the set the release stamped, so the stamp
+    // is established before anything leaves. A packet that did not land
+    // is then reported with the reason the release recorded for it,
+    // rather than later as an unstamped original on the far side.
+    for file in release["files"]
+        .as_array()
+        .expect("the release wrote files")
+    {
+        assert_eq!(
+            file["xmp"]["state"], "written",
+            "the release stamped {file}"
+        );
+    }
+
     // 1. A send is recorded, carries an act, and names both the
     //    destination label and the run that carries the bytes.
     let send = ok(

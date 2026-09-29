@@ -52,6 +52,8 @@ use asterism_importer_sdk::{
 use asterism_server::core_init::{CoreCtx, JobWorker, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
 
+mod support;
+
 /// The attribution these fixtures write with: a caller that states
 /// nothing, which records nothing.
 fn unattributed() -> asterism_core::domain::attribution::AttributionContext {
@@ -78,6 +80,7 @@ const PNG_1X1: &[u8] = &[
 /// Bind happens before the spawn so the importer's first request cannot
 /// arrive at a closed port.
 async fn boot(tmp: &std::path::Path, mode: JobWorker) -> (CoreCtx, u16) {
+    support::trace_jobs();
     let core = init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
@@ -197,7 +200,10 @@ async fn wait_for(
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    panic!("{what} did not happen within 30s");
+    panic!(
+        "{what} did not happen within 30s; queue: {}",
+        support::queue_state(core).await
+    );
 }
 
 /// Every open conflict row, as `(newcomer, incumbent, axis, digest)`.
