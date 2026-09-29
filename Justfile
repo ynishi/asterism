@@ -543,13 +543,12 @@ check-shared: rust-fmt-check md-check bindings-check ui-test ui-check ui-build a
 # differ in what a run is asked about, not in how green is defined.
 #
 # A gate added here and not to `check-shared` will never run on a pull
-# request, because `check-changed` below is a separate list, and never on
-# Windows, because the Windows job in `.github/workflows/check.yml` names
-# `check-shared` and the clippy gates in two steps of its own, leaving
-# the Rust tests off for the reason that job's comment gives. Add to
-# `check-shared` unless the gate is genuinely `main`-only. A gate that
-# has to sit beside clippy and the tests instead means editing three
-# lists together: this one, `check-changed`'s, and those two steps.
+# request, because `check-changed` below is a separate list. Add to
+# `check-shared` unless the gate is genuinely `main`-only, and edit the
+# two together when it is not. The Windows job in
+# `.github/workflows/check.yml` runs these same two recipes, so it is not
+# a third list; while #309 was open it named `check-shared` and the
+# clippy gates on their own, and was one.
 #
 # Run all Rust and frontend checks (the full workspace suite).
 [group('check')]
