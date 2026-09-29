@@ -163,7 +163,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub use transport::{
-    Connector, Credentials, HostKey, Scheme, Target, Transport, TransportError, read_endpoint,
+    Connector, Credentials, HostKey, Scheme, Target, Transport, TransportError, file_endpoint,
+    read_endpoint,
 };
 
 /// Slug the registry uses for this exporter.

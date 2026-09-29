@@ -264,7 +264,7 @@ pub fn read_endpoint(endpoint: &str) -> Result<Target, TransportError> {
             scheme,
             host: String::new(),
             port: None,
-            dir: path.to_string(),
+            dir: file_url_path_to_dir(path),
         });
     }
     let (host, port) = match authority.rsplit_once(':') {
@@ -296,6 +296,52 @@ pub fn read_endpoint(endpoint: &str) -> Result<Target, TransportError> {
     })
 }
 
+/// Spells an absolute directory on this machine as a `file://`
+/// endpoint that [`read_endpoint`] reads back as the same directory.
+/// A relative path has no `file://` spelling, and what this returns
+/// for one is refused or misread.
+///
+/// On unix that is `file://` followed by the path, which already starts
+/// with the `/` that leaves the authority empty. A Windows path starts
+/// with a drive, so written the same way the drive lands where the host
+/// goes and the endpoint is refused (#309); the URL form puts a `/`
+/// before the drive and spells the separators as `/` —
+/// `C:\out` is `file:///C:/out`. Nothing is percent-encoded, because
+/// [`read_endpoint`] decodes nothing.
+pub fn file_endpoint(dir: &std::path::Path) -> String {
+    let path = dir.display().to_string();
+    if cfg!(windows) {
+        let slashed = path.replace('\\', "/");
+        if slashed.starts_with('/') {
+            format!("file://{slashed}")
+        } else {
+            format!("file:///{slashed}")
+        }
+    } else {
+        format!("file://{path}")
+    }
+}
+
+/// The directory a `file://` endpoint's path names on this machine.
+///
+/// The inverse of [`file_endpoint`]. On Windows `/C:/out` names the
+/// directory `C:/out` — the `/` before the drive is the URL's, not the
+/// path's — and Windows reads `/` as a separator, so the rest is left
+/// as written. On unix the path is the directory as it stands.
+fn file_url_path_to_dir(path: &str) -> String {
+    if cfg!(windows) {
+        let bytes = path.as_bytes();
+        let names_a_drive = bytes.len() >= 3
+            && bytes[0] == b'/'
+            && bytes[1].is_ascii_alphabetic()
+            && bytes[2] == b':';
+        if names_a_drive {
+            return path[1..].to_string();
+        }
+    }
+    path.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +365,22 @@ mod tests {
 
         assert_eq!(target.port, None);
         assert_eq!(target.dir, ".");
+    }
+
+    /// Whatever this machine's paths look like, a directory spelled with
+    /// [`file_endpoint`] reads back as that directory — on Windows a
+    /// drive-letter path is where the plain `file://{path}` spelling
+    /// broke (#309).
+    #[test]
+    fn a_local_directory_round_trips_through_its_file_endpoint() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("incoming").join("2026-09");
+
+        let target = read_endpoint(&file_endpoint(&dir)).unwrap();
+
+        assert_eq!(target.scheme, Scheme::File);
+        assert!(target.host.is_empty());
+        assert_eq!(std::path::Path::new(&target.dir), dir);
     }
 
     #[test]

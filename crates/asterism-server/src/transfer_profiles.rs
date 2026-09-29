@@ -262,12 +262,12 @@ mod tests {
     #[test]
     fn the_shape_the_release_e2e_writes_is_usable() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let destination = tmp.path().join("e2e-sent/1789");
+        let destination = tmp.path().join("e2e-sent").join("1789");
         write(
             tmp.path(),
             "e2e-file-destination.json",
             &serde_json::json!({
-                "endpoint": format!("file://{}", destination.display()),
+                "endpoint": asterism_exporter_transfer::file_endpoint(&destination),
                 "sidecar": {
                     "filename": "metadata.csv",
                     "columns": [
@@ -283,9 +283,11 @@ mod tests {
         assert_eq!(profile.error, None, "{:?}", profile.error);
         assert_eq!(profile.scheme.as_deref(), Some("file"));
         assert_eq!(profile.host.as_deref(), Some(""));
+        // Compared as paths: on Windows the endpoint spells the
+        // separators as `/`, which name the same directory.
         assert_eq!(
-            profile.directory.as_deref(),
-            Some(destination.display().to_string().as_str())
+            profile.directory.as_deref().map(std::path::Path::new),
+            Some(destination.as_path())
         );
     }
 

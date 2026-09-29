@@ -363,7 +363,7 @@ async fn run_to_terminal(
 /// an agency would declare.
 fn profile(to: &std::path::Path) -> String {
     serde_json::json!({
-        "endpoint": format!("file://{}", to.display()),
+        "endpoint": asterism_exporter_transfer::file_endpoint(to),
         "sidecar": {
             "filename": "metadata.csv",
             "columns": [

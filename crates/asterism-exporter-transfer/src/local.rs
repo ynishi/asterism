@@ -55,13 +55,13 @@ impl Transport for LocalTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::{Scheme, read_endpoint};
+    use crate::transport::{Scheme, file_endpoint, read_endpoint};
 
     #[tokio::test]
     async fn it_creates_the_directory_and_writes_what_it_is_given() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path().join("incoming").join("2026-09");
-        let target = read_endpoint(&format!("file://{}", dir.display())).expect("an endpoint");
+        let target = read_endpoint(&file_endpoint(&dir)).expect("an endpoint");
         assert_eq!(target.scheme, Scheme::File);
 
         let mut wire = open(&target).await.expect("open");
