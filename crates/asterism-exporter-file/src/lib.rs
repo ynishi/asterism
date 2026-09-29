@@ -517,7 +517,8 @@ fn check_kind(handle: &Handle) -> Result<(), ExporterError> {
 ///
 /// Two rejections, both trigger [`ExporterError::BackendRejected`]:
 ///
-/// 1. A `~` / `~/`-prefixed path where `$HOME` is not readable
+/// 1. A `~` / `~/`-prefixed path — `~\` too on Windows — where
+///    `$HOME` is not readable
 ///    (older versions returned the input verbatim, which caused a
 ///    literal `~` directory to be created under the process CWD on
 ///    macOS Tauri dev builds where HOME did not propagate — the
@@ -531,8 +532,10 @@ fn check_kind(handle: &Handle) -> Result<(), ExporterError> {
 /// glob semantics.
 ///
 /// "Absolute" is [`Path::is_absolute`], the platform's own answer: a
-/// leading `/` on unix, a drive or UNC prefix on Windows. A test for a
-/// leading `/` refused every local directory on Windows (#309). For
+/// leading `/` on unix; on Windows a drive or UNC prefix followed by a
+/// root (`C:\out`, `\\server\share\out`), so a drive-relative `C:out`
+/// and a drive-less `\out` are refused. A test for a leading `/`
+/// refused every local directory on Windows (#309). For
 /// the same reason the rest of a `~` path is joined onto `$HOME` with
 /// [`Path::join`] rather than a literal `/`, and the separator after
 /// `~` is whatever [`std::path::is_separator`] accepts — only `/` on
@@ -568,11 +571,16 @@ fn resolve_output_dir(path: &str) -> Result<String, ExporterError> {
             .into_owned(),
         Some(Some(rest)) => {
             let home = std::env::var_os("HOME").ok_or_else(|| {
-                ExporterError::BackendRejected(
-                    "output_dir starts with '~/' but $HOME is not set; \
+                // Name the separators `is_separator` accepted above.
+                let prefix = if cfg!(windows) {
+                    r"'~/' or '~\'"
+                } else {
+                    "'~/'"
+                };
+                ExporterError::BackendRejected(format!(
+                    "output_dir starts with {prefix} but $HOME is not set; \
                      pass an absolute path instead"
-                        .into(),
-                )
+                ))
             })?;
             Path::new(&home).join(rest).to_string_lossy().into_owned()
         }
