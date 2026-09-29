@@ -529,6 +529,14 @@ fn check_kind(handle: &Handle) -> Result<(), ExporterError> {
 /// Anything already absolute passes through verbatim. Nested `~`
 /// inside a segment (`/tmp/~/foo`) is treated as literal — no shell
 /// glob semantics.
+///
+/// "Absolute" is [`Path::is_absolute`], the platform's own answer: a
+/// leading `/` on unix, a drive or UNC prefix on Windows. A test for a
+/// leading `/` refused every local directory on Windows (#309). For
+/// the same reason the rest of a `~` path is joined onto `$HOME` with
+/// [`Path::join`] rather than a literal `/`, and the separator after
+/// `~` is whatever [`std::path::is_separator`] accepts — only `/` on
+/// unix, `/` or `\` on Windows.
 fn resolve_output_dir(path: &str) -> Result<String, ExporterError> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -536,8 +544,19 @@ fn resolve_output_dir(path: &str) -> Result<String, ExporterError> {
             "output_dir must not be empty".into(),
         ));
     }
-    let resolved: String = if trimmed == "~" {
-        std::env::var_os("HOME")
+    let after_tilde = trimmed.strip_prefix('~').and_then(|rest| {
+        if rest.is_empty() {
+            Some(None)
+        } else if rest.starts_with(std::path::is_separator) {
+            Some(Some(rest.trim_start_matches(std::path::is_separator)))
+        } else {
+            // `~user` and `~foo` are not expanded; they fall through
+            // to the absolute-path check and are refused there.
+            None
+        }
+    });
+    let resolved: String = match after_tilde {
+        Some(None) => std::env::var_os("HOME")
             .ok_or_else(|| {
                 ExporterError::BackendRejected(
                     "output_dir=~ requires $HOME to be set; \
@@ -546,22 +565,22 @@ fn resolve_output_dir(path: &str) -> Result<String, ExporterError> {
                 )
             })?
             .to_string_lossy()
-            .into_owned()
-    } else if let Some(rest) = trimmed.strip_prefix("~/") {
-        let home = std::env::var_os("HOME").ok_or_else(|| {
-            ExporterError::BackendRejected(
-                "output_dir starts with '~/' but $HOME is not set; \
-                 pass an absolute path instead"
-                    .into(),
-            )
-        })?;
-        format!("{}/{}", home.to_string_lossy(), rest)
-    } else {
-        trimmed.to_string()
+            .into_owned(),
+        Some(Some(rest)) => {
+            let home = std::env::var_os("HOME").ok_or_else(|| {
+                ExporterError::BackendRejected(
+                    "output_dir starts with '~/' but $HOME is not set; \
+                     pass an absolute path instead"
+                        .into(),
+                )
+            })?;
+            Path::new(&home).join(rest).to_string_lossy().into_owned()
+        }
+        None => trimmed.to_string(),
     };
-    if !resolved.starts_with('/') {
+    if !Path::new(&resolved).is_absolute() {
         return Err(ExporterError::BackendRejected(format!(
-            "output_dir must be an absolute path (starts with '/'); got {resolved:?}"
+            "output_dir must be an absolute path; got {resolved:?}"
         )));
     }
     Ok(resolved)
@@ -855,26 +874,39 @@ mod tests {
 
     #[test]
     fn resolve_output_dir_expands_tilde_and_rejects_relative() {
-        let home = std::env::var("HOME").expect("HOME is always set on unix");
+        let home = std::env::var("HOME").expect("HOME is set on the test hosts");
+        // Built with the code's own join, so the expectation carries
+        // the platform's separator and form of absolute path.
+        let under_home = |parts: &[&str]| {
+            parts
+                .iter()
+                .fold(PathBuf::from(&home), |path, part| path.join(part))
+                .display()
+                .to_string()
+        };
         // Tilde forms resolve to $HOME.
         assert_eq!(resolve_output_dir("~").unwrap(), home);
         assert_eq!(
             resolve_output_dir("~/selection1").unwrap(),
-            format!("{home}/selection1")
+            under_home(&["selection1"])
         );
-        // Absolute paths pass through verbatim.
-        assert_eq!(
-            resolve_output_dir("/absolute/path").unwrap(),
-            "/absolute/path"
-        );
+        // Absolute paths pass through verbatim. $HOME is absolute on
+        // every platform, where `/absolute/path` is not on Windows.
+        let absolute = under_home(&["absolute", "path"]);
+        assert_eq!(resolve_output_dir(&absolute).unwrap(), absolute);
         // Nested `~` inside an already-absolute path is left as
         // literal — no shell glob semantics.
-        assert_eq!(resolve_output_dir("/tmp/~/foo").unwrap(), "/tmp/~/foo");
+        let nested = under_home(&["tmp", "~", "foo"]);
+        assert_eq!(resolve_output_dir(&nested).unwrap(), nested);
         // Relative paths are rejected (the 2026-07-20 fallout: a
         // literal `~/selection1` under CWD was the tell that the
         // silent fallback was wrong).
         assert!(matches!(
             resolve_output_dir("relative/path"),
+            Err(ExporterError::BackendRejected(_))
+        ));
+        assert!(matches!(
+            resolve_output_dir("~user/path"),
             Err(ExporterError::BackendRejected(_))
         ));
         assert!(matches!(
