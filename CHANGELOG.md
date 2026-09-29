@@ -586,9 +586,9 @@ and this project adheres to
   the path: the exporter's rule is the only one, and a directory it refuses —
   relative, or `~user` — is reported in the dispatch toast in the exporter's own
   words. A path typed as `~` or `~/…`, which the app used to refuse, now reaches
-  the exporter, which expands it onto `$HOME`. A refused path now leaves a
-  failed dispatch in the history where it used to leave nothing. None of it has
-  run on Windows yet.
+  the exporter, which expands it onto `$HOME` where that is set — Windows does
+  not set it by default. A refused path now leaves a failed dispatch in the
+  history where it used to leave nothing. None of it has run on Windows yet.
 
 - **The file exporter, disclosure stamps, file:// sends and team blobs work on
   Windows** (#309). Four things assumed unix. The file exporter took "absolute"
