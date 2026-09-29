@@ -253,7 +253,11 @@ mod tests {
 
     /// The shape `e2e/forge-release.spec.ts` writes before it drives
     /// the app: a `file://` destination, one sidecar column, and no
-    /// `auth` or `host_key` at all.
+    /// `auth` or `host_key` at all. The spec spells the endpoint as
+    /// `file://` plus the native path and this test uses
+    /// [`file_endpoint`](asterism_exporter_transfer::file_endpoint);
+    /// the two agree on unix only, since on Windows `file_endpoint`
+    /// writes `file:///C:/...` with forward slashes.
     ///
     /// Pinned here because that spec cannot say why a profile was
     /// refused any faster than a whole `ui-e2e` run, and a profile it
