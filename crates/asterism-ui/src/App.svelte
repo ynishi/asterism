@@ -4019,21 +4019,22 @@
     }
     const outputDir = await customPrompt(
       "Copy selection to which directory?",
-      "absolute path, e.g. /Users/you/desktop/alice",
+      "an absolute path, or one under ~",
       "",
     );
     if (!outputDir || !outputDir.trim()) return;
-    // Reject relative paths and `~`-prefixed shell shorthand up front —
-    // the backend enforces absolute-only anyway (2026-07-20 fallout: a
-    // `~/selection1` input created a literal `~` directory).
+    // The path is not checked here. Which directories the exporter
+    // accepts is `resolve_output_dir`'s rule (`asterism-exporter-file`),
+    // and a path it refuses comes back as a failed dispatch whose
+    // message `pollDispatch` puts in the toast, in the exporter's words.
+    //
+    // It is not mirrored here because the mirror is what went wrong: a
+    // leading-`/` test stood in this spot and refused every Windows
+    // directory before the exporter — which asks the platform — could
+    // answer (#306). The price of asking the backend is that a refused
+    // path leaves a failed dispatch behind it and freezes the selection
+    // into a Snapshot, deduped by content like every other.
     const trimmed = outputDir.trim();
-    if (!trimmed.startsWith("/")) {
-      dispatchCatalog.flash(
-        `Dispatch aborted: output_dir must be an absolute path (starts with "/"). Got: ${trimmed}`,
-        6000,
-      );
-      return;
-    }
     try {
       const params = {
         output_dir: trimmed,
