@@ -108,9 +108,16 @@ use crate::paths::DataProfile;
 /// Environment variable naming an explicit importer binary.
 const BINARY_OVERRIDE: &str = "ASTERISM_IMPORT";
 
-/// The importer's file name, looked for beside this executable and on
-/// `PATH`.
+/// The importer's name, without the platform's executable suffix;
+/// [`binary_file_name`] adds it.
 const BINARY_NAME: &str = "asterism-import";
+
+/// The importer's file name, looked for beside this executable and on
+/// `PATH`: [`BINARY_NAME`] plus [`std::env::consts::EXE_SUFFIX`], which
+/// is empty on macOS and Linux and `.exe` on Windows.
+fn binary_file_name() -> String {
+    format!("{BINARY_NAME}{}", std::env::consts::EXE_SUFFIX)
+}
 
 /// The variable the child reads its credential out of.
 ///
@@ -210,26 +217,27 @@ fn find_binary() -> Result<PathBuf, Vec<String>> {
     // Named rather than described. "beside this executable" is a
     // location an operator then has to work out, and the whole reason
     // the list exists is to be actionable.
+    let name = binary_file_name();
     match std::env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join(BINARY_NAME)))
+        .and_then(|exe| exe.parent().map(|dir| dir.join(&name)))
     {
         Some(beside) if beside.is_file() => return Ok(beside),
         Some(beside) => tried.push(beside.display().to_string()),
         None => tried.push(format!(
-            "beside this executable ({BINARY_NAME}), whose own path this process cannot read"
+            "beside this executable ({name}), whose own path this process cannot read"
         )),
     }
 
     if let Some(path_var) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path_var) {
-            let candidate = dir.join(BINARY_NAME);
+            let candidate = dir.join(&name);
             if candidate.is_file() {
                 return Ok(candidate);
             }
         }
     }
-    tried.push(format!("$PATH ({BINARY_NAME})"));
+    tried.push(format!("$PATH ({name})"));
 
     Err(tried)
 }
@@ -353,6 +361,17 @@ mod tests {
             secret_ref: None,
             secret_header: None,
         }
+    }
+
+    /// The file the launcher looks for, pinned per platform: without
+    /// the suffix a Windows install's `asterism-import.exe` is never
+    /// found beside the app or on `PATH`.
+    #[test]
+    fn the_binary_file_name_is_the_platforms_executable_name() {
+        #[cfg(windows)]
+        assert_eq!(binary_file_name(), "asterism-import.exe");
+        #[cfg(not(windows))]
+        assert_eq!(binary_file_name(), "asterism-import");
     }
 
     /// The defect this file was written wrong for: a child sent to

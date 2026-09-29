@@ -36,8 +36,21 @@
 //! so the app prefers the binary it shipped and was tested with over
 //! whatever the host happens to carry, and a clean machine (no
 //! Homebrew) plays video out of the box.
+//!
+//! Both the sidecar and the `PATH` probe look for the platform's
+//! executable name ([`ffmpeg_file_name`]): `ffmpeg` on macOS, and
+//! `ffmpeg.exe` on Windows, where an executable carries the `.exe`
+//! extension and a file named plain `ffmpeg` is not one.
+//!
+//! # Spawning
+//!
+//! Spawn ffmpeg through [`ffmpeg_command`], so a per-platform spawn
+//! setting is made in one place. The one it makes is Windows': the
+//! release app is a GUI-subsystem process with no console of its own,
+//! so a console-subsystem child such as ffmpeg is given a new console
+//! window unless it is created with `CREATE_NO_WINDOW`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use asterism_core::domain::value::MimeType;
@@ -93,8 +106,9 @@ pub fn ffmpeg_binary() -> Option<PathBuf> {
         return Some(sidecar);
     }
     if let Some(path_var) = std::env::var_os("PATH") {
+        let name = ffmpeg_file_name();
         for dir in std::env::split_paths(&path_var) {
-            let candidate = dir.join("ffmpeg");
+            let candidate = dir.join(&name);
             if candidate.is_file() {
                 return Some(candidate);
             }
@@ -110,14 +124,40 @@ pub fn ffmpeg_binary() -> Option<PathBuf> {
     .find(|p| p.is_file())
 }
 
-/// The bundled-sidecar candidate for a given executable path: an
-/// `ffmpeg` in the same directory (`Contents/MacOS/` in the bundle,
-/// where Tauri's `externalBin` places it, triple suffix stripped).
-/// Split from [`ffmpeg_binary`] so the beside-the-exe rule is
-/// testable without planting files next to the real test binary.
-fn sidecar_beside(exe: &std::path::Path) -> Option<PathBuf> {
-    let candidate = exe.parent()?.join("ffmpeg");
+/// The bundled-sidecar candidate for a given executable path: a
+/// [`ffmpeg_file_name`] file in the same directory (`Contents/MacOS/`
+/// in the macOS bundle, where Tauri's `externalBin` places it, triple
+/// suffix stripped). Split from [`ffmpeg_binary`] so the beside-the-exe
+/// rule is testable without planting files next to the real test
+/// binary.
+fn sidecar_beside(exe: &Path) -> Option<PathBuf> {
+    let candidate = exe.parent()?.join(ffmpeg_file_name());
     candidate.is_file().then_some(candidate)
+}
+
+/// ffmpeg's file name on the platform this was built for: `ffmpeg`
+/// plus [`std::env::consts::EXE_SUFFIX`], which is empty on macOS and
+/// Linux and `.exe` on Windows.
+fn ffmpeg_file_name() -> String {
+    format!("ffmpeg{}", std::env::consts::EXE_SUFFIX)
+}
+
+/// Windows' `CREATE_NO_WINDOW` process-creation flag.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// A `Command` for the ffmpeg at `bin`, with this platform's spawn
+/// settings applied (see the module's Spawning section). Callers add
+/// their own arguments.
+pub(crate) fn ffmpeg_command(bin: &Path) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut cmd = Command::new(bin);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
 }
 
 /// Extracts one frame from the video at `path_str`, scaled to fit a
@@ -142,7 +182,7 @@ pub fn make_thumb(path_str: &str, target_px: u32) -> Result<Vec<u8>, DomainError
     for seek in ["1", "0"] {
         let scale =
             format!("scale=w={target_px}:h={target_px}:force_original_aspect_ratio=decrease");
-        let output = Command::new(&bin)
+        let output = ffmpeg_command(&bin)
             .args(["-v", "error", "-ss", seek, "-i", path_str])
             .args(["-frames:v", "1", "-vf", &scale])
             .args(["-f", "image2pipe", "-c:v", "mjpeg", "-"])
@@ -190,7 +230,7 @@ mod tests {
         }
     }
 
-    /// The sidecar rule is "an `ffmpeg` file beside the executable" —
+    /// The sidecar rule is "an ffmpeg file beside the executable" —
     /// exercised against a fake exe path in a tempdir because the
     /// real one (`target/debug/deps/…`) must stay unpolluted: a
     /// planted `ffmpeg` there would outrank the host install for
@@ -202,13 +242,40 @@ mod tests {
 
         assert_eq!(sidecar_beside(&exe), None, "no sidecar file, no candidate");
 
-        let sidecar = tmp.path().join("ffmpeg");
+        let sidecar = tmp.path().join(ffmpeg_file_name());
         std::fs::write(&sidecar, b"#!/bin/sh\n").expect("plant sidecar");
         assert_eq!(
             sidecar_beside(&exe),
             Some(sidecar),
             "an ffmpeg beside the exe is the bundled sidecar"
         );
+    }
+
+    /// The name the sidecar and `PATH` probes look for, pinned per
+    /// platform rather than rebuilt from `EXE_SUFFIX`, so the test says
+    /// what the file is called and not how the name is put together.
+    #[test]
+    fn the_ffmpeg_file_name_is_the_platforms_executable_name() {
+        #[cfg(windows)]
+        assert_eq!(ffmpeg_file_name(), "ffmpeg.exe");
+        #[cfg(not(windows))]
+        assert_eq!(ffmpeg_file_name(), "ffmpeg");
+    }
+
+    /// A file under the other platform's name is not the sidecar: on
+    /// Windows the executable is `ffmpeg.exe`, so a plain `ffmpeg` is
+    /// not it, and elsewhere an `ffmpeg.exe` is not it either.
+    #[test]
+    fn a_file_under_the_other_platforms_name_is_not_the_sidecar() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let exe = tmp.path().join("Asterism");
+        let other = if cfg!(windows) {
+            "ffmpeg"
+        } else {
+            "ffmpeg.exe"
+        };
+        std::fs::write(tmp.path().join(other), b"").expect("plant decoy");
+        assert_eq!(sidecar_beside(&exe), None);
     }
 
     #[test]
@@ -234,7 +301,7 @@ mod tests {
         );
         let tmp = tempfile::tempdir().expect("tempdir");
         let clip = tmp.path().join("test.webm");
-        let status = Command::new(&bin)
+        let status = ffmpeg_command(&bin)
             .args([
                 "-v",
                 "error",

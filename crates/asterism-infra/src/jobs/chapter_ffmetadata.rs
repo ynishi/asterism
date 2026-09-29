@@ -33,12 +33,10 @@
 //! value, would put a timestamp the file never declared into a band
 //! whose entire claim is that it says what the file says.
 
-use std::process::Command;
-
 use asterism_core::application_support::ScannedChapter;
 use asterism_core::domain::material_mark::TimelineSpan;
 
-use crate::jobs::thumb_ffmpeg::ffmpeg_binary;
+use crate::jobs::thumb_ffmpeg::{ffmpeg_binary, ffmpeg_command};
 
 /// What one reading of a material's chapter list came back with.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -94,7 +92,7 @@ pub fn read_chapters(path_str: &str) -> ChapterProbe {
     // all, so this costs a demux of the container's header rather than
     // a pass over its frames. No `-c copy` and no output file: the
     // muxer being asked for carries only metadata.
-    let output = match Command::new(&bin)
+    let output = match ffmpeg_command(&bin)
         .args(["-v", "error", "-i", path_str])
         .args(["-f", "ffmetadata", "-"])
         .output()

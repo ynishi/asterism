@@ -10,6 +10,23 @@ and this project adheres to
 
 ### Added
 
+- **The video jobs find, start and encode with ffmpeg the way Windows needs**
+  (part of #306). The first slice of a Windows build, and the part that does not
+  wait on signing or packaging. The lookups asked for files named `ffmpeg` and
+  `asterism-import`; on Windows those are `ffmpeg.exe` and
+  `asterism-import.exe`, so the bundled sidecar, anything on `PATH` and the
+  importer beside the app would all have read as missing. Each name now carries
+  the platform's executable suffix, which is empty on macOS. The three ffmpeg
+  spawns go through one helper that creates the process without a console window
+  on Windows, since the release app has no console for a child to share. The
+  preview transcode tries `h264_mf`, Media Foundation's encoder, where macOS
+  tries VideoToolbox, with `-rate_control quality -quality 55` rather than the
+  `-q:v 55` VideoToolbox takes: the CLI turns that into a quality of 6490, which
+  `h264_mf` hands to Media Foundation as a QP. On Windows N and KN editions,
+  which lack Media Foundation, the job's error says to install the Media Feature
+  Pack. None of it has run on Windows yet; nothing here builds a Windows bundle
+  or a Windows ffmpeg.
+
 - **An import keeps running, on an interval, with nobody watching** (#302). #299
   stored a command line and gave it a supervisor, and said in its own doc what
   it left out: a timer belongs on top of this and calls it. A definition now
