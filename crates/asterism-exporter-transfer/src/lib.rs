@@ -208,7 +208,8 @@ pub struct ProfileFacts {
     /// The host the bytes go to. Empty for [`Scheme::File`], which
     /// names no host.
     pub host: String,
-    /// The directory they land in, as the endpoint's path.
+    /// The directory they land in: [`Target::dir`], which says where it
+    /// differs from the endpoint's path.
     pub directory: String,
 }
 

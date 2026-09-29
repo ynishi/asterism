@@ -38,9 +38,11 @@ pub struct Target {
     /// Port, when the endpoint named one. Each protocol's default is
     /// the protocol's, not this type's.
     pub port: Option<u16>,
-    /// The directory on the far side, as the endpoint's path. Never
-    /// empty: an endpoint with no path lands in the far side's own
-    /// default directory, which is spelled `"."`.
+    /// The directory on the far side, as the endpoint's path — except
+    /// for a `file://` endpoint on Windows, where the `/` before a
+    /// drive is the URL's and is dropped (`/C:/out` is `C:/out`; see
+    /// [`file_endpoint`]). Never empty: an endpoint with no path lands
+    /// in the far side's own default directory, which is spelled `"."`.
     pub dir: String,
 }
 
