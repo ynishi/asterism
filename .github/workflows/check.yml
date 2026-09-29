@@ -545,8 +545,8 @@ jobs:
 
   # The same gates on Windows, so that code behind
   # `cfg(not(target_os = "macos"))` and `cfg(windows)` is compiled, linted
-  # and tested by the pull request that changes it rather than first on
-  # release day. #306's "Open 4" comment is the decision, and it names the
+  # and tested by the pull request that changes it; the macOS job
+  # cannot reach it, and neither can the release build. #306's "Open 4" comment is the decision, and it names the
   # ways to narrow this job, in order, if what it costs turns out to be
   # more than it is worth.
   #

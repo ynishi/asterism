@@ -463,11 +463,11 @@ aidoc-guard:
         echo "         rustup toolchain install ${required}" >&2
         exit 0
     fi
-    # The third way this cannot run: the toolchain the tool asks for is
+    # Another way this cannot run: the toolchain the tool asks for is
     # not installed, or a `--toolchain` override points at one whose
     # rustdoc JSON format it cannot read. Either way the tool says so
     # and exits 1 — a statement about the environment rather than about
-    # this repository, so it belongs with the other two warnings instead
+    # this repository, so it is a warning like the ones above instead
     # of turning every gate red. Drift still exits 2 and still fails.
     #
     # Since the tool pins its own nightly this should now only happen
@@ -479,7 +479,7 @@ aidoc-guard:
     if [ "$status" -eq 0 ]; then
         exit 0
     fi
-    # The fourth way this cannot run, and, like the Windows branch
+    # One more way this cannot run, and, like the Windows branch
     # above, about the machine rather than the tool. `docs/aidoc/`
     # records the target it describes (cargo-aidoc 0.3.0), and two of
     # `asterism-infra`'s job modules are behind
@@ -489,9 +489,10 @@ aidoc-guard:
     # exit 3 instead of exit 2, which is the whole reason it can be
     # told apart from the drift this recipe exists to fail on.
     #
-    # CI regenerates on the recorded target before it checks
-    # (`.github/workflows/check.yml`), so this branch is about the
-    # machine somebody is typing on, not about the gate.
+    # CI's macOS job regenerates on the recorded target before it checks
+    # (`.github/workflows/check.yml`), and its Windows job stops at the
+    # Windows branch above, so this branch is about the machine somebody
+    # is typing on, not about the gate.
     if [ "$status" -eq 3 ]; then
         echo "WARNING: docs/aidoc/ NOT CHECKED — the artifacts describe another" >&2
         echo "         target, and CI regenerates them on it." >&2
