@@ -8,6 +8,12 @@
 # silently not be picked up. `just` names the recipe that failed in its own
 # error line, so a failing gate is still identifiable without the split.
 #
+# The Windows job is the one partial composition here: its two gate steps
+# name `check-shared` and the clippy gate and leave the Rust tests off,
+# for the reason that job's comment gives. That makes those two steps a
+# list of their own, and `check`'s comment in the Justfile is where the
+# lists to edit together are named.
+#
 # Recipes are named here rather than cited by line. Every line number
 # this file used to carry had drifted off its target by the time anyone
 # followed it — `Justfile:279`, offered as the definition of green,
@@ -551,18 +557,21 @@ jobs:
   # if what it costs turns out to be more than it is worth.
   #
   # This job is on the first of those: it compiles and lints, and the
-  # Rust test suite does not run here. The suite holds tests written
-  # against unix — paths split and joined on `/`, "absolute" read as a
-  # leading `/`, `file://` endpoints built from native paths — and tests
-  # whose disclosure writes Windows refuses with "Access is denied".
-  # Those fail on every run whatever the pull request changed, so a
-  # Windows test step would answer nothing about the change in front of
-  # it, and making the tests portable is work of its own. The tests
-  # answer in the macOS job; `rust-test` joins this one as a change to
-  # it, made once the suite passes on Windows. That change owes the job
-  # an ffmpeg as well: the tests that spawn one panic without it, as the
-  # macOS job's install step says, and no gate here spawns it, so
-  # nothing here installs it.
+  # Rust test suite does not run here. Parts of it fail on Windows, some
+  # because the tests assume unix and some because the production code
+  # they exercise does: paths split and joined on `/`, "absolute" read
+  # as a leading `/`, `file://` endpoints built from native paths, a
+  # directory opened as a file so it can be fsynced. Those failures do
+  # not depend on the change. They fail on every `main` run, and on any
+  # pull request that edits a crate they sit in or touches a path the
+  # sentinel covers — `rust-test-changed` runs only the changed members'
+  # tests otherwise, and the whole workspace then. A Windows test step
+  # would answer nothing about the change in front of it, and making the
+  # code and the tests portable is work of its own. The tests answer in
+  # the macOS job; `rust-test` joins this one as a change to it, made
+  # once the suite passes on Windows. That change owes the job an ffmpeg
+  # as well: the tests that spawn one panic without it, as the macOS
+  # job's install step says.
   #
   # A job of its own rather than a matrix over the one above, the shape
   # `release.yml` asks for too: the macOS job regenerates and pushes
@@ -613,8 +622,15 @@ jobs:
       # mode makes the default UTF-8 without the scripts learning about
       # Windows.
       PYTHONUTF8: '1'
-      # The same two as the macOS job, whose comment gives the reason, so
-      # that what this job costs is measured on the same terms as that one.
+      # The same two as the macOS job, so that what this job costs is
+      # measured on the same terms as that one. The reason that job's
+      # comment gives is its test build, which does not happen here:
+      # every cargo call this job makes is `cargo check` or `cargo
+      # clippy`, which build every target under `dev`, so
+      # `CARGO_PROFILE_TEST_DEBUG` reaches nothing until `rust-test` joins
+      # the job. It stays because `Swatinem/rust-cache` hashes every
+      # `CARGO*` variable into its key, as the macOS job's comment says,
+      # and taking it out would cost a cold run and buy nothing.
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
@@ -648,10 +664,12 @@ jobs:
       # including after the macOS job pushes its regeneration.
       # This job pushes nothing, so it needs no branch to push to. On a
       # fork's pull request the macOS job tests the merge commit instead,
-      # for the reason its checkout gives; this job still tests the head.
+      # for the reason its checkout gives; this job still checks the head.
       #
       # Full history for the reason the macOS job's checkout gives:
-      # `check-changed` diffs against the merge base with `origin/main`.
+      # `rust-clippy-changed` asks `changed-packages` which members the
+      # branch touched, and that answer comes from the merge base with
+      # `origin/main`.
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || '' }}
