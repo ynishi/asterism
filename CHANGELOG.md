@@ -10,6 +10,16 @@ and this project adheres to
 
 ### Added
 
+- **Every pull request is checked on Windows as well as macOS** (part of #306).
+  Code that only compiles on Windows, or anywhere but macOS, used to meet a
+  compiler for the first time on release day. `check.yml` now has a Windows job
+  that runs the same `just` recipe as the macOS one, so formatting, clippy, the
+  tests and the frontend checks answer for that code in the pull request that
+  changes it. The `Justfile` runs its recipes under Git for Windows' bash there.
+  `docs/aidoc/` stays with the macOS job, and the Windows run says so rather
+  than checking it. The ffmpeg the tests use on Windows comes from Chocolatey
+  and never leaves the job.
+
 - **The video jobs find, start and encode with ffmpeg the way Windows needs**
   (part of #306). The first slice of a Windows build, and the part that does not
   wait on signing or packaging. The lookups asked for files named `ffmpeg` and
