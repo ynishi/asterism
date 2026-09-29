@@ -1621,8 +1621,10 @@ fn stage(path: &Path) -> std::io::Result<tempfile::NamedTempFile> {
 /// where the user's original was, which is the opposite of what this
 /// module advertises. So the data is fsynced before the rename and the
 /// directory after it, the same order the blob store writes its bytes
-/// in. The cost is real on a large video and it is paid on purpose:
-/// the alternative prices durability per file, and "whether power loss
+/// in; on Windows the directory half is [`sync_directory`]'s, which
+/// says what it does there instead. The cost is real on a large video
+/// and it is paid on purpose: the alternative prices durability per
+/// file, and "whether power loss
 /// eats your original" is not a property that should depend on a
 /// setting. An fsync that fails is a failure like any other, and the
 /// two sit on different sides of the rename: the data fsync stops the
@@ -1643,7 +1645,10 @@ fn stage(path: &Path) -> std::io::Result<tempfile::NamedTempFile> {
 /// support `F_FULLFSYNC` — an SMB share, some external enclosures —
 /// the call errors and the stamp stops. That is the same stance as
 /// every other fsync failure here: a file whose durability cannot be
-/// promised is not quietly rewritten with less.
+/// promised is not quietly rewritten with less. Windows is the one
+/// exception, and a known one rather than a quiet one: the directory
+/// half cannot be asked for there at all, and [`sync_directory`] says
+/// what the rewrite is promised without it.
 fn commit(temporary: tempfile::NamedTempFile, path: &Path) -> std::io::Result<()> {
     // The data first: a rename made durable ahead of its content would
     // pin the name to bytes the disk does not hold yet.
@@ -1653,7 +1658,33 @@ fn commit(temporary: tempfile::NamedTempFile, path: &Path) -> std::io::Result<()
     // directory's own blocks, and until they are written back the old
     // entry is what a crash recovers.
     let directory = path.parent().unwrap_or_else(|| Path::new("."));
+    sync_directory(directory)
+}
+
+/// Makes a completed rename's directory entry durable, by fsyncing the
+/// directory it sits in — the second sync [`commit`] describes.
+#[cfg(not(windows))]
+fn sync_directory(directory: &Path) -> std::io::Result<()> {
     std::fs::File::open(directory)?.sync_all()
+}
+
+/// Does nothing on Windows, where a directory cannot be opened as a
+/// file: `File::open` on one fails with `Access is denied (os error 5)`,
+/// which stopped every stamp there (#309).
+///
+/// What that leaves is weaker than unix, and on purpose rather than by
+/// accident. NTFS logs the rename in its own metadata journal, so a
+/// crash recovers either the old entry or the new one and never a torn
+/// one, and the data was already flushed before the rename — but the
+/// new entry is not promised to have reached the disk when this
+/// returns. The Windows way to promise that is renaming with
+/// `MOVEFILE_WRITE_THROUGH`, which `tempfile`'s persist does not pass
+/// (it asks `MoveFileExW` for `MOVEFILE_REPLACE_EXISTING` alone);
+/// taking it means a rename of this module's own in place of the
+/// temporary's.
+#[cfg(windows)]
+fn sync_directory(_directory: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 /// Replaces `path`'s contents through a temporary and a rename.

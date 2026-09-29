@@ -19,8 +19,10 @@
 //! the computed digest against the **declared** one (the domain's
 //! [`verify_declared_digest`], so the mismatch arm is the same
 //! rejection everywhere) → `fsync` the file → rename into the final
-//! path → `fsync` the parent directories. This hardens the `.part`
-//! precedent from `asterism-infra`'s preview jobs: same
+//! path → `fsync` the parent directories (on Windows that last step is
+//! skipped; `fsync_dir` says what that leaves unpromised). This
+//! hardens the `.part` precedent from `asterism-infra`'s preview jobs:
+//! same
 //! temp-then-rename shape, plus the fsyncs and the digest gate, because
 //! here the rename is what makes bytes *exist* for the link layer and
 //! a half-written blob must never be reachable under its digest.
@@ -351,6 +353,11 @@ impl StagingWrite {
     /// this very write). An orphan blob after a crash is harmless; a
     /// blob that vanishes after its link row committed would be a
     /// dangling link, which #83 §3's ordering promises never happens.
+    ///
+    /// On unix, that is. On Windows neither directory is fsynced —
+    /// `fsync_dir` there does nothing, and says why — so the promise is
+    /// weaker: a crash after the link row commits can still lose the
+    /// rename, and with it the blob the link names.
     pub async fn commit(mut self, declared: &DeclaredDigest) -> Result<VerifiedCopy, DomainError> {
         let file = self
             .file
@@ -421,6 +428,7 @@ impl Drop for StagingWrite {
 
 /// Fsyncs a directory — what makes a completed rename's directory
 /// entry durable, per the write path in the module doc.
+#[cfg(not(windows))]
 async fn fsync_dir(path: &Path) -> Result<(), DomainError> {
     let dir = tokio::fs::File::open(path).await.map_err(|e| {
         DomainError::Infra(anyhow::anyhow!(
@@ -434,6 +442,23 @@ async fn fsync_dir(path: &Path) -> Result<(), DomainError> {
             path.display()
         ))
     })
+}
+
+/// Does nothing on Windows, where a directory cannot be opened as a
+/// file: opening one fails with `Access is denied (os error 5)`, which
+/// refused every blob write there (#309).
+///
+/// That is weaker than unix, and said here so nobody reads it as
+/// equal. NTFS logs the rename in its own metadata journal, so a crash
+/// recovers either no blob at its final path or the whole one — the
+/// bytes were fsynced before the rename — but the entry is not promised
+/// to be on disk when the write returns, so a link recorded after it
+/// can outlive a blob a crash then loses. The Windows way to promise
+/// it is renaming with `MOVEFILE_WRITE_THROUGH`, which
+/// `tokio::fs::rename` does not pass.
+#[cfg(windows)]
+async fn fsync_dir(_path: &Path) -> Result<(), DomainError> {
+    Ok(())
 }
 
 async fn read_dir(path: &Path) -> Result<tokio::fs::ReadDir, DomainError> {
