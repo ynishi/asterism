@@ -609,9 +609,9 @@ and this project adheres to
   reopens its poll a second later, and records itself as alive first, since a
   claim is refused until it has been. The job queue's connections also wait 30 s
   on a locked database instead of 5 s, which makes the failure rarer but is not
-  what recovers from it. Each failed poll logs a warning
-  (`diag.jobs.worker_error`, then `diag.jobs.poll_restarted`) that now names the
-  database's own error.
+  what recovers from it. Each failed poll logs two warnings:
+  `diag.jobs.worker_error`, which now names the database's own error, then
+  `diag.jobs.poll_restarted`.
 
 - **The organisation warning covers a subject whose name this build cannot
   read** (found while working on #179, which this does not close). The warning
