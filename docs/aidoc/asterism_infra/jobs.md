@@ -49,3 +49,7 @@ future work.
 - `SqliteJobQueue` — Implementation of `JobQueue` on top of apalis' `SqliteStorage`.
 - `SqlitePool` — Re-export the sqlx-side pool type so downstream crates (server /
 
+## Constants
+
+- `JOB_POOL_BUSY_TIMEOUT` — How long a job-pool connection waits on a locked database before
+
