@@ -463,16 +463,6 @@ aidoc-guard:
         echo "         rustup toolchain install ${required}" >&2
         exit 0
     fi
-    # Another way this cannot run: the toolchain the tool asks for is
-    # not installed, or a `--toolchain` override points at one whose
-    # rustdoc JSON format it cannot read. Either way the tool says so
-    # and exits 1 — a statement about the environment rather than about
-    # this repository, so it is a warning like the ones above instead
-    # of turning every gate red. Drift still exits 2 and still fails.
-    #
-    # Since the tool pins its own nightly this should now only happen
-    # when somebody has not installed it, and the message names the
-    # `rustup` line that fixes that.
     output=$(cargo aidoc --workspace-root "{{ project_root }}" --check --strict --title asterism 2>&1)
     status=$?
     printf '%s\n' "$output"
@@ -498,6 +488,10 @@ aidoc-guard:
         echo "         target, and CI regenerates them on it." >&2
         exit 0
     fi
+    # cargo-aidoc and the nightly it runs disagreeing on rustdoc's JSON
+    # format is a statement about the environment rather than about this
+    # repository, so that one message is a warning instead of turning
+    # every gate red. Any other failure, drift (exit 2) included, fails.
     if printf '%s' "$output" | grep -q 'rustdoc format version mismatch'; then
         echo "WARNING: docs/aidoc/ NOT CHECKED — cargo-aidoc and this nightly" >&2
         echo "         disagree on the rustdoc JSON format. Update cargo-aidoc," >&2

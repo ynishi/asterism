@@ -545,10 +545,9 @@ jobs:
 
   # The same gates on Windows, so that code behind
   # `cfg(not(target_os = "macos"))` and `cfg(windows)` is compiled, linted
-  # and tested by the pull request that changes it; the macOS job
-  # cannot reach it, and neither can the release build. #306's "Open 4" comment is the decision, and it names the
-  # ways to narrow this job, in order, if what it costs turns out to be
-  # more than it is worth.
+  # and tested by the pull request that changes it. #306's "Open 4"
+  # comment is the decision, and it names the ways to narrow this job, in
+  # order, if what it costs turns out to be more than it is worth.
   #
   # A job of its own rather than a matrix over the one above, the shape
   # `release.yml` asks for too: the macOS job regenerates and pushes

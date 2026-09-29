@@ -569,10 +569,12 @@ fn resolve_output_dir(path: &str) -> Result<String, ExporterError> {
 
 /// Put a symlink at `target` pointing at `source`.
 ///
-/// Whatever already sits at `target` is removed first so `symlink`
+/// A file or symlink already at `target` is removed first so `symlink`
 /// does not fail with EEXIST. The test is `symlink_metadata`, which
 /// succeeds for a regular file as well as for a symlink, so a physical
-/// file at that name is removed too — not only a stale symlink.
+/// file at that name is removed too — not only a stale symlink. A
+/// directory is not: `remove_file` fails on it, that error is dropped,
+/// and `symlink` then reports EEXIST.
 #[cfg(unix)]
 fn place_symlink(source: &str, target: &Path) -> Result<(), ExporterError> {
     if target.symlink_metadata().is_ok() {
@@ -583,10 +585,9 @@ fn place_symlink(source: &str, target: &Path) -> Result<(), ExporterError> {
     })
 }
 
-/// Symlink mode is unix-only. The rejection comes before the
-/// stale-symlink removal the unix arm does, so a refused export leaves
-/// whatever sits at `target` where it was rather than deleting it and
-/// then failing.
+/// Symlink mode is unix-only. Nothing at `target` is removed here, so
+/// a refused export leaves whatever sits there where it was rather than
+/// deleting it and then failing.
 #[cfg(not(unix))]
 fn place_symlink(_source: &str, _target: &Path) -> Result<(), ExporterError> {
     Err(ExporterError::BackendRejected(
