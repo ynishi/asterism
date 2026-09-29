@@ -555,12 +555,10 @@ jobs:
   # tests assumed unix, and some production code did — paths joined on
   # `/`, "absolute" read as a leading `/`, `file://` endpoints built from
   # native paths, a directory opened as a file to fsync it. #309 fixed
-  # those and brought the tests back before a Windows run had shown the
-  # suite green; three of its targets timed out waiting on the job
-  # worker for reasons nobody has determined, and this job is where they
-  # answer. A test that fails here because it assumes unix is a defect
-  # in the test or in the code under it, to be fixed in one of those two
-  # places, not a reason to take the step away again.
+  # those and brought the tests back. A test that fails here because it
+  # assumes unix is a defect in the test or in the code under it, to be
+  # fixed in one of those two places, not a reason to take the step away
+  # again.
   #
   # A job of its own rather than a matrix over the one above, the shape
   # `release.yml` asks for too: the macOS job regenerates and pushes
@@ -585,9 +583,8 @@ jobs:
     # to restore, and ran the whole Rust suite: the job finished 39
     # minutes after it started, 16 of them the test build. A cache is
     # saved only by a run that succeeds, so a cold run is the one to leave
-    # room for. This is more than twice that one, the macOS job's figure,
-    # and far short of the six hours a hung step would otherwise hold a
-    # runner.
+    # room for. This is more than twice the cold run, and far short of
+    # the six hours a hung step would otherwise hold a runner.
     timeout-minutes: 90
     # Read-only. The write permission at the top of this file is for the
     # macOS job's `docs/aidoc/` push, and this job pushes nothing.
