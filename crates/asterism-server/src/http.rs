@@ -2694,6 +2694,13 @@ async fn get_thumb(
     }
 }
 
+/// The refusal [`get_asset_file`] gives an original that is on this disk
+/// but is not a regular file — the same `409` a container-record
+/// locator gets.
+fn not_a_regular_file(locator: &str) -> DomainError {
+    DomainError::clashes(format!("asset original is not a regular file: {locator}"))
+}
+
 /// `GET /asterism/assets/{id}/file` — the asset's **original** bytes.
 ///
 /// The thumbnail route serves a derived rendition; this serves the
@@ -2717,7 +2724,8 @@ async fn get_thumb(
 ///   the parameter reads as the owner.
 /// - **409** — the asset exists and is visible, but its original is not
 ///   a file on this disk (a record inside a container file, a remote
-///   URL, a caller-minted logical name). A fact about the asset, not
+///   URL, a caller-minted logical name, a path naming a directory). A
+///   fact about the asset, not
 ///   about the request, so it is not a 404.
 /// - **404, "asset original file not found"** — the row is here and its
 ///   locator is a path, but nothing is at that path. `410 Gone` states
@@ -2750,6 +2758,21 @@ async fn get_asset_file(
             }
             .into());
         }
+        // Windows will not open a directory as a file at all — the open
+        // fails with `PermissionDenied` (os error 5) where unix hands
+        // back a handle — so there the regular-file refusal below is
+        // never reached, and a directory came back as a 500 (#309).
+        // Asked of the path only on Windows and only on that error, so
+        // unix still answers from the open handle and nowhere else.
+        Err(err)
+            if cfg!(windows)
+                && err.kind() == std::io::ErrorKind::PermissionDenied
+                && tokio::fs::metadata(&original.path)
+                    .await
+                    .is_ok_and(|meta| meta.is_dir()) =>
+        {
+            return Err(not_a_regular_file(&original.locator).into());
+        }
         Err(err) => {
             return Err(DomainError::Infra(anyhow::anyhow!(
                 "asset original is unreadable ({}): {err}",
@@ -2772,11 +2795,7 @@ async fn get_asset_file(
         ))
     })?;
     if !meta.is_file() {
-        return Err(DomainError::clashes(format!(
-            "asset original is not a regular file: {}",
-            original.locator
-        ))
-        .into());
+        return Err(not_a_regular_file(&original.locator).into());
     }
     let length = meta.len();
     // The stored token, whatever it was: a format this codebase does
