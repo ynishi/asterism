@@ -1,5 +1,24 @@
 set shell := ["zsh", "-cu"]
 
+# Windows has no zsh, and the gates there are these same recipes rather
+# than a copy of them somewhere else, so on Windows they run under Git for
+# Windows' bash. `-cu` keeps the unset-variable failure `zsh -cu` gives
+# the linewise recipes everywhere else. The
+# shebang recipes need nothing from this setting: on Windows `just` hands
+# a `/`-bearing interpreter path such as `/usr/bin/env` to `cygpath`, and
+# Git for Windows supplies both.
+#
+# `windows-shell` rather than `[windows] set shell`, although just 1.56
+# deprecated the first in favour of the second: the attribute form does
+# not parse on an older `just`, so it would break this file for everyone
+# not yet on 1.56 to serve the one platform that needs it.
+set windows-shell := ["bash", "-cu"]
+
+# The interpreter the check scripts run under. The python.org installer
+# for Windows provides `python` and `py` and no `python3`, which there is
+# at most the Microsoft Store's alias.
+python := if os_family() == "windows" { "python" } else { "python3" }
+
 project_root := justfile_directory()
 ui_dir := project_root + "/crates/asterism-ui"
 dev_home := project_root + "/workspace/runtime/dev"
@@ -386,8 +405,9 @@ aidoc-check:
 aidoc-guard:
     #!/usr/bin/env bash
     set -uo pipefail
-    # The fifth way this cannot run, and the only one that is nobody's
-    # fault: the artifacts were regenerated earlier in this same run.
+    # A way this cannot run that is nobody's fault and says nothing
+    # about the machine: the artifacts were regenerated earlier in this
+    # same run.
     # CI does that (`.github/workflows/check.yml`) and sets this, and
     # from here the check would compare a regeneration against the
     # regeneration that produced it — it cannot report drift, and it
@@ -409,10 +429,19 @@ aidoc-guard:
     #     guard exits 0 unless the pinned nightly is installed.
     #
     # Said out loud rather than skipped quietly, on the same terms as
-    # the four warnings below — with the difference that here the
+    # the warnings below — with the difference that here the
     # artifacts *were* checked, by the tool that wrote them.
     if [ -n "${ASTERISM_AIDOC_REGENERATED:-}" ]; then
         echo "docs/aidoc/ was regenerated earlier in this run; not re-checked." >&2
+        exit 0
+    fi
+    # Windows is the exit-3 case below, the target mismatch, decided
+    # before the tool runs: the recorded target is macOS, so nothing on
+    # Windows can check these artifacts. Said here, ahead of the tool
+    # checks, which would otherwise name a missing install as the reason.
+    if [ "{{ os_family() }}" = "windows" ]; then
+        echo "WARNING: docs/aidoc/ NOT CHECKED — the artifacts describe another" >&2
+        echo "         target, and nothing on Windows can check them." >&2
         exit 0
     fi
     if ! command -v cargo-aidoc >/dev/null 2>&1; then
@@ -450,11 +479,12 @@ aidoc-guard:
     if [ "$status" -eq 0 ]; then
         exit 0
     fi
-    # The fourth way this cannot run, and the first that is about the
-    # machine rather than the tool. `docs/aidoc/` records the target it
-    # describes (cargo-aidoc 0.3.0), and two of `asterism-infra`'s job
-    # modules are behind `#[cfg(target_os = "macos")]` — from anywhere
-    # else, every diff this reports is `cfg` resolution rather than
+    # The fourth way this cannot run, and, like the Windows branch
+    # above, about the machine rather than the tool. `docs/aidoc/`
+    # records the target it describes (cargo-aidoc 0.3.0), and two of
+    # `asterism-infra`'s job modules are behind
+    # `#[cfg(target_os = "macos")]` — from anywhere else, every diff
+    # this reports is `cfg` resolution rather than
     # drift, and none of it is fixable from here. The tool says so with
     # exit 3 instead of exit 2, which is the whole reason it can be
     # told apart from the drift this recipe exists to fail on.
@@ -494,6 +524,13 @@ aidoc-guard:
 # `aidoc-guard` sits here rather than with those two despite doing a
 # rustdoc pass over the workspace: it is not narrowable by package,
 # since the artifacts it checks are one inventory of the whole tree.
+#
+# Every gate here runs on Windows too, as the same recipe (the
+# `windows-shell` setting at the top of this file is how). A gate that
+# cannot mean anything there says so in a Windows branch of its own and
+# exits 0 out loud, the way `aidoc-guard` does, rather than being left
+# out of a Windows copy of this list — a copy is what would let the next
+# gate added here silently not run there.
 #
 # Every gate whose cost does not scale with the workspace.
 [group('check')]
@@ -741,7 +778,7 @@ branch-check:
 [group('check')]
 [group('allow-agent')]
 commit-msg-check *args:
-    python3 "{{ project_root }}/scripts/check-commit-msg.py" {{ args }}
+    {{ python }} "{{ project_root }}/scripts/check-commit-msg.py" {{ args }}
 
 # Hold `scripts/cross-member-readers.txt` to the tree, both ways. The
 # list is how `changed-packages` selects a test that reads another
@@ -754,7 +791,7 @@ commit-msg-check *args:
 [group('check')]
 [group('allow-agent')]
 cross-member-check:
-    python3 "{{ project_root }}/scripts/check-cross-member-readers.py"
+    {{ python }} "{{ project_root }}/scripts/check-cross-member-readers.py"
 
 # Hold the AGPL and MIT/Apache planes apart. README's licence section
 # says the direction an `asterism-*` crate depending on a `teams-*` crate
@@ -767,7 +804,7 @@ cross-member-check:
 [group('check')]
 [group('allow-agent')]
 licence-check:
-    python3 "{{ project_root }}/scripts/check-licence-planes.py"
+    {{ python }} "{{ project_root }}/scripts/check-licence-planes.py"
 
 # Regenerate the notice naming every package the app links, the licence each
 # is used under, and that licence's text. `about.toml` decides which side of
@@ -809,7 +846,7 @@ licences:
 [group('check')]
 [group('allow-agent')]
 third-party-check:
-    python3 "{{ project_root }}/scripts/check-third-party-notices.py"
+    {{ python }} "{{ project_root }}/scripts/check-third-party-notices.py"
 
 # The last gate before a branch is handed over, and the agent that built
 # the branch is the one that runs it. It writes to nothing remote — so

@@ -159,7 +159,10 @@ permissions:
 
 jobs:
   check:
-    # Everything on macOS: the simple answer and the expensive one. The
+    # All of `check` on macOS: the simple answer and the expensive one.
+    # (The Windows job below is not the split weighed here. It runs the
+    # same gates a second time, for the `cfg` code this job never
+    # compiles, rather than moving any of them off macOS.) The
     # workspace is not uniformly portable — `crates/asterism-ui/src-tauri`
     # wants a webview toolkit, and the two recipes above want macOS outright
     # — so the alternative is a Linux job for the portable crates plus a
@@ -532,6 +535,141 @@ jobs:
       # including the dependent a branch broke without touching, the one
       # case `check-changed` gives up. That case surfaces here, one
       # merge later than it used to.
+      - name: just check-changed
+        if: github.event_name == 'pull_request'
+        run: just check-changed
+
+      - name: just check
+        if: github.event_name != 'pull_request'
+        run: just check
+
+  # The same gates on Windows, so that code behind
+  # `cfg(not(target_os = "macos"))` and `cfg(windows)` is compiled, linted
+  # and tested by the pull request that changes it rather than first on
+  # release day. #306's "Open 4" comment is the decision, and it names the
+  # ways to narrow this job, in order, if what it costs turns out to be
+  # more than it is worth.
+  #
+  # A job of its own rather than a matrix over the one above, the shape
+  # `release.yml` asks for too: the macOS job regenerates and pushes
+  # `docs/aidoc/`, installs a nightly for it, and needs `contents: write`
+  # to do so, and none of that belongs here.
+  #
+  # It runs the same recipe the macOS job runs, `check-changed` on a pull
+  # request and `check` everywhere else, and not a narrower one. The rule
+  # at the top of this file is why: a Windows step that called cargo
+  # directly would be a second definition of green. `check-shared`'s
+  # comment in the Justfile says how a gate that means nothing on Windows
+  # behaves there. `aidoc-guard` is that case, and what it leaves out is
+  # this job's to say: nothing here installs `cargo-aidoc` or its
+  # nightly, and nothing here regenerates the artifacts. The macOS job in
+  # the same run is where they are checked.
+  #
+  # `collation-jsc` is not in `check` and so not here either; the top of
+  # this file says why it stays out of CI altogether.
+  windows:
+    runs-on: windows-latest
+    # Generous for the reason the macOS job's is: a cold run is itself
+    # the measurement of what the job costs, so a timeout that kills it
+    # destroys the answer. Longer than that job's because this job's
+    # first runs are that measurement; set it against what they took.
+    timeout-minutes: 120
+    # Read-only. The write permission at the top of this file is for the
+    # macOS job's `docs/aidoc/` push, and this job pushes nothing.
+    permissions:
+      contents: read
+    # Git for Windows' bash for every step, so a step and a recipe run
+    # under the same shell. The Windows default is PowerShell.
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The check scripts read files with `read_text()` and no encoding,
+      # which on Windows, before Python 3.15, means the ANSI code page
+      # rather than UTF-8, and this repository's text is UTF-8. UTF-8
+      # mode makes the default UTF-8 without the scripts learning about
+      # Windows.
+      PYTHONUTF8: '1'
+
+    steps:
+      # Before the checkout, which is when it matters. Git on Windows
+      # turns LF into CRLF on checkout by default, and this repository
+      # has no `.gitattributes` to say otherwise. The gates should read
+      # the bytes that were committed, not a conversion of them;
+      # prettier's `--check`, for one, expects LF and fails every file
+      # otherwise.
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+
+      # On a pull request, the head commit the run was started for,
+      # named by SHA. The macOS job checks out the branch by name, which
+      # is the same commit unless the branch moves before that job
+      # starts; a SHA keeps this job on the commit the run is about,
+      # including after the macOS job pushes its regeneration.
+      # This job pushes nothing, so it needs no branch to push to. On a
+      # fork's pull request the macOS job tests the merge commit instead,
+      # for the reason its checkout gives; this job still tests the head.
+      #
+      # Full history for the reason the macOS job's checkout gives:
+      # `check-changed` diffs against the merge base with `origin/main`.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || '' }}
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The tests that need ffmpeg, for the reason the macOS job's step
+      # gives, from Chocolatey, which the runner image carries. Its
+      # package is a GPL build, and that is acceptable here because
+      # nothing leaves this job: no bundle is built from it, and the
+      # sidecar a bundle carries is built separately, under the LGPL
+      # (`FFMPEG-NOTICE.md`). It lands on `PATH`, so the tests find it
+      # through the same `PATH` lookup a user's own ffmpeg goes through,
+      # `.exe` suffix included, rather than through `$ASTERISM_FFMPEG`.
+      - name: Install ffmpeg
+        run: choco install ffmpeg --no-progress -y
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/asterism-ui/package-lock.json
+
+      - uses: extractions/setup-just@v4
+
+      - name: npm ci
+        working-directory: crates/asterism-ui
+        run: npm ci
+
+      # What the gates reach for, found or not by name here, so that a
+      # missing one fails in seconds rather than after the minutes of
+      # gates that ran before the first one needing it. `bash` is the
+      # linewise recipes' shell, `cygpath` and `env` are how a shebang
+      # recipe starts, `python` runs the check scripts, the tests spawn
+      # `ffmpeg`, and every gate runs through `just`, `cargo` or `npm`.
+      # `HOME` is read when the Justfile loads, so every recipe needs it.
+      - name: Check the tools the gates reach for
+        run: |
+          missing=0
+          for tool in bash cygpath env python ffmpeg just cargo npm; do
+            if path=$(command -v "$tool"); then
+              echo "$tool: $path"
+            else
+              echo "$tool: not found" >&2
+              missing=1
+            fi
+          done
+          echo "HOME: ${HOME:-<unset>}"
+          [ -n "${HOME:-}" ] || missing=1
+          exit "$missing"
+
+      # The same two steps as the macOS job's last two, and the same
+      # choice between them; its comment gives the reasons.
       - name: just check-changed
         if: github.event_name == 'pull_request'
         run: just check-changed
