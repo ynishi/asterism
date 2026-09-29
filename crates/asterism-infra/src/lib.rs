@@ -56,5 +56,7 @@ pub mod search;
 pub mod source_text;
 pub mod sqlite;
 pub mod telemetry;
+#[cfg(test)]
+mod test_log;
 #[cfg(feature = "vision")]
 pub mod vision;
