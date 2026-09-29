@@ -16,11 +16,13 @@ and this project adheres to
   `check.yml` now has a Windows job that runs every gate the macOS one does
   except the Rust tests, so formatting, clippy and the frontend checks answer
   for that code in the pull request that changes it. The tests stay with the
-  macOS job: parts of the suite assume unix paths, or write where Windows
-  refuses them, and fail there whatever a change touches, which #306's Open 4
-  comment anticipated as the first way to narrow the job. The `Justfile` runs
-  its recipes under Git for Windows' bash there. `docs/aidoc/` stays with the
-  macOS job, and the Windows run says so rather than checking it.
+  macOS job: parts of the suite fail on Windows, some because the tests assume
+  unix and some because the production code under them does, and they would fail
+  on every `main` run and on any pull request reaching those crates, whatever it
+  changed. #306's Open 4 comment anticipated that as the first way to narrow the
+  job; making the code and the tests portable is what brings them back. The
+  `Justfile` runs its recipes under Git for Windows' bash there. `docs/aidoc/`
+  stays with the macOS job, and the Windows run says so rather than checking it.
 
 - **The video jobs find, start and encode with ffmpeg the way Windows needs**
   (part of #306). The first slice of a Windows build, and the part that does not
