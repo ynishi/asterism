@@ -394,33 +394,7 @@ impl Exporter for FileExporter {
                     target.display().to_string()
                 }
                 WriteMode::Symlink => {
-                    // If a stale symlink is sitting where we want to
-                    // write, remove it first so `symlink` does not
-                    // fail with EEXIST. This only clears symlinks
-                    // (not real files) so a filename collision with
-                    // a physical file below `output_dir` still
-                    // surfaces as an error.
-                    if target.symlink_metadata().is_ok() {
-                        let _ = std::fs::remove_file(&target);
-                    }
-                    #[cfg(unix)]
-                    {
-                        std::os::unix::fs::symlink(&input.source_locator, &target).map_err(
-                            |e| {
-                                ExporterError::BackendRejected(format!(
-                                    "symlink {} -> {}: {e}",
-                                    input.source_locator,
-                                    target.display()
-                                ))
-                            },
-                        )?;
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        return Err(ExporterError::BackendRejected(
-                            "symlink mode is only supported on unix".into(),
-                        ));
-                    }
+                    place_symlink(&input.source_locator, &target)?;
                     target.display().to_string()
                 }
                 WriteMode::Reference => input.source_locator.clone(),
@@ -591,6 +565,33 @@ fn resolve_output_dir(path: &str) -> Result<String, ExporterError> {
         )));
     }
     Ok(resolved)
+}
+
+/// Put a symlink at `target` pointing at `source`.
+///
+/// Whatever already sits at `target` is removed first so `symlink`
+/// does not fail with EEXIST. The test is `symlink_metadata`, which
+/// succeeds for a regular file as well as for a symlink, so a physical
+/// file at that name is removed too — not only a stale symlink.
+#[cfg(unix)]
+fn place_symlink(source: &str, target: &Path) -> Result<(), ExporterError> {
+    if target.symlink_metadata().is_ok() {
+        let _ = std::fs::remove_file(target);
+    }
+    std::os::unix::fs::symlink(source, target).map_err(|e| {
+        ExporterError::BackendRejected(format!("symlink {source} -> {}: {e}", target.display()))
+    })
+}
+
+/// Symlink mode is unix-only. The rejection comes before the
+/// stale-symlink removal the unix arm does, so a refused export leaves
+/// whatever sits at `target` where it was rather than deleting it and
+/// then failing.
+#[cfg(not(unix))]
+fn place_symlink(_source: &str, _target: &Path) -> Result<(), ExporterError> {
+    Err(ExporterError::BackendRejected(
+        "symlink mode is only supported on unix".into(),
+    ))
 }
 
 fn mode_slug(mode: WriteMode) -> &'static str {
