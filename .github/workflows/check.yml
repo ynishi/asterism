@@ -590,16 +590,33 @@ jobs:
       # mode makes the default UTF-8 without the scripts learning about
       # Windows.
       PYTHONUTF8: '1'
+      # The same two as the macOS job, whose comment gives the reason, so
+      # that what this job costs is measured on the same terms as that one.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
     steps:
-      # Before the checkout, which is when it matters. Git on Windows
-      # turns LF into CRLF on checkout by default, and this repository
-      # has no `.gitattributes` to say otherwise. The gates should read
-      # the bytes that were committed, not a conversion of them;
-      # prettier's `--check`, for one, expects LF and fails every file
-      # otherwise.
-      - name: Keep line endings as committed
-        run: git config --global core.autocrlf false
+      # Before the checkout, which is when it matters. The gates should
+      # read the tree that was committed, not a conversion of it, and Git
+      # on Windows converts two things on checkout by default.
+      #
+      # Line endings: LF becomes CRLF, and this repository has no
+      # `.gitattributes` to say otherwise. prettier's `--check` then fails
+      # every markdown file, and worse, `changed-packages` reads each
+      # workspace member as a path ending in a carriage return, finds no
+      # manifest under it, and reports that no member changed — which
+      # skips clippy and the tests and reads as green.
+      #
+      # Symlinks: without `core.symlinks` a tracked symlink is written as
+      # a small file holding its target's path. `.claude/CLAUDE.md` is one,
+      # and prettier's `--check` fails on what that leaves.
+      #
+      # The tools step below fails the job if either conversion happened
+      # anyway, rather than leaving a gate to trip over it.
+      - name: Keep line endings and symlinks as committed
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.symlinks true
 
       # On a pull request, the head commit the run was started for,
       # named by SHA. The macOS job checks out the branch by name, which
@@ -622,6 +639,15 @@ jobs:
           components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
+
+      # `licence-check` and `third-party-check` read `cargo metadata
+      # --offline`, which needs every platform's packages already on disk,
+      # and a Windows build downloads only Windows's; nothing else in this
+      # job reads the full graph before those gates run. `cargo fetch`
+      # with no `--target` downloads for every platform, from the
+      # lockfile as committed.
+      - name: Fetch every platform's dependencies
+        run: cargo fetch --locked
 
       # The tests that need ffmpeg, for the reason the macOS job's step
       # gives, from Chocolatey, which the runner image carries. Its
@@ -653,20 +679,37 @@ jobs:
       # recipe starts, `python` runs the check scripts, the tests spawn
       # `ffmpeg`, and every gate runs through `just`, `cargo` or `npm`.
       # `HOME` is read when the Justfile loads, so every recipe needs it.
-      - name: Check the tools the gates reach for
+      # And the checkout is held to the first step's two settings: a file
+      # committed with LF must not be CRLF on disk, and a tracked symlink
+      # must be a symlink.
+      - name: Check the checkout and the tools the gates reach for
         run: |
-          missing=0
+          failed=0
           for tool in bash cygpath env python ffmpeg just cargo npm; do
             if path=$(command -v "$tool"); then
               echo "$tool: $path"
             else
               echo "$tool: not found" >&2
-              missing=1
+              failed=1
             fi
           done
           echo "HOME: ${HOME:-<unset>}"
-          [ -n "${HOME:-}" ] || missing=1
-          exit "$missing"
+          [ -n "${HOME:-}" ] || failed=1
+          converted=$(git ls-files --eol | grep 'i/lf *w/crlf' || true)
+          if [ -n "$converted" ]; then
+            echo "checked out with CRLF although committed with LF:" >&2
+            printf '%s\n' "$converted" | head -20 >&2
+            failed=1
+          fi
+          while IFS= read -r link; do
+            if [ -L "$link" ]; then
+              echo "symlink: $link"
+            else
+              echo "tracked symlink checked out as a file: $link" >&2
+              failed=1
+            fi
+          done < <(git ls-files -s | awk '$1 == "120000" { print $4 }')
+          exit "$failed"
 
       # The same two steps as the macOS job's last two, and the same
       # choice between them; its comment gives the reasons.
