@@ -768,12 +768,52 @@ pub async fn jobs_snapshot(pool: &SqlitePool) -> Result<JobsSnapshot, DomainErro
     Ok(snap)
 }
 
+/// How long a job-pool connection waits on a locked database before
+/// its statement fails with `SQLITE_BUSY`.
+///
+/// Longer than the catalogue connections' timeout (`sqlite::open`)
+/// because the two share one file, and SQLite has one write lock per
+/// file: every claim, ack and enqueue here queues behind whatever
+/// catalogue transaction a handler or a request is holding, and behind
+/// the other process's writes too. This pool used to take sqlx's
+/// default of 5 s, and a Windows CI runner exceeded it — the claim
+/// `UPDATE Jobs … RETURNING *` waited 5.5 s and failed (#309, run
+/// 36533184789). A statement that waits is cheap; one that fails costs
+/// more here than elsewhere: a failed ack leaves a finished job
+/// `Running` under a worker whose heartbeat keeps it out of the orphan
+/// sweep, so it runs again only after the process restarts, and a
+/// failed claim ends the poll stream ([`RestartingPoll`] is what
+/// reopens it). Raising this makes a failure rarer; it does not make
+/// one survivable, which is why the restart exists regardless.
+///
+/// Giving the queue a file of its own would remove the contention
+/// rather than wait it out, but it moves `Jobs` out from under every
+/// profile that already has rows in it, which is a migration and not a
+/// timeout.
+pub const JOB_POOL_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Opens the sqlx pool used by the job engine. Provided as a helper so
 /// consumers (the Tauri UI, and the tests that build a core) do not
 /// need to import sqlx directly. The pool shares the on-disk file with the isle backend
-/// (they run on separate connection stacks under WAL).
+/// (they run on separate connection stacks under WAL), and waits
+/// [`JOB_POOL_BUSY_TIMEOUT`] on a locked database.
 pub async fn open_job_pool(db_path: &std::path::Path) -> Result<SqlitePool, DomainError> {
-    SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db_path.display()))
+    connect_job_pool(db_path, JOB_POOL_BUSY_TIMEOUT).await
+}
+
+/// [`open_job_pool`] with the busy timeout named, so a test can make a
+/// held lock outlast it in milliseconds rather than half a minute.
+async fn connect_job_pool(
+    db_path: &std::path::Path,
+    busy_timeout: std::time::Duration,
+) -> Result<SqlitePool, DomainError> {
+    use std::str::FromStr;
+    let options =
+        sqlx::sqlite::SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))
+            .map_err(|e| DomainError::Infra(anyhow::anyhow!("job pool path invalid: {e}")))?
+            .create_if_missing(true)
+            .busy_timeout(busy_timeout);
+    SqlitePool::connect_with(options)
         .await
         .map_err(|e| DomainError::Infra(anyhow::anyhow!("job pool open failed: {e}")))
 }
@@ -853,7 +893,7 @@ pub fn start_workers(queue: SqliteJobQueue, deps: JobDeps, concurrency: Option<u
     let worker = WorkerBuilder::new("asterism-jobs")
         .concurrency(concurrency)
         .data(Arc::new(env))
-        .backend(storage)
+        .backend(RestartingPoll::new(storage, POLL_RESTART_DELAY))
         .build_fn(handle_asterism_job);
     tokio::spawn(
         Monitor::new()
@@ -863,15 +903,142 @@ pub fn start_workers(queue: SqliteJobQueue, deps: JobDeps, concurrency: Option<u
     );
 }
 
+/// How long [`RestartingPoll`] waits before reopening a poll stream
+/// that ended. It paces the reopening, so a failure that recurs at once
+/// — a claim refused by the foreign key, a database that stays
+/// unreachable — cannot turn the restart into a loop that does nothing
+/// else. Waiting for a held lock is [`JOB_POOL_BUSY_TIMEOUT`]'s job.
+const POLL_RESTART_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// A backend whose poll stream is reopened whenever it ends.
+///
+/// apalis-sql 0.7.4's SQLite poll stream is a `try_stream!` whose
+/// queries all end in `?` (`stream_jobs`, `src/sqlite.rs:195-243`),
+/// so the first failed statement — a claim or a fetch that met a
+/// locked database past the busy timeout — is yielded as an error and
+/// ends the stream. apalis-core does not reopen it: `Runnable::poll`
+/// (`src/worker/mod.rs:370-395`) joins the finished poll loop with the
+/// backend's heartbeat, which loops forever (`src/sqlite.rs:504-548`),
+/// so the worker neither exits nor claims another job, and its
+/// `Workers` row stays fresh, so the orphan sweep never hands its work
+/// to anyone else. Before this wrapper, one locked-database poll
+/// stalled the queue until the process restarted (#309).
+///
+/// This asks the wrapped storage for a new poller whenever the current
+/// stream ends and keeps only its stream. The heartbeat and the ack
+/// layer come from the first poller and live for the worker's lifetime,
+/// exactly as they did unwrapped; the later pollers' heartbeats are
+/// dropped without being polled, so none of their writes (the
+/// start-of-life orphan sweep included) ever run. The orphan semantics
+/// are therefore unchanged: one heartbeat, one worker id, one sweep.
+///
+/// Reopening alone is not enough, and the gap is why this wraps
+/// `SqliteStorage` rather than any backend. A claim writes `lock_by`,
+/// which is a foreign key onto `Workers(id)` (apalis-sql
+/// `migrations/sqlite/20220530084123_jobs_workers.sql:27`), and the
+/// worker's row is written only by the heartbeat — once at start and
+/// then every 30 s (`src/sqlite.rs:516-522`). A lock that fails the
+/// claim usually fails that first heartbeat too, and then every claim
+/// fails with `FOREIGN KEY constraint failed` until the next beat,
+/// ending each reopened stream in turn. So before reopening, this
+/// writes the row itself with `keep_alive_at`, the same upsert the
+/// heartbeat runs: it records only that this worker is alive, which it
+/// is. If that write fails as well, the reopened stream fails the same
+/// way and the next reopen tries again.
+///
+/// It is not a second worker. The streams run one after another —
+/// the next is opened only once the previous has ended — under the
+/// same worker id and the same claim query, so no two of them are ever
+/// claiming at once, and a claim is a single `UPDATE … WHERE status =
+/// 'Pending' AND lock_by IS NULL` that another claimant cannot share.
+/// A failed claim statement changed nothing, so no job is left
+/// `Running` under a stream that no longer exists. The one exception is
+/// a row the claim did take and apalis-sql then failed to decode: it
+/// stays `Running` under this worker's live id, where the orphan sweep
+/// does not look — as it did before this wrapper, when the same error
+/// also stopped every other job.
+///
+/// The alternatives were worse fits. Restarting the whole worker from
+/// the `Monitor` on an error event would start a second heartbeat and a
+/// second start-of-life orphan sweep beside handlers still running
+/// under the first, and apalis 0.7's `Monitor` has no restart hook to
+/// do it with. Retrying the failed statement inside the stream would
+/// mean re-implementing apalis-sql's private `stream_jobs` and
+/// `fetch_next` here, which then drift from the crate they copy.
+#[derive(Clone)]
+struct RestartingPoll {
+    inner: SqliteStorage<AsterismJob>,
+    delay: std::time::Duration,
+}
+
+impl RestartingPoll {
+    fn new(inner: SqliteStorage<AsterismJob>, delay: std::time::Duration) -> Self {
+        Self { inner, delay }
+    }
+}
+
+/// The request type the SQLite storage yields to the worker.
+type JobRequest = Request<AsterismJob, apalis_sql::context::SqlContext>;
+
+impl Backend<JobRequest> for RestartingPoll {
+    type Stream = futures::stream::BoxStream<'static, Result<Option<JobRequest>, Error>>;
+    type Layer = <SqliteStorage<AsterismJob> as Backend<JobRequest>>::Layer;
+    type Codec = <SqliteStorage<AsterismJob> as Backend<JobRequest>>::Codec;
+
+    fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+        use futures::StreamExt;
+
+        let Self { inner, delay } = self;
+        let first = inner.clone().poll(worker);
+        let reopened = futures::stream::unfold(
+            (inner, worker.clone()),
+            move |(mut inner, worker)| async move {
+                tokio::time::sleep(delay).await;
+                // A worker being shut down wants its stream to end,
+                // not to be handed a new one.
+                if worker.is_shutting_down() {
+                    return None;
+                }
+                tracing::warn!(
+                    event = "diag.jobs.poll_restarted",
+                    worker = %worker.id(),
+                    "job poll stream ended; reopening it"
+                );
+                if let Err(error) = inner
+                    .keep_alive_at(&worker, chrono::Utc::now().timestamp())
+                    .await
+                {
+                    tracing::warn!(
+                        event = "diag.jobs.worker_register_failed",
+                        worker = %worker.id(),
+                        error = %error,
+                        "could not record the job worker as alive before reopening its poll"
+                    );
+                }
+                let next = inner.clone().poll(&worker).stream;
+                Some((next, (inner, worker)))
+            },
+        )
+        .flatten();
+        Poller::new_with_layer(
+            first.stream.chain(reopened).boxed(),
+            first.heartbeat,
+            first.layer,
+        )
+    }
+}
+
 /// Says out loud what the worker otherwise tells nobody.
 ///
 /// apalis reports a failed poll, heartbeat, orphan sweep or ack as an
 /// [`Event::Error`] and nothing else, and with no handler registered
-/// that is the whole of it. One of those is worse than it looks: the
-/// SQLite backend's poll stream ends at its first query error, while
-/// the heartbeat beside it keeps the worker's row fresh, so the process
-/// goes on looking alive and never claims another job. This line is the
-/// only trace that leaves.
+/// that is the whole of it. A failed poll also ends the SQLite
+/// backend's poll stream; [`RestartingPoll`] reopens it, and logs
+/// `diag.jobs.poll_restarted` when it does, so a worker that met a
+/// locked database shows both lines and carries on claiming. The
+/// error's `cause` is logged beside it because apalis wraps a poll
+/// failure as "Encountered an error during streaming" and keeps the
+/// database's own message in the source chain.
 ///
 /// `Start`, `Engage` and `Idle` are left out: `Idle` fires on every
 /// empty poll, ten times a second.
@@ -881,6 +1048,7 @@ fn log_worker_event(worker: Worker<Event>) {
             event = "diag.jobs.worker_error",
             worker = %worker.id(),
             error = %error,
+            cause = %error_causes(error.as_ref()),
             "job worker reported an error"
         ),
         Event::Stop | Event::Exit => tracing::warn!(
@@ -891,6 +1059,18 @@ fn log_worker_event(worker: Worker<Event>) {
         ),
         Event::Start | Event::Engage(_) | Event::Idle | Event::Custom(_) => {}
     }
+}
+
+/// The messages of `error`'s sources, outermost first, joined with
+/// `": "` — empty when it has none.
+fn error_causes(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut causes = Vec::new();
+    let mut next = error.source();
+    while let Some(cause) = next {
+        causes.push(cause.to_string());
+        next = cause.source();
+    }
+    causes.join(": ")
 }
 
 /// Starts the job engine: opens the queue ([`open_queue`]) and spawns a
@@ -1382,6 +1562,109 @@ mod tests {
         let records = emitter.records.lock().unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].1.current, 1);
+    }
+
+    /// **A poll that meets a locked database does not stall the queue.**
+    ///
+    /// The failure #309 found on a Windows runner, forced here on any
+    /// platform: a second connection takes the queue file's write lock
+    /// (`BEGIN IMMEDIATE`) before the worker starts and holds it past
+    /// the pool's busy timeout, so the worker's first claim fails with
+    /// `SQLITE_BUSY` and apalis-sql ends its poll stream. The file is on
+    /// disk because an in-memory database has no second connection to
+    /// lock it from, and the pool's busy timeout is 200 ms so the lock
+    /// needs holding for a fraction of a second rather than half a
+    /// minute.
+    ///
+    /// The lock is held until the log says the stream is being reopened,
+    /// so the failure is witnessed, not assumed from a sleep: a stream is
+    /// reopened only after one has ended, and with the lock still held
+    /// nothing can have been claimed. Then the lock goes and every job
+    /// has to finish. The lock also fails the heartbeat's first write of
+    /// the worker's row, so the drain covers the other half of the fix
+    /// too: a claim's `lock_by` is a foreign key onto that row, and it
+    /// is the reopen that writes it before the next heartbeat would.
+    /// With the bare storage the queue stays where the Windows e2e runs
+    /// found it — every job `Pending`, none `Running`.
+    #[tokio::test]
+    async fn the_worker_keeps_claiming_after_a_poll_meets_a_locked_database() {
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        // Thread-local, and enough: the test runtime is single-threaded,
+        // so the monitor's tasks log from this thread.
+        let log = crate::test_log::EventNames::default();
+        let _subscriber =
+            tracing::subscriber::set_default(tracing_subscriber::registry().with(log.clone()));
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("jobs.db");
+        let pool = connect_job_pool(&db, Duration::from_millis(200))
+            .await
+            .unwrap();
+        let queue = open_queue(pool.clone()).await.unwrap();
+        // `DispatchRun` with no runtime bound skips at once and settles
+        // `Done`, so the only thing between a job and done is a claim.
+        for _ in 0..3 {
+            queue
+                .enqueue(JobKind::DispatchRun, serde_json::json!({}))
+                .await
+                .unwrap();
+        }
+
+        let locker = rusqlite::Connection::open(&db).unwrap();
+        locker.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        start_workers(
+            queue.clone(),
+            test_deps(&isle, Arc::new(std::sync::OnceLock::new())).await,
+            Some(1),
+        );
+
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while !log.seen().iter().any(|e| e == "diag.jobs.poll_restarted") {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "the poll stream was never reopened while the lock was held; seen: {:?}",
+                log.seen()
+            )
+        });
+        assert!(
+            log.seen().iter().any(|e| e == "diag.jobs.worker_error"),
+            "the failed claim is reported: {:?}",
+            log.seen()
+        );
+        // WAL lets this read past the held write lock.
+        let held = jobs_depth(&pool).await.unwrap();
+        assert_eq!(
+            (held.pending, held.done),
+            (3, 0),
+            "nothing is claimed while the lock is held: {held:?}"
+        );
+
+        locker.execute_batch("COMMIT").unwrap();
+        drop(locker);
+
+        let drained = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                let depth = jobs_depth(&pool).await.unwrap();
+                if depth.done == 3 {
+                    return depth;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await;
+        assert!(
+            drained.is_ok(),
+            "every job finishes once the lock is gone: {:?}; seen: {:?}",
+            jobs_depth(&pool).await.unwrap(),
+            log.seen()
+        );
     }
 
     /// The startup dedupe probe distinguishes a queued backfill walk

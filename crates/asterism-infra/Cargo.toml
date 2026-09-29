@@ -50,6 +50,10 @@ color-thief  = { workspace = true }
 # the workspace `Cargo.toml` for the rationale).
 apalis     = { workspace = true }
 apalis-sql = { workspace = true }
+# The `Stream` trait and its combinators, for the backend wrapper that
+# reopens the worker's poll stream when apalis-sql ends it
+# (`jobs::RestartingPoll`). Already built here: apalis depends on it.
+futures    = "0.3"
 
 # SQLite access: `rusqlite-isle` provides a thread-isolated actor with
 # cancellation and an optional reader pool. `rusqlite` is depended on

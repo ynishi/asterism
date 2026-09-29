@@ -682,6 +682,7 @@ dependencies = [
  "chrono-tz",
  "color-thief",
  "crc32fast",
+ "futures",
  "image",
  "kamadak-exif",
  "lindera",
