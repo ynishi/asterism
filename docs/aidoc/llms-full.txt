@@ -10074,6 +10074,7 @@ some of it may have.
 
 ## Functions
 
+- `file_endpoint` — Spells an absolute directory on this machine as a `file://`
 - `read_endpoint` — Reads a profile's endpoint into a [`Target`].
 
 ## Types
@@ -17985,8 +17986,10 @@ Stream into a uniquely named staging file while hashing → verify
 the computed digest against the **declared** one (the domain's
 [`verify_declared_digest`], so the mismatch arm is the same
 rejection everywhere) → `fsync` the file → rename into the final
-path → `fsync` the parent directories. This hardens the `.part`
-precedent from `asterism-infra`'s preview jobs: same
+path → `fsync` the parent directories (on Windows that last step is
+skipped; `fsync_dir` says what that leaves unpromised). This
+hardens the `.part` precedent from `asterism-infra`'s preview jobs:
+same
 temp-then-rename shape, plus the fsyncs and the digest gate, because
 here the rename is what makes bytes *exist* for the link layer and
 a half-written blob must never be reachable under its digest.
@@ -18131,7 +18134,9 @@ the read surface's visibility predicate.
 
 The #93 adapter's write path makes bytes durable (staging → rename)
 **before** the link row commits (#83 §3 ordering). That order is
-what makes a dangling link impossible for uploads — and it is
+what makes a dangling link impossible for uploads — on unix; on
+Windows the rename is not fsynced, as `blob::StagingWrite::commit`
+says — and it is
 exactly what a concurrent sweep could break: between the upload's
 rename and its link commit, the digest has bytes and zero links,
 and a sweep deciding in that window would delete bytes whose link

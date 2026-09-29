@@ -18,7 +18,9 @@ the read surface's visibility predicate.
 
 The #93 adapter's write path makes bytes durable (staging → rename)
 **before** the link row commits (#83 §3 ordering). That order is
-what makes a dangling link impossible for uploads — and it is
+what makes a dangling link impossible for uploads — on unix; on
+Windows the rename is not fsynced, as `blob::StagingWrite::commit`
+says — and it is
 exactly what a concurrent sweep could break: between the upload's
 rename and its link commit, the digest has bytes and zero links,
 and a sweep deciding in that window would delete bytes whose link

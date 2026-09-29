@@ -28,6 +28,7 @@ some of it may have.
 
 ## Functions
 
+- `file_endpoint` — Spells an absolute directory on this machine as a `file://`
 - `read_endpoint` — Reads a profile's endpoint into a [`Target`].
 
 ## Types

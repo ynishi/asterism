@@ -21,8 +21,10 @@ Stream into a uniquely named staging file while hashing → verify
 the computed digest against the **declared** one (the domain's
 [`verify_declared_digest`], so the mismatch arm is the same
 rejection everywhere) → `fsync` the file → rename into the final
-path → `fsync` the parent directories. This hardens the `.part`
-precedent from `asterism-infra`'s preview jobs: same
+path → `fsync` the parent directories (on Windows that last step is
+skipped; `fsync_dir` says what that leaves unpromised). This
+hardens the `.part` precedent from `asterism-infra`'s preview jobs:
+same
 temp-then-rename shape, plus the fsyncs and the digest gate, because
 here the rename is what makes bytes *exist* for the link layer and
 a half-written blob must never be reachable under its digest.
