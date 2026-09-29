@@ -600,6 +600,19 @@ and this project adheres to
   followed by several separators joins onto `$HOME` once instead of leaving
   `//`.
 
+- **One locked-database poll no longer stops background jobs for good** (#309).
+  When the job worker's claim met a database another writer held longer than the
+  busy timeout, the queue's poll ended at that one error while the worker went
+  on looking alive, so no job ran again until the app restarted — thumbnails,
+  hashes, indexing and duplicate detection all waited. On any platform a slow or
+  virus-scanned disk could do it; a Windows CI runner did. The worker now
+  reopens its poll a second later, and records itself as alive first, since a
+  claim is refused until it has been. The job queue's connections also wait 30 s
+  on a locked database instead of 5 s, which makes the failure rarer but is not
+  what recovers from it. Each failed poll logs a warning
+  (`diag.jobs.worker_error`, then `diag.jobs.poll_restarted`) that now names the
+  database's own error.
+
 - **The organisation warning covers a subject whose name this build cannot
   read** (found while working on #179, which this does not close). The warning
   asks whether a signing certificate gives a validator a signer name to display,
