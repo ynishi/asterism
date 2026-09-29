@@ -579,14 +579,24 @@ and this project adheres to
 
 ### Fixed
 
+- **The app's "Copy to…" prompt takes a Windows directory** (part of #306). The
+  prompt ran its own leading-`/` test on the directory and refused anything else
+  before a request was made, so on Windows `C:\…` was refused by the app even
+  though the file exporter would have written there. The app no longer checks
+  the path: the exporter's rule is the only one, and a directory it refuses —
+  relative, or `~user` — is reported in the dispatch toast in the exporter's own
+  words. A path typed as `~` or `~/…`, which the app used to refuse, now reaches
+  the exporter, which expands it onto `$HOME`. A refused path now leaves a
+  failed dispatch in the history where it used to leave nothing. None of it has
+  run on Windows yet.
+
 - **The file exporter, disclosure stamps, file:// sends and team blobs work on
   Windows** (#309). Four things assumed unix. The file exporter took "absolute"
   to mean "starts with `/`" and refused every local directory on Windows; it now
   asks the platform, and joins a `~` path onto `$HOME` the same way. The app's
-  copy-selection prompt still applies its own leading-`/` check before the
-  request reaches the exporter, so a Windows path typed there is refused by the
-  app, not the exporter. Writing a disclosure into a file and storing a team
-  blob both fsync the directory after the rename by opening it as a file, which
+  copy-selection prompt kept a leading-`/` check of its own until the entry
+  above removed it. Writing a disclosure into a file and storing a team blob
+  both fsync the directory after the rename by opening it as a file, which
   Windows refuses, so every stamp and every blob upload failed there; on Windows
   that step is now skipped, which is weaker than on unix — the data is still
   flushed before the rename, but the renamed entry is not promised to be on disk
