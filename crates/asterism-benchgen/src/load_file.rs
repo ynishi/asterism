@@ -656,7 +656,12 @@ mod tests {
             serde_json::to_string(&a).expect("json"),
             serde_json::to_string(&b).expect("json")
         );
-        assert_eq!(a.locator, format!("/corpus/{}", spec.rel_path));
+        // The same construction as `locator_of`, so the expectation carries
+        // the platform's separator instead of assuming `/`.
+        assert_eq!(
+            a.locator,
+            Path::new("/corpus").join(&spec.rel_path).display().to_string()
+        );
         assert_eq!(a.source_kind, "fs");
         assert_eq!(a.modality.as_deref(), Some(BENCH_MODALITY));
         assert_eq!(a.occurred_at_ms, spec.occurred_at_ms);

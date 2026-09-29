@@ -536,7 +536,12 @@ mod tests {
         assert!((PSEUDO_SIZE.0..=PSEUDO_SIZE.1).contains(&pseudo_size(&spec)));
         assert_eq!(
             locator_of(Path::new("/corpus/42-v1"), &spec),
-            format!("/corpus/42-v1/{}", spec.rel_path)
+            // Joined the way `locator_of` joins, so the separator is the
+            // platform's rather than an assumed `/`.
+            Path::new("/corpus/42-v1")
+                .join(&spec.rel_path)
+                .display()
+                .to_string()
         );
         let labels = labels_of(&spec).expect("labels");
         assert_eq!(

@@ -516,7 +516,9 @@ mod tests {
                     b"one".to_vec()
                 ),
                 (
-                    tmp.path().join("sub/b.md").display().to_string(),
+                    // Joined per component, as the walk builds it: on
+                    // Windows the separator is `\`, not `/`.
+                    tmp.path().join("sub").join("b.md").display().to_string(),
                     b"two".to_vec()
                 ),
             ],
@@ -583,7 +585,14 @@ mod tests {
         std::fs::create_dir(tmp.path().join("a")).expect("mkdir");
         std::fs::write(tmp.path().join("a/z.txt"), b"one").expect("write");
         std::fs::write(tmp.path().join("a-b.txt"), b"two").expect("write");
-        let at = |name: &str| tmp.path().join(name).display().to_string();
+        // Per component, as the walk joins them, so `a/z.txt` carries the
+        // platform's separator rather than a literal `/`.
+        let at = |name: &str| {
+            name.split('/')
+                .fold(tmp.path().to_path_buf(), |path, part| path.join(part))
+                .display()
+                .to_string()
+        };
 
         let first = drain_events(FsScanner::new(tmp.path()), None).await;
         assert_eq!(
