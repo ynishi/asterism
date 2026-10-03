@@ -99,15 +99,41 @@ impl Drop for ImportSchedule {
 
 impl ImportSchedule {
     /// Starts asking every `tick` which imports are due, and starting
-    /// them.
+    /// them, on the runtime the caller is already inside.
+    ///
+    /// The form for a caller already inside a runtime. It is
+    /// [`spawn_on`](Self::spawn_on) with the
+    /// current runtime's handle, and like `tokio::spawn` it panics when
+    /// there is none — a caller on a thread no runtime owns reaches for
+    /// `spawn_on` instead.
+    pub fn spawn(service: Arc<ImportRunService>, tick: Duration) -> Self {
+        Self::spawn_on(&tokio::runtime::Handle::current(), service, tick)
+    }
+
+    /// Starts the same loop on `runtime`, from any thread.
     ///
     /// The product and the test that proves the product start the same
     /// loop through here. `tick` is the resolution, not a schedule:
     /// [`DEFAULT_TICK`] is what the serving process passes, and a test
     /// passes something short because it cannot wait a minute to learn
     /// anything.
-    pub fn spawn(service: Arc<ImportRunService>, tick: Duration) -> Self {
-        let task = tokio::spawn(async move {
+    ///
+    /// The runtime is a parameter because the serving process starts
+    /// the timer from a thread that has none. Tauri's `setup` hook runs
+    /// on the main thread, outside every runtime, and a bare
+    /// `tokio::spawn` there panicked inside the OS's launch callback,
+    /// where a panic cannot unwind — the app aborted before a window
+    /// appeared (#311). Entering the runtime at the call site would have
+    /// fixed that one call too, but as a guard the next edit can move
+    /// the call out of, at a site that reads as plain synchronous code;
+    /// a parameter puts the requirement in the signature, where a caller
+    /// with no runtime has to answer it.
+    pub fn spawn_on(
+        runtime: &tokio::runtime::Handle,
+        service: Arc<ImportRunService>,
+        tick: Duration,
+    ) -> Self {
+        let task = runtime.spawn(async move {
             let mut ticker = tokio::time::interval(tick);
             // Not `Burst`, the default: it saves the repeated
             // question after a suspend, and guards nothing. Module doc.
@@ -146,5 +172,105 @@ impl ImportSchedule {
             }
         });
         Self { task }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use async_trait::async_trait;
+    use chrono::DateTime;
+
+    use super::*;
+    use crate::application::{ImportLauncher, LaunchOutcome, LaunchSpec};
+    use crate::domain::import_definition::{ImportDefinition, ImportRun};
+    use crate::domain::repository::ImportDefinitionRepository;
+    use crate::error::DomainError;
+
+    /// Answers `due` with nothing and says each time it was asked;
+    /// nothing else is reached, because nothing is ever due.
+    struct Asked(std::sync::Mutex<mpsc::Sender<()>>);
+
+    #[async_trait]
+    impl ImportDefinitionRepository for Asked {
+        async fn upsert(&self, _: &ImportDefinition) -> Result<(), DomainError> {
+            unreachable!("nothing is due, so nothing is written")
+        }
+        async fn find(&self, _: &str) -> Result<Option<ImportDefinition>, DomainError> {
+            unreachable!("nothing is due, so nothing is looked up")
+        }
+        async fn list(&self) -> Result<Vec<ImportDefinition>, DomainError> {
+            unreachable!("the timer never lists")
+        }
+        async fn abandon_running(&self) -> Result<u64, DomainError> {
+            unreachable!("the timer never sweeps")
+        }
+        async fn record_run(&self, _: &ImportRun) -> Result<(), DomainError> {
+            unreachable!("nothing is due, so nothing runs")
+        }
+        async fn runs_for(&self, _: &str, _: u32) -> Result<Vec<ImportRun>, DomainError> {
+            unreachable!("the timer never reads runs")
+        }
+        async fn due(&self, _: DateTime<Utc>) -> Result<Vec<ImportDefinition>, DomainError> {
+            // The receiver is gone once the test has heard enough.
+            let _ = self.0.lock().expect("the sender").send(());
+            Ok(Vec::new())
+        }
+    }
+
+    struct NeverLaunched;
+
+    #[async_trait]
+    impl ImportLauncher for NeverLaunched {
+        async fn launch(&self, _: LaunchSpec) -> Result<LaunchOutcome, DomainError> {
+            unreachable!("nothing is due, so nothing is launched")
+        }
+    }
+
+    /// The shape of Tauri's `setup`: a plain thread no runtime owns,
+    /// holding a handle to one that lives elsewhere. `#[test]` and not
+    /// `#[tokio::test]` on purpose — inside a runtime a bare
+    /// `tokio::spawn` works, and this is the case where it did not
+    /// (#311).
+    #[test]
+    fn spawn_on_starts_the_timer_from_a_thread_with_no_runtime() {
+        assert!(
+            tokio::runtime::Handle::try_current().is_err(),
+            "the test thread must not be inside a runtime, or it proves nothing"
+        );
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let (tx, rx) = mpsc::channel();
+        let service = Arc::new(ImportRunService::new(
+            Arc::new(Asked(std::sync::Mutex::new(tx))),
+            Arc::new(NeverLaunched),
+        ));
+
+        let schedule =
+            ImportSchedule::spawn_on(runtime.handle(), service, Duration::from_millis(10));
+
+        // Two asks, not one: the first tick of an interval is immediate,
+        // so only the second says the timer is ticking.
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("the timer asks at once");
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("the timer asks again a tick later");
+
+        // Dropping the handle aborts the task, which drops the service
+        // and with it the only sender, so the channel closes. Asks
+        // already queued drain first; a timer still running would keep
+        // the channel open and keep adding to it.
+        drop(schedule);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while rx.recv_timeout(Duration::from_secs(5)) != Err(mpsc::RecvTimeoutError::Disconnected) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the timer kept asking after its handle was dropped"
+            );
+        }
     }
 }
