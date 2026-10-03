@@ -406,8 +406,8 @@ aidoc:
 # Carries `allow-agent` on ui-e2e's half of that group's reasoning, not
 # the "seconds long, writes nothing" half: a run costs minutes and
 # writes rustdoc JSON into cargo's build directory in order to have
-# something to compare (docs/aidoc/ itself is untouched in check mode), but it is
-# the only surface that can check the inventory, so it is run
+# something to compare (docs/aidoc/ itself is untouched in check mode),
+# but it is the only surface that can check the inventory, so it is run
 # deliberately rather than skipped.
 [group('allow-agent')]
 aidoc-check:
@@ -620,12 +620,21 @@ check-changed: check-shared rust-clippy-changed rust-test-changed
 #
 # The Branches section of CONTRIBUTING.md states the rule; this recipe
 # chooses two things within it, the destination under `.worktrees/`
-# and a warm `target/`. What this adds is the copy: a
-# fresh worktree has no `target/`, so its first gate rebuilds the whole
-# dependency graph — 21 crates' worth of work this machine may have
-# done an hour ago, one directory away. Measured on `asterism-infra`
-# (753 dependencies): `cargo check` took 1 min 17 s in a cold worktree
-# against 39 s in a copied one.
+# and a warm build directory. What this adds is the copy: a fresh
+# worktree's build directory is empty, so its first gate rebuilds the
+# whole dependency graph — 21 crates' worth of work this machine may
+# have done an hour ago, one directory away. Measured on
+# `asterism-infra` (753 dependencies): `cargo check` took 1 min 17 s in
+# a cold worktree against 39 s in a copied one.
+#
+# Both ends are cargo's to say, through `scripts/cargo-build-dir.py`:
+# the source asked in this checkout, the destination asked from inside
+# the new worktree. With `CARGO_TARGET_DIR` set, every checkout already
+# builds into that one directory — the sharing the next paragraph
+# argues against, chosen by whoever set it — so there is nothing to
+# seed and the recipe says so instead of copying a directory onto
+# itself. The same holds for a `build.target-dir` that names one
+# directory for both.
 #
 # A copy and deliberately not a shared directory. Cargo treats path
 # dependencies carrying the same name, version and workspace-relative
@@ -646,26 +655,27 @@ check-changed: check-shared rust-clippy-changed rust-test-changed
 # of a job that is the same on every checkout that runs it. #226 is the
 # writeup, and the crate's own docs carry the mechanics: which
 # filesystems clone, why `incremental/` is matched by where it sits in
-# `target/` rather than by name (a build script's own `OUT_DIR` is free
-# to hold a directory of that name), why it takes a share of Cargo's
-# build lock while reading, and why dep-info is never shared regardless
-# of size. `--min-shared-size` is left at the crate's default, which is
-# the same 1 MiB the old shell used for the same split.
+# the build directory rather than by name (a build script's own
+# `OUT_DIR` is free to hold a directory of that name), why it takes a
+# share of Cargo's build lock while reading, and why dep-info is never
+# shared regardless of size. `--min-shared-size` is left at the crate's
+# default, which is the same 1 MiB the old shell used for the same
+# split.
 #
 # Staged under `workspace/`, which `.gitignore` covers, because a
 # staged tree at the worktree's root would be untracked — and the
 # `-changed` gates refuse a tree with anything untracked in it, which
 # would make an unfinished copy block the branch's own gates.
-# Backgrounded with `&` unconditionally: nothing reads `target/` until
-# something compiles, so the copy runs through the reading-the-issue
-# part of the work rather than in front of the prompt. The old shell
-# only backgrounded its slow hardlink half and ran the APFS clone in
-# the foreground because that one was seconds; here it is one call
-# either way, so there is nothing to gain by telling the fast case from
-# the slow one before making it.
+# Backgrounded with `&` unconditionally: nothing reads the build
+# directory until something compiles, so the copy runs through the
+# reading-the-issue part of the work rather than in front of the
+# prompt. The old shell only backgrounded its slow hardlink half and
+# ran the APFS clone in the foreground because that one was seconds;
+# here it is one call either way, so there is nothing to gain by
+# telling the fast case from the slow one before making it.
 #
-# A build running in this checkout while the seeding reads its
-# `target/` is a case the old shell did not detect — a torn snapshot
+# A build running in this checkout while the seeding reads its build
+# directory is a case the old shell did not detect — a torn snapshot
 # that surfaced later as an artifact sitting behind a fingerprint that
 # said fresh. The crate takes a share of Cargo's own build lock while
 # reading instead, so this now fails rather than tears: the seeding
@@ -673,7 +683,7 @@ check-changed: check-shared rust-clippy-changed rust-test-changed
 # cold. Cut worktrees between builds, still.
 #
 # Absent, this recipe still hands back a worktree — cold, the same as
-# when there is no `target/` in this checkout to copy at all (the other
+# when this checkout has no build directory to copy at all (another
 # NOTE below). A cold worktree's first gate is slower, not broken, and
 # that degrade is what keeps `allow-agent` true on a machine nobody has
 # run `cargo install cargo-shared-target` on yet.
@@ -745,10 +755,21 @@ worktree-new type slug:
         exit 1
     fi
     dest="{{ project_root }}/.worktrees/$slug"
-    src="{{ project_root }}/target"
+    # Asked before the worktree exists, so that a refusal (a relative
+    # `CARGO_TARGET_DIR`) leaves nothing behind to clean up.
+    src="$({{ build_dir_script }} dir)"
     git worktree add "$dest" -b "$kind/$slug" origin/main
-    if [ ! -d "$src" ]; then
-        echo "NOTE: no target/ in this checkout to copy; worktree starts cold." >&2
+    # Asked from inside the new worktree: cargo looks for config files
+    # from its working directory, not from the manifest.
+    into="$(cd "$dest" && {{ build_dir_script }} --manifest-path "$dest/Cargo.toml" dir)"
+    if [ -n "${CARGO_TARGET_DIR+set}" ]; then
+        echo "NOTE: CARGO_TARGET_DIR is set ($CARGO_TARGET_DIR), so every checkout" >&2
+        echo "      already builds into that one directory; nothing to seed." >&2
+    elif [ "$src" = "$into" ]; then
+        echo "NOTE: cargo names one build directory for both checkouts ($src);" >&2
+        echo "      nothing to seed." >&2
+    elif [ ! -d "$src" ]; then
+        echo "NOTE: no build directory at $src to copy; worktree starts cold." >&2
     elif ! command -v cargo-shared-target >/dev/null 2>&1; then
         echo "NOTE: cargo-shared-target is not installed; worktree starts cold." >&2
         echo "      cargo install cargo-shared-target" >&2
@@ -758,10 +779,10 @@ worktree-new type slug:
         # SIGHUP ignored so that closing the terminal that ran this does
         # not leave the seeding half-done.
         ( trap '' HUP
-          cargo shared-target --src "$src" --dest "$dest/target" \
+          cargo shared-target --src "$src" --dest "$into" \
               --staging "$dest/workspace/target.partial"
         ) > "$log" 2>&1 &
-        echo "seeding target/ in the background — until it lands this worktree"
+        echo "seeding $into in the background — until it lands this worktree"
         echo "builds cold, and $log says when it is done."
     fi
     cd "$dest" && just branch-check
@@ -1671,9 +1692,10 @@ rust-test: rust-fmt-check
         echo "Their tests are absent from the counts above — the totals are a floor," >&2
         echo "not a tally. The binaries that were launched but stayed silent:" >&2
         # Identity is the last field of a `Running` line (the test
-        # binary's path in cargo's build directory, in parentheses) or the crate on a `Doc-tests`
-        # line. Not `$2`: that is the literal word `unittests`, which
-        # would make every binary look like the same one.
+        # binary's path in cargo's build directory, in parentheses) or
+        # the crate on a `Doc-tests` line. Not `$2`: that is the literal
+        # word `unittests`, which would make every binary look like the
+        # same one.
         awk '
             /^ +Running /   { key = $NF; gsub(/[()]/, "", key); seen[key] = 1; last = key; next }
             /^ +Doc-tests / { key = "doc:" $2;                  seen[key] = 1; last = key; next }
