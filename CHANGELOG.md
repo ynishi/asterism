@@ -579,6 +579,16 @@ and this project adheres to
 
 ### Fixed
 
+- **The desktop app starts again** (#311). Since 8f1b1cf, after v0.1.1, the app
+  aborted at launch before a window appeared: the setup hook started the import
+  timer with a bare `tokio::spawn` on the main thread, which no runtime owns,
+  and the panic could not unwind out of the OS's launch callback. The timer now
+  starts on Tauri's runtime through `ImportSchedule::spawn_on`, which takes the
+  runtime as a parameter; `ImportSchedule::spawn` keeps its signature for
+  callers already inside one. The end-to-end test that proves the schedule now
+  calls `spawn_on` too, so it starts the timer through the same function the
+  desktop does.
+
 - **The file exporter, disclosure stamps, file:// sends and team blobs work on
   Windows** (#309). Four things assumed unix. The file exporter took "absolute"
   to mean "starts with `/`" and refused every local directory on Windows; it now
