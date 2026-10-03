@@ -616,11 +616,13 @@ check: check-shared rust-clippy rust-test
 [group('check')]
 check-changed: check-shared rust-clippy-changed rust-test-changed
 
-# Cut the worktree for an issue, and hand it a warm target directory.
+# Cut the worktree for an issue, and seed its build directory from this
+# checkout's where it can.
 #
 # The Branches section of CONTRIBUTING.md states the rule; this recipe
 # chooses two things within it, the destination under `.worktrees/`
-# and a warm build directory. What this adds is the copy: a fresh
+# and a build directory seeded from this checkout's where it can. What
+# this adds is the copy: a fresh
 # worktree's build directory is empty, so its first gate rebuilds the
 # whole dependency graph — 21 crates' worth of work this machine may
 # have done an hour ago, one directory away. Measured on
@@ -695,7 +697,7 @@ check-changed: check-shared rust-clippy-changed rust-test-changed
 # `ui-e2e`'s half of the group's reasoning rather than the format
 # checks': an agent without it cannot start.
 
-# Cut a worktree for an issue, with a target directory seeded into it.
+# Cut a worktree for an issue, seeding its build directory from this checkout's where it can.
 #
 # `[positional-arguments]` rather than `{{ }}` inside the body, because
 # `{{ slug }}` is a textual substitution: `just` writes the argument
@@ -755,8 +757,8 @@ worktree-new type slug:
         exit 1
     fi
     dest="{{ project_root }}/.worktrees/$slug"
-    # Asked before the worktree exists, so that a refusal (a relative
-    # `CARGO_TARGET_DIR`) leaves nothing behind to clean up.
+    # Asked before the worktree exists, so that a refusal leaves nothing
+    # behind to clean up.
     src="$({{ build_dir_script }} dir)"
     git worktree add "$dest" -b "$kind/$slug" origin/main
     # Asked from inside the new worktree: cargo looks for config files
