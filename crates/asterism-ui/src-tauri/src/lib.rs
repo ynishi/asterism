@@ -259,7 +259,12 @@ pub fn run() {
             // stops the timer when it drops and a local would drop at
             // the end of `setup`. Tauri's state outlives the process's
             // useful life, which is exactly the timer's.
-            app.manage(asterism_core::application::ImportSchedule::spawn(
+            //
+            // `spawn_on` with Tauri's runtime, not `spawn`: this hook
+            // runs on the main thread, outside any runtime, and
+            // `spawn_on`'s doc says what `spawn` did here (#311).
+            app.manage(asterism_core::application::ImportSchedule::spawn_on(
+                tauri::async_runtime::handle().inner(),
                 server_ctx.import_run_service.clone(),
                 asterism_core::application::DEFAULT_TICK,
             ));

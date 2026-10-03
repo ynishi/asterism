@@ -207,8 +207,14 @@ async fn an_interval_starts_an_import_and_an_absent_one_does_not() {
     );
 
     // Nothing below asks for a run. This is the only line that could
-    // cause one, and it starts the same function the desktop starts.
-    let _timer = ImportSchedule::spawn(core.import_run_service.clone(), Duration::from_millis(50));
+    // cause one, and it starts the same function the desktop starts —
+    // `spawn_on`, which the desktop hands Tauri's runtime and this test
+    // hands its own.
+    let _timer = ImportSchedule::spawn_on(
+        &tokio::runtime::Handle::current(),
+        core.import_run_service.clone(),
+        Duration::from_millis(50),
+    );
 
     let run = settled_run(&core, &scheduled.id).await;
     assert_eq!(
@@ -351,7 +357,11 @@ async fn a_wait_a_source_stated_reaches_the_run_record() {
         .await
         .expect("a definition");
 
-    let _timer = ImportSchedule::spawn(core.import_run_service.clone(), Duration::from_millis(50));
+    let _timer = ImportSchedule::spawn_on(
+        &tokio::runtime::Handle::current(),
+        core.import_run_service.clone(),
+        Duration::from_millis(50),
+    );
 
     let run = settled_run(&core, &limited.id).await;
     assert_eq!(
