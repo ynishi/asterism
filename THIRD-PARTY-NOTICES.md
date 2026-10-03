@@ -12402,7 +12402,7 @@ Used by:
 
 - [adler2 2.0.1](https://github.com/oyvindln/adler2)
 - [anyhow 1.0.103](https://github.com/dtolnay/anyhow)
-- [async-trait 0.1.89](https://github.com/dtolnay/async-trait)
+- [async-trait 0.1.92](https://github.com/dtolnay/async-trait)
 - [atomic-waker 1.1.2](https://github.com/smol-rs/atomic-waker)
 - [btree-slab 0.6.1](https://github.com/timothee-haudebourg/btree-slab)
 - [camino 1.2.4](https://github.com/camino-rs/camino)

@@ -213,7 +213,7 @@ tokio       = { version = "1", features = ["full"] }
 tar         = "0.4"
 anyhow      = "1"
 thiserror   = "2"
-async-trait = "0.1"
+async-trait = "0.1.92"
 uuid        = { version = "1", features = ["v7", "serde"] }
 chrono      = { version = "0.4", features = ["serde"] }
 # The IANA time-zone database, for the one question a UTC offset cannot
