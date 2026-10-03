@@ -809,12 +809,17 @@ const SYNC_EXEMPT_FNS: &[(&str, &str)] = &[
          async is a separate question from attribution)",
     ),
     (
-        "import_scheduler::spawn",
+        "import_scheduler::spawn_on",
         "starts the timer and returns the handle that stops it. Writes \
          nothing itself and never could: what it starts is a loop calling \
          `import_run_service::start_due`, which takes a context and is in \
          the population the previous guard walks. Synchronous because \
          handing a task to the runtime is not something to await",
+    ),
+    (
+        "import_scheduler::spawn",
+        "`spawn_on` with the current runtime's handle, and exempt for \
+         `spawn_on`'s reason: it adds no body of its own",
     ),
 ];
 
