@@ -19,10 +19,5 @@
         }
       ]
     }
-  },
-  "bundle": {
-    "externalBin": [
-      "../../../target/ffmpeg-sidecar/ffmpeg"
-    ]
   }
 }

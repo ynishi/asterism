@@ -20,10 +20,9 @@
 //! The middle rung is the one worth naming, because it is the rung a
 //! development build lands on: `cargo build` puts `asterism-ui` and
 //! `asterism-import` in one target directory, and neither is on
-//! anybody's `PATH`. Nothing bundles the importer today —
-//! `tauri.bundle.conf.json`'s `externalBin` lists the ffmpeg sidecar
-//! and nothing else — so a shipped app reaches an importer by the
-//! first rung or the third. A failure names every rung it tried,
+//! anybody's `PATH`. The importer is not one of the bundle's external
+//! binaries, so a shipped app reaches an importer by the first rung or
+//! the third. A failure names every rung it tried,
 //! because "not found" without the list is a message an operator
 //! cannot act on.
 //!

@@ -200,6 +200,18 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         run: just dogfood-build
 
+      # Where the steps below find what was built: the bundle under
+      # `$BUILD_DIR/release/bundle`, and the sidecar's source tarball in
+      # `$SIDECAR_DIR`. Asked of cargo, through the same script the build
+      # and the recipes ask, rather than written down — cargo's build
+      # directory is wherever cargo's configuration puts it.
+      - name: find cargo's build directory
+        run: |
+          build_dir=$(python3 scripts/cargo-build-dir.py dir)
+          sidecar_dir=$(python3 scripts/cargo-build-dir.py sidecar-dir)
+          echo "BUILD_DIR=$build_dir" >> "$GITHUB_ENV"
+          echo "SIDECAR_DIR=$sidecar_dir" >> "$GITHUB_ENV"
+
       # The source of every linked dependency whose licence asks for it,
       # collected here rather than beside the upload: the registry cache is
       # complete the moment the build ends, and a cache that carried the
@@ -223,7 +235,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         run: |
-          dmg=$(ls target/release/bundle/dmg/*.dmg)
+          dmg=$(ls "$BUILD_DIR"/release/bundle/dmg/*.dmg)
           # `submit --wait` can exit zero with a verdict of Invalid; the
           # staple would then fail, but without saying why. Read the
           # verdict, and on anything but Accepted print Apple's own log
@@ -249,8 +261,8 @@ jobs:
       # here, on every release, rather than living only in the issue.
       - name: gatekeeper accepts what was built
         run: |
-          spctl --assess --type execute --verbose=2 target/release/bundle/macos/Asterism.app
-          xcrun stapler validate target/release/bundle/dmg/*.dmg
+          spctl --assess --type execute --verbose=2 "$BUILD_DIR/release/bundle/macos/Asterism.app"
+          xcrun stapler validate "$BUILD_DIR"/release/bundle/dmg/*.dmg
 
       # The DMG, and beside it the source of the LGPL binary inside it.
       #
@@ -277,15 +289,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          dmg=$(ls target/release/bundle/dmg/*.dmg)
+          dmg=$(ls "$BUILD_DIR"/release/bundle/dmg/*.dmg)
           # Named from the stamp the build wrote rather than globbed.
-          # A glob would upload whatever archives `target/` happens to
-          # hold — an older version left behind by a bump, say — and
-          # FFMPEG-NOTICE.md inside the DMG names exactly one URL and
-          # one digest. The stamp says which one this build used.
-          stamp=target/ffmpeg-sidecar/.ffmpeg-version
+          # A glob would upload whatever archives the sidecar's
+          # directory happens to hold — an older version left behind by
+          # a bump, say — and FFMPEG-NOTICE.md inside the DMG names
+          # exactly one URL and one digest. The stamp says which one
+          # this build used.
+          stamp="$SIDECAR_DIR/.ffmpeg-version"
           ver=$(cut -d' ' -f1 "$stamp")
-          src="target/ffmpeg-sidecar/ffmpeg-$ver.tar.xz"
+          src="$SIDECAR_DIR/ffmpeg-$ver.tar.xz"
           if [[ ! -f "$src" ]]; then
             echo "the sidecar's source tarball is not on disk, so this" >&2
             echo "release would offer the binary and not its source." >&2
@@ -311,8 +324,8 @@ jobs:
         with:
           name: asterism-macos-dmg
           path: |
-            target/release/bundle/dmg/*.dmg
-            target/ffmpeg-sidecar/ffmpeg-*.tar.xz
+            ${{ env.BUILD_DIR }}/release/bundle/dmg/*.dmg
+            ${{ env.SIDECAR_DIR }}/ffmpeg-*.tar.xz
             scripts/build-ffmpeg-sidecar.sh
             ${{ runner.temp }}/copyleft/*.crate
           if-no-files-found: error

@@ -270,13 +270,13 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      # Caches `~/.cargo` and the dependency half of `target/`. The
-      # workspace's own crates are deliberately not cached by this action,
-      # so all 21 are recompiled and re-linted on every run — the verdict is
-      # recomputed, not replayed. What the cache does hide is anything that
-      # only appears when dependencies are built fresh; the sidecar resource
-      # error of 2026-08-03/04 was that shape, and a run here would not see
-      # it.
+      # Caches `~/.cargo` and the dependency half of cargo's build
+      # directory. The workspace's own crates are deliberately not cached
+      # by this action, so all 21 are recompiled and re-linted on every
+      # run — the verdict is recomputed, not replayed. What the cache does
+      # hide is anything that only appears when dependencies are built
+      # fresh; the sidecar resource error of 2026-08-03/04 was that shape,
+      # and a run here would not see it.
       #
       # Ahead of the two install steps below rather than after them,
       # which is where it used to sit. The action caches `~/.cargo/bin`
@@ -357,8 +357,8 @@ jobs:
       # (`crates/asterism-infra/src/jobs/thumb_ffmpeg.rs:225-229`). The
       # runner image ships no ffmpeg, so without this step every run is red
       # on a missing dependency rather than on the change under review. The
-      # `ffmpeg-sidecar` recipe is not the answer here — it writes to
-      # `target/ffmpeg-sidecar/`, which is not one of the locations
+      # `ffmpeg-sidecar` recipe is not the answer here — it writes into
+      # cargo's build directory, which is not one of the locations
       # `ffmpeg_binary()` searches, and it is minutes of source build. Both
       # this and `$ASTERISM_FFMPEG` are what the test's own panic message
       # tells you to do.

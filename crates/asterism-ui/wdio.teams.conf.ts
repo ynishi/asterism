@@ -74,7 +74,12 @@
 import type { TauriCapabilities } from "@wdio/tauri-service";
 import { SevereServiceError } from "webdriverio";
 import { fileURLToPath } from "node:url";
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import {
+  execFileSync,
+  spawn,
+  spawnSync,
+  type ChildProcess,
+} from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 import fs from "node:fs";
@@ -140,14 +145,25 @@ const screensRoot = path.join(
   "workspace/test-logs/e2e-teams-screens",
 );
 
-const appBinary = path.join(repoRoot, "target/debug/asterism-ui");
-const serverBinary = path.join(repoRoot, "target/debug/teams-server");
+/** Cargo's build directory, from `scripts/cargo-build-dir.py` — the
+ *  one place that works it out. */
+function cargoBuildDir(): string {
+  return execFileSync(
+    "python3",
+    [path.join(repoRoot, "scripts/cargo-build-dir.py"), "dir"],
+    { encoding: "utf8" },
+  ).trim();
+}
+
+/** The debug profile's directory, where `just ui-e2e-teams` builds all
+ *  three binaries this run starts. */
+const debugDir = path.join(cargoBuildDir(), "debug");
+
+const appBinary = path.join(debugDir, "asterism-ui");
+const serverBinary = path.join(debugDir, "teams-server");
 /** The stand-in identity provider (#163), an example of the server's
  *  crate — `just ui-e2e-teams` builds it beside the binary. */
-const providerBinary = path.join(
-  repoRoot,
-  "target/debug/examples/fake_oidc_provider",
-);
+const providerBinary = path.join(debugDir, "examples", "fake_oidc_provider");
 
 // The third process: the identity provider the sign-in spec walks
 // through. Its port sits beside the server's; the client id and secret

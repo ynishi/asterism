@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the LGPL-clean ffmpeg sidecar that `tauri build` bundles into
-# Asterism.app (bundle.externalBin, see src-tauri/tauri.conf.json).
+# Asterism.app (bundle.externalBin, which the Justfile recipes hand the
+# Tauri CLI as a `--config` — see `sidecar_config` there).
 #
 # Why build instead of download: every published macOS arm64 ffmpeg
 # binary (evermeet, martin-riedl, Homebrew bottle) is a GPL build —
@@ -20,10 +21,12 @@
 # not part of FFmpeg's corresponding source to begin with — see the
 # note on the link check below for why no exception is being invoked.
 #
-# Output: target/ffmpeg-sidecar/ffmpeg-<host-triple>
-#   - under target/ on purpose: already gitignored, wiped by
-#     `cargo clean` like every other build artifact, and rebuilt by
-#     this script (the Justfile recipes that need it depend on it).
+# Output: ffmpeg-sidecar/ffmpeg-<host-triple> under cargo's build
+# directory, wherever cargo says that is (`scripts/cargo-build-dir.py`
+# asks it, and the recipes that hand the binary to Tauri ask the same).
+#   - in cargo's build directory on purpose: wiped by `cargo clean`
+#     like every other build artifact, and rebuilt by this script (the
+#     Justfile recipes that need it depend on it).
 #   - the -<triple> suffix is Tauri's externalBin naming contract; the
 #     bundler strips it when copying to Asterism.app/Contents/MacOS/.
 #
@@ -59,7 +62,7 @@ FFMPEG_VERSION="${FFMPEG_VERSION:-8.0}"
 FFMPEG_SHA256="${FFMPEG_SHA256:-b2751fccb6cc4c77708113cd78b561059b6fa904b24162fa0be2d60273d27b8e}"
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-out_dir="$root/target/ffmpeg-sidecar"
+out_dir="$(python3 "$root/scripts/cargo-build-dir.py" sidecar-dir)"
 triple="$(rustc -vV | sed -n 's/^host: //p')"
 out="$out_dir/ffmpeg-$triple"
 stamp="$out_dir/.ffmpeg-version"
@@ -73,9 +76,9 @@ src_dir="$out_dir/ffmpeg-$FFMPEG_VERSION"
 # here and still checks it. Two things depend on that:
 #
 #   - the release workflow uploads this file beside the DMG, which is
-#     how the LGPL's source offer is met. A cached `target/` that
-#     carried the binary and not the archive would otherwise take the
-#     run all the way through the compile and Apple's notarization
+#     how the LGPL's source offer is met. A cached build directory
+#     that carried the binary and not the archive would otherwise take
+#     the run all the way through the compile and Apple's notarization
 #     queue before failing at the last step, with the tag spent.
 #   - FFMPEG-NOTICE.md, inside the app, states this digest as the
 #     source the binary was built from. A check that a warm build skips
@@ -88,8 +91,8 @@ if [[ ! -f "$tarball" ]]; then
     curl -fSL --retry 3 -o "$tarball" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
 fi
 
-# A tarball already sitting in target/ is exactly as unchecked as one
-# that just arrived, so this runs for both.
+# A tarball already sitting in the build directory is exactly as
+# unchecked as one that just arrived, so this runs for both.
 actual="$(shasum -a 256 "$tarball" | cut -d' ' -f1)"
 if [[ "$actual" != "$FFMPEG_SHA256" ]]; then
     echo "ffmpeg $FFMPEG_VERSION tarball is not the pinned one:" >&2
@@ -105,8 +108,8 @@ fi
 # used to record the version alone, which left the case a pin exists
 # for unhandled: correcting FFMPEG_SHA256 without moving the version —
 # because the first digest was wrong, or upstream re-rolled the
-# archive — matched a warm `target/`, skipped the build, and kept a
-# binary compiled from the bytes that were just rejected.
+# archive — matched a warm build directory, skipped the build, and kept
+# a binary compiled from the bytes that were just rejected.
 built="$FFMPEG_VERSION $FFMPEG_SHA256"
 if [[ -x "$out" && -f "$stamp" && "$(cat "$stamp")" == "$built" && "${FFMPEG_SIDECAR_FORCE:-0}" != "1" ]]; then
     echo "ffmpeg sidecar $FFMPEG_VERSION already built: $out"

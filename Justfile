@@ -24,7 +24,30 @@ ui_dir := project_root + "/crates/asterism-ui"
 dev_home := project_root + "/workspace/runtime/dev"
 dogfood_home := env_var("HOME") + "/.asterism/profiles/dogfood"
 bench_home := env_var("HOME") + "/.asterism/profiles/bench"
-dogfood_app := project_root + "/target/release/bundle/macos/Asterism.app"
+
+# Cargo's build directory is cargo's to say — `CARGO_TARGET_DIR` or a
+# `build.target-dir` moves it — so these ask it, through
+# `scripts/cargo-build-dir.py`, rather than naming it. They hold a shell
+# command substitution, not its answer: a top-level backtick is run on
+# every invocation of every recipe (`just` 1.48 measured; only `--list`
+# skips it), and `set lazy`, which would stop that, does not parse on an
+# older `just`. So the question is asked only by a recipe that
+# interpolates one, inside double quotes, and costs one `cargo metadata
+# --no-deps` (about 0.1 s) each time. Assign it to a shell variable
+# first where a failure has to stop the recipe — the exit status of an
+# assignment is the substitution's.
+build_dir_script := python + " " + quote(project_root / "scripts" / "cargo-build-dir.py")
+dogfood_app := "$(" + build_dir_script + " dir)/release/bundle/macos/Asterism.app"
+
+# The bundle's one external binary, as a Tauri config to merge over the
+# `tauri.*.conf.json` a recipe already passes. The tracked configs
+# cannot carry it — a path into the build directory is computed, and
+# JSON computes nothing — so every `tauri build` and `tauri dev` below
+# passes this as a second `--config`. Tauri merges the two as a JSON
+# merge patch, which replaces an array rather than appending to it;
+# with no `externalBin` left in any tracked config there is nothing for
+# it to replace.
+sidecar_config := "$(" + build_dir_script + " sidecar-config)"
 
 # Show the available commands.
 default:
@@ -33,13 +56,13 @@ default:
 # Build the LGPL-clean ffmpeg sidecar the bundle carries (idempotent;
 # exits fast once built). Every recipe that runs `tauri build` or
 # `tauri dev` depends on this: bundle.externalBin names the binary,
-# and Tauri fails the build when it is missing. externalBin is declared
-# only in the CLI merge configs (tauri.dev/e2e/bundle.conf.json), not
-# the base tauri.conf.json, so plain cargo compiles (check / clippy /
-# test on a fresh target dir or worktree) never require the sidecar —
-# only the tauri CLI paths below do. Lives under target/ so
-# `cargo clean` wipes it like any other artifact — this recipe
-# rebuilds it (~2-4 min once per clean).
+# and Tauri fails the build when it is missing. externalBin reaches
+# Tauri only as `sidecar_config`, which those recipes pass to the CLI —
+# no tracked config declares it — so plain cargo compiles (check /
+# clippy / test on a fresh build directory or worktree) never require
+# the sidecar; only the tauri CLI paths below do. Lives in cargo's
+# build directory so `cargo clean` wipes it like any other artifact —
+# this recipe rebuilds it (~2-4 min once per clean).
 [group('app')]
 ffmpeg-sidecar:
     "{{ project_root }}/scripts/build-ffmpeg-sidecar.sh"
@@ -47,18 +70,18 @@ ffmpeg-sidecar:
 # Run the disposable Dev app.
 [group('app')]
 dev: ffmpeg-sidecar
-    cd "{{ ui_dir }}" && npm run app:dev
+    cd "{{ ui_dir }}" && config="{{ sidecar_config }}" && npm run app:dev -- --config "$config"
 
 # Build and launch the production-shaped Dogfood app.
 [group('app')]
 dogfood: dogfood-build
-    open "{{ dogfood_app }}"
+    app="{{ dogfood_app }}" && open "$app"
 
 # Launch an already-built Dogfood app without rebuilding it.
 [group('app')]
 dogfood-open:
-    @test -d "{{ dogfood_app }}" || (echo "Dogfood app is not built; run: just dogfood-build" >&2; exit 1)
-    open "{{ dogfood_app }}"
+    @app="{{ dogfood_app }}" || exit 1; test -d "$app" || (echo "Dogfood app is not built; run: just dogfood-build" >&2; exit 1)
+    app="{{ dogfood_app }}" && open "$app"
 
 # Restart the already-built Dogfood app so a fresh build takes over the
 # port — the shell-side twin of the MCP proxy's `app_restart` tool.
@@ -71,7 +94,7 @@ dogfood-open:
 # the relaunch.
 [group('app')]
 dogfood-restart:
-    @test -d "{{ dogfood_app }}" || (echo "Dogfood app is not built; run: just dogfood-build" >&2; exit 1)
+    @app="{{ dogfood_app }}" || exit 1; test -d "$app" || (echo "Dogfood app is not built; run: just dogfood-build" >&2; exit 1)
     @code=$(curl -sS -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8989/asterism/admin/shutdown 2>/dev/null || true); \
     if [ "$code" != "200" ]; then pkill -f "Asterism.app/Contents/MacOS" 2>/dev/null || true; fi
     @for i in {1..20}; do \
@@ -79,7 +102,7 @@ dogfood-restart:
         if [ "$code" != "200" ]; then break; fi; \
         sleep 0.2; \
     done
-    open "{{ dogfood_app }}"
+    app="{{ dogfood_app }}" && open "$app"
     @# 20s wall-clock ceiling matches the launchd-restart pattern; a
     @# cold start on Apple Silicon warms up in ~2-3s.
     @for i in {1..40}; do \
@@ -102,8 +125,8 @@ mcp-proxy-build:
 
 # Build the production-shaped Dogfood app without launching it.
 # The trailing asserts are the teeth for the config split (2026-08-04):
-# externalBin rides tauri.bundle.conf.json via `--config` merge, and if
-# that merge ever stops reaching tauri-build the bundler would silently
+# externalBin rides `sidecar_config` via a second `--config` merge, and
+# if that merge ever stops reaching tauri-build the bundler would silently
 # ship an app without the sidecar — runtime would fall back to whatever
 # ffmpeg the host carries instead of failing loudly here.
 #
@@ -119,17 +142,18 @@ mcp-proxy-build:
 # so a failure names the file that did not arrive.
 [group('app')]
 dogfood-build: ffmpeg-sidecar
-    cd "{{ ui_dir }}" && npm run app:dogfood:build
-    @test -x "{{ dogfood_app }}/Contents/MacOS/ffmpeg" || (echo "bundle is missing the ffmpeg sidecar — tauri.bundle.conf.json externalBin merge did not reach tauri-build" >&2; exit 1)
-    @for f in LICENSE-MIT LICENSE-APACHE LICENSE-LGPL-2.1 FFMPEG-NOTICE.md THIRD-PARTY-NOTICES.md; do \
-        test -f "{{ dogfood_app }}/Contents/Resources/licenses/$f" || \
+    cd "{{ ui_dir }}" && config="{{ sidecar_config }}" && npm run app:dogfood:build -- --config "$config"
+    @app="{{ dogfood_app }}" || exit 1; test -x "$app/Contents/MacOS/ffmpeg" || (echo "bundle is missing the ffmpeg sidecar — the sidecar_config externalBin merge did not reach tauri-build" >&2; exit 1)
+    @app="{{ dogfood_app }}" || exit 1; \
+    for f in LICENSE-MIT LICENSE-APACHE LICENSE-LGPL-2.1 FFMPEG-NOTICE.md THIRD-PARTY-NOTICES.md; do \
+        test -f "$app/Contents/Resources/licenses/$f" || \
             { echo "bundle is missing Contents/Resources/licenses/$f — tauri.conf.json bundle.resources did not reach the bundler, and the app may not ship without it" >&2; exit 1; }; \
      done
 
 # Run the large-fixture Bench app.
 [group('app')]
 bench: ffmpeg-sidecar
-    cd "{{ ui_dir }}" && npm run app:bench
+    cd "{{ ui_dir }}" && config="{{ sidecar_config }}" && npm run app:bench -- --config "$config"
 
 # Run the Dev backend on http://127.0.0.1:18989.
 [group('headless')]
@@ -297,11 +321,13 @@ bench-measure-cold:
 bench-scroll jumps="200" seed="42": ffmpeg-sidecar
     #!/usr/bin/env bash
     set -euo pipefail
+    sidecar_config="{{ sidecar_config }}"
     cd "{{ ui_dir }}"
     # Same build shape as `ui-e2e` (see its comment for why `tauri
     # build` rather than `cargo build`), plus the bench gate.
     VITE_WDIO=1 VITE_BENCH=1 npx tauri build --debug --no-bundle \
-        --features wdio --config src-tauri/tauri.e2e.conf.json
+        --features wdio --config src-tauri/tauri.e2e.conf.json \
+        --config "$sidecar_config"
     # `--spec` even with one scenario present: the conf's glob matches
     # everything under `e2e-bench/`, so a second scenario added later
     # would silently join this run on a profile staged for this one.
@@ -379,8 +405,8 @@ aidoc:
 #
 # Carries `allow-agent` on ui-e2e's half of that group's reasoning, not
 # the "seconds long, writes nothing" half: a run costs minutes and
-# writes rustdoc JSON under target/ in order to have something to
-# compare (docs/aidoc/ itself is untouched in check mode), but it is
+# writes rustdoc JSON into cargo's build directory in order to have
+# something to compare (docs/aidoc/ itself is untouched in check mode), but it is
 # the only surface that can check the inventory, so it is run
 # deliberately rather than skipped.
 [group('allow-agent')]
@@ -988,11 +1014,12 @@ rust-fmt-check:
 # at zero from here on. On failure, fix the named lints — lint fixes
 # stay in their own commit, like fmt.
 #
-# No ffmpeg-sidecar dependency: bundle.externalBin lives only in the
-# CLI merge configs (tauri.dev/e2e/bundle.conf.json) since 2026-08-04,
-# so a plain cargo compile of the asterism-ui build script never
-# validates the sidecar path. Before that split, `--all-targets` on any
-# fresh target dir (cargo clean, new worktree, agent recipe) aborted
+# No ffmpeg-sidecar dependency: bundle.externalBin reaches Tauri only
+# through the CLI (`sidecar_config`, merged over the tauri.dev, e2e and
+# bundle configs), so a plain cargo compile of the asterism-ui build
+# script never validates the sidecar path. Before the 2026-08-04 split
+# took it out of the base config, `--all-targets` on any fresh build
+# directory (cargo clean, new worktree, agent recipe) aborted
 # with a resource error that named no recipe (observed 2026-08-03 and
 # again 2026-08-04 from a fresh worktree).
 #
@@ -1643,8 +1670,8 @@ rust-test: rust-fmt-check
         echo "MISSING: $((launched - reported)) binary/binaries never reported a result." >&2
         echo "Their tests are absent from the counts above — the totals are a floor," >&2
         echo "not a tally. The binaries that were launched but stayed silent:" >&2
-        # Identity is the last field of a `Running` line (the
-        # `(target/debug/deps/…)` path) or the crate on a `Doc-tests`
+        # Identity is the last field of a `Running` line (the test
+        # binary's path in cargo's build directory, in parentheses) or the crate on a `Doc-tests`
         # line. Not `$2`: that is the literal word `unittests`, which
         # would make every binary look like the same one.
         awk '
@@ -1780,6 +1807,7 @@ md-check:
 ui-e2e: ffmpeg-sidecar
     #!/usr/bin/env bash
     set -euo pipefail
+    sidecar_config="{{ sidecar_config }}"
     cd "{{ ui_dir }}"
     # `tauri build`, not `cargo build`: a plain cargo build sets
     # `cfg(dev)`, and a dev-mode Tauri app loads `devUrl`
@@ -1790,7 +1818,8 @@ ui-e2e: ffmpeg-sidecar
     # not need. `VITE_WDIO` pulls in the frontend half of the plugin
     # pair during the beforeBuildCommand.
     VITE_WDIO=1 npx tauri build --debug --no-bundle \
-        --features wdio --config src-tauri/tauri.e2e.conf.json
+        --features wdio --config src-tauri/tauri.e2e.conf.json \
+        --config "$sidecar_config"
     npx wdio run wdio.conf.ts
 
 # The suite `ui-e2e` cannot hold. Every read on the team plane is a
@@ -1817,17 +1846,20 @@ ui-e2e: ffmpeg-sidecar
 ui-e2e-teams: ffmpeg-sidecar
     #!/usr/bin/env bash
     set -euo pipefail
-    # The second binary. Debug, because the config looks for it under
-    # `target/debug/` beside the app the next command builds. The third
-    # is the stand-in identity provider the sign-in spec walks through
-    # (#163) — an example of the same crate, under `target/debug/examples/`.
+    # The second binary. Debug, because the config looks for it in the
+    # debug profile's directory under cargo's build directory, beside
+    # the app the next command builds. The third is the stand-in
+    # identity provider the sign-in spec walks through (#163) — an
+    # example of the same crate, in that directory's `examples/`.
     # Both named: `--example` alone builds only the example.
     cargo build -p teams-server --bin teams-server --example fake_oidc_provider
+    sidecar_config="{{ sidecar_config }}"
     cd "{{ ui_dir }}"
     # Same build shape as `ui-e2e` — see its comment for why `tauri
     # build` rather than `cargo build`.
     VITE_WDIO=1 npx tauri build --debug --no-bundle \
-        --features wdio --config src-tauri/tauri.e2e.conf.json
+        --features wdio --config src-tauri/tauri.e2e.conf.json \
+        --config "$sidecar_config"
     npx wdio run wdio.teams.conf.ts
 
 # Check that JavaScriptCore agrees with the collation golden (macOS).
