@@ -60,12 +60,18 @@ class Refused(Exception):
 def refuse_relative_env() -> None:
     # `CARGO_TARGET_DIR` outranks `build.target-dir`, and so the variable
     # that sets the latter, so only the first one present is in force. An
-    # empty value counts as relative: cargo fails on it, and this says why.
+    # empty value is refused too, but for its own reason: cargo refuses it
+    # outright rather than resolving it anywhere.
     name = "CARGO_TARGET_DIR"
     value = os.environ.get(name)
     if value is None:
         name = "CARGO_BUILD_TARGET_DIR"
         value = os.environ.get(name)
+    if value == "":
+        raise Refused(
+            f"{name} is set but empty, which cargo refuses; unset it or set "
+            "it to an absolute path."
+        )
     if value is not None and not Path(value).is_absolute():
         raise Refused(
             f"{name}={value!r} is relative; cargo resolves it against each "
