@@ -41,9 +41,20 @@ import type { TauriCapabilities } from "@wdio/tauri-service";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../..");
+
+/** Cargo's build directory, from `scripts/cargo-build-dir.py` — the
+ *  one place that works it out. */
+function cargoBuildDir(): string {
+  return execFileSync(
+    "python3",
+    [path.join(repoRoot, "scripts/cargo-build-dir.py"), "dir"],
+    { encoding: "utf8" },
+  ).trim();
+}
 
 /** A port of its own — see the header. */
 const BENCH_PORT = "19898";
@@ -58,7 +69,7 @@ const resultsRoot = path.join(repoRoot, "workspace/bench-results");
 // frontend half so `thumb-perf.ts` records (see its header: the e2e
 // build's frontend is a production Vite build, where a `DEV`-only gate
 // is a no-op).
-const appBinary = path.join(repoRoot, "target/debug/asterism-ui");
+const appBinary = path.join(cargoBuildDir(), "debug", "asterism-ui");
 
 /** Same window, same reasoning as `wdio.conf.ts` — the app builds one
  *  window labelled `"main"` (`src-tauri/src/lib.rs:165`) and the

@@ -26,9 +26,20 @@ import type { TauriCapabilities } from "@wdio/tauri-service";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../..");
+
+/** Cargo's build directory, from `scripts/cargo-build-dir.py` — the
+ *  one place that works it out. */
+function cargoBuildDir(): string {
+  return execFileSync(
+    "python3",
+    [path.join(repoRoot, "scripts/cargo-build-dir.py"), "dir"],
+    { encoding: "utf8" },
+  ).trim();
+}
 
 // Per-run screenshot dir (see card-trash.spec.ts `snapStage`). Created
 // in `onPrepare` (launcher process) and handed to the worker through
@@ -38,10 +49,11 @@ const repoRoot = path.resolve(here, "../..");
 // machine artifacts, same tier as the tee'd logs next to it.
 const screensRoot = path.join(repoRoot, "workspace/test-logs/e2e-screens");
 
-// Built by `just ui-e2e` — plain `cargo build --features wdio`, not a
-// bundle. The binary reads the Vite output from `frontendDist`, so the
-// recipe runs `npm run build` first.
-const appBinary = path.join(repoRoot, "target/debug/asterism-ui");
+// Built by `just ui-e2e` — `tauri build --debug --no-bundle --features
+// wdio`, with the e2e config and the sidecar's merged over the base. Not
+// a bundle; the Vite output is built by the CLI's `beforeBuildCommand`
+// and embedded in the binary.
+const appBinary = path.join(cargoBuildDir(), "debug", "asterism-ui");
 
 // The app's only window, and the handle the embedded driver knows it
 // by. `tauri.conf.json` declares `app.windows: []` and the window is

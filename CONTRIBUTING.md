@@ -66,9 +66,12 @@ That is `git fetch origin`, then
 `git worktree add .worktrees/<slug> -b <type>/<slug> origin/main` — one worktree
 per issue, under the gitignored `.worktrees/` — then `just branch-check` to
 verify the base before you build on it. What the recipe adds to those three is a
-copy of `target/` into the new worktree, so its first gate is not a rebuild of
-the whole dependency graph. Measured on `asterism-infra`: `cargo check` took 1
-min 17 s in a cold worktree against 39 s in a copied one.
+copy of this checkout's build directory, as cargo reports it, into the one cargo
+reports for the new worktree, so its first gate is not a rebuild of the whole
+dependency graph — unless cargo reports one directory for both, as it does with
+`CARGO_TARGET_DIR` set, and there is nothing to copy. Measured on
+`asterism-infra`: `cargo check` took 1 min 17 s in a cold worktree against 39 s
+in a copied one.
 
 The copy itself is
 [`cargo shared-target`](https://crates.io/crates/cargo-shared-target)
@@ -80,7 +83,7 @@ replaced did, and copies the rest. It runs in the background
 (`workspace/target-staging.log` says when it lands), staged under `workspace/`,
 which is gitignored, so an unfinished seeding never makes the tree dirty and
 never blocks the `-changed` gates. A build started before it lands gets a cold
-`target/` of its own, which the seeding leaves alone. Without the crate
+build directory of its own, which the seeding leaves alone. Without the crate
 installed the recipe says so and the worktree starts cold, which is where it
 would have started regardless.
 
