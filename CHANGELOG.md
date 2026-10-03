@@ -533,7 +533,11 @@ and this project adheres to
   nothing. `scripts/cargo-build-dir.py` now reads it from `cargo metadata`, and
   the recipes hand Tauri the sidecar's path at build time instead of the tracked
   Tauri JSON carrying it. Running `npm run app:dev` or its siblings directly,
-  without the recipe, no longer bundles the sidecar.
+  without the recipe, no longer bundles the sidecar. A relative or empty
+  `CARGO_TARGET_DIR` or `CARGO_BUILD_TARGET_DIR` is refused with the variable
+  named. `just worktree-new` seeds from and into the build directories cargo
+  reports for the two checkouts, and skips the copy with a note when cargo
+  reports one directory for both.
 
 - **The contributing document says which of its sentences bind** (#272).
   `CONTRIBUTING.md` told a contributor to use `.worktrees/` and `workspace/` in
