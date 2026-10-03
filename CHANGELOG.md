@@ -579,6 +579,14 @@ and this project adheres to
 
 ### Fixed
 
+- **The workspace passes clippy 1.99** (#318). Clippy 1.99 reported
+  `double_must_use` on every async method declared in an `#[async_trait]` trait,
+  because the async-trait release this workspace held put a bare `#[must_use]`
+  on each such method, whose return type, a pinned boxed future, is already
+  must_use; CI, which follows stable, failed on any change reaching such a
+  crate. async-trait 0.1.92 no longer adds it, and the workspace now requires
+  that release.
+
 - **The file exporter, disclosure stamps, file:// sends and team blobs work on
   Windows** (#309). Four things assumed unix. The file exporter took "absolute"
   to mean "starts with `/`" and refused every local directory on Windows; it now
